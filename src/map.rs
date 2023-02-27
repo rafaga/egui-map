@@ -43,17 +43,23 @@ impl Widget for Map {
             // "how should something that is being interacted with be painted?".
             // This will, for instance, give us different colors when the widget is hovered or clicked.
             let visuals = ui_obj.style().interact(&response);
+            let style = egui::style::Style::default();
 
             if let Some(tree) = self.points{
                 
             }
             else {
-                let rect = ui_obj.next_widget_position();
+                egui::Frame::canvas(&style)
+                    .show(ui_obj, |ui| {
+                        ui.label("Loading");
+                    });
+                /*let rect = ui_obj.next_widget_position();
                 let mut reply = ui_obj.allocate_at_least(egui::vec2(100.0, 200.0), egui::Sense::click_and_drag());
                 let pos = Pos2{x:reply.0.left(), y:reply.0.top() };
                 let font_id = FontId{size:20.0, family:FontFamily::Proportional};
-                ui_obj.painter().text( pos,Align2::LEFT_TOP, "loading", font_id, Color32::LIGHT_RED);
-                egui::widgets::stroke_ui(ui_obj, &mut Stroke{width:1f32, color:Color32::LIGHT_GRAY}, "Hello");
+                
+                
+                ui_obj.painter().text( pos,Align2::LEFT_TOP, "loading", font_id, Color32::LIGHT_RED);*/
             }
             
             /*
