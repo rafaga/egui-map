@@ -48,7 +48,7 @@ impl Widget for Map {
                 
             }
             else {
-                let rect = ui_obj.ctx().available_rect();
+                let rect = ui_obj.next_widget_position();
                 let mut reply = ui_obj.allocate_at_least(egui::vec2(100.0, 200.0), egui::Sense::click_and_drag());
                 let pos = Pos2{x:reply.0.left(), y:reply.0.top() };
                 let font_id = FontId{size:20.0, family:FontFamily::Proportional};
