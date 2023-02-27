@@ -48,8 +48,11 @@ impl Widget for Map {
                 
             }
             else {
+                let rect = ui_obj.ctx().available_rect();
+                
+                let pos = Pos2{x:rect.left(), y:rect.top() };
                 let font_id = FontId{size:20.0, family:FontFamily::Proportional};
-                ui_obj.painter().text( Pos2{x:12.0f32, y:12.0f32 },Align2::LEFT_TOP, "loading", font_id, Color32::LIGHT_RED);
+                ui_obj.painter().text( pos,Align2::LEFT_TOP, "loading", font_id, Color32::LIGHT_RED);
             }
             
             /*
