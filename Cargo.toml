@@ -1,14 +1,14 @@
 [package]
 name = "egui-map"
-version = "0.0.1"
+version = "0.0.2"
 edition = "2021"
 authors = ["Rafael Amador <rafaga@duck.com"]
 description = "Visual component to draw a map on screen."
 readme = "README.md"
 repository = "https://github.com/rafaga/egui-map/"
 license = "MIT OR Apache-2.0"
-keywords = ["sde", "eve-online"]
-categories = ["games", "value-formatting"]
+keywords = ["egui", "map", "component"]
+categories = ["graphics", "gui"]
 exclude = ["tests/",".github/",".gitignore"]
 
 [badges]
