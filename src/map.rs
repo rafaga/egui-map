@@ -9,7 +9,7 @@ use rand::distributions::{Alphanumeric,Distribution};
 /// Struct that contains coordinates to help calculate nearest point in space
 #[derive(Clone)]
 #[derive(serde::Deserialize, serde::Serialize)]
-pub struct SystemPoint{
+pub struct MapPoint{
     dimension: usize,
     /// coordinates of the Solar System
     pub coords: [f64;3],
@@ -21,9 +21,9 @@ pub struct SystemPoint{
     pub name: String,
 }
 
-impl SystemPoint{
+impl MapPoint{
     /// Creates a new Spatial point with an Id (solarSystemId) and the system's 3D coordinates
-    pub fn new(id: usize, coords: Vec<f64>) -> SystemPoint {
+    pub fn new(id: usize, coords: Vec<f64>) -> MapPoint {
         let mut point = [0.0f64;3];
         let size= coords.len();
         point[0] = coords[0];
@@ -31,7 +31,7 @@ impl SystemPoint{
         if size == 3 {
             point[2] = coords[2];
         }
-        SystemPoint {
+        MapPoint {
             coords: point,
             dimension: size,
             id,
@@ -47,8 +47,6 @@ impl SystemPoint{
     }
 
 }
-
-
 
 
 #[derive(Clone)]
@@ -82,7 +80,7 @@ impl Default for MapBounds {
 pub struct Map {
     pub zoom: f32,
     previous_zoom: f32,
-    points: Option<HashMap<usize,SystemPoint>>,
+    points: Option<HashMap<usize,MapPoint>>,
     tree: Option<KdTree<f64,usize,[f64;2]>>,
     visible_points: Option<Vec<usize>>,
     map_area: Option<Rect>,
@@ -261,7 +259,7 @@ impl Map {
         }
     }
 
-    pub fn add_points(&mut self, points: Vec<SystemPoint>) -> (){
+    pub fn add_points(&mut self, points: Vec<MapPoint>) -> (){
         let mut hmap = HashMap::new();
         let mut min = (f64::INFINITY,f64::INFINITY);
         let mut max = (f64::NEG_INFINITY,f64::NEG_INFINITY);
