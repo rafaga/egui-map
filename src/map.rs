@@ -74,7 +74,7 @@ impl Widget for &mut Map {
             }
             if self.zoom < 1.5 {
                 for label in &self.labels{
-                    paint.text(label.center,Align2::CENTER_CENTER,label.text.as_str(),map_style.unwrap().font.unwrap(),map_style.unwrap().text_color);
+                    paint.text(label.center,Align2::CENTER_CENTER,label.text.as_str(),map_style.unwrap().font.clone().unwrap(),map_style.unwrap().text_color);
                 }
             } 
             // Drawing Mappoints
