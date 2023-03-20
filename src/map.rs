@@ -66,15 +66,15 @@ impl Widget for &mut Map {
                 self.set_pos(self.current.pos.x - coords.0, self.current.pos.y -coords.1);
                 self.calculate_visible_points();
             }
-            let map_style = self.styles.get("default");
+            let map_style = self.styles.get("default").unwrap().clone() * self.zoom;
             if self.zoom > 0.2 {
                 for line in &self.lines{
-                    paint.line_segment(line.points, map_style.unwrap().line.unwrap());
+                    paint.line_segment(line.points, map_style.line.unwrap());
                 }
             }
             if self.zoom < 1.5 {
                 for label in &self.labels{
-                    paint.text(label.center,Align2::CENTER_CENTER,label.text.as_str(),map_style.unwrap().font.clone().unwrap(),map_style.unwrap().text_color);
+                    paint.text(label.center,Align2::CENTER_CENTER,label.text.as_str(),map_style.font.clone().unwrap(),map_style.text_color);
                 }
             } 
             // Drawing Mappoints
@@ -90,7 +90,7 @@ impl Widget for &mut Map {
                                 let a_point = Pos2::new(center.x-min_point.x,center.y-min_point.y);
                                 for line in &system.lines {
                                     let b_point = Pos2::new((line[0] as f32 * self.zoom)-min_point.x,(line[1] as f32 * self.zoom)-min_point.y);
-                                    paint.line_segment([a_point, b_point], map_style.unwrap().line.unwrap());
+                                    paint.line_segment([a_point, b_point], map_style.line.unwrap());
                                 }
                             }
                         } 
@@ -101,12 +101,12 @@ impl Widget for &mut Map {
                             let center = Pos2::new(system.coords[0] as f32 * self.zoom,system.coords[1] as f32 * self.zoom);
                             let viewport_point = Pos2::new(center.x-min_point.x,center.y-min_point.y);
                             let mut viewport_text = viewport_point.clone();
-                            viewport_text.x += 3.0;
-                            viewport_text.y -= 3.0;
+                            viewport_text.x += 3.0 * self.zoom;
+                            viewport_text.y -= 3.0 * self.zoom;
                             if self.zoom > 0.58 {
                                 paint.text(viewport_text,Align2::LEFT_BOTTOM,system.name.to_string(),FontId::new(12.00 * self.zoom,FontFamily::Proportional),Color32::LIGHT_GREEN);
                             }
-                            paint.circle(viewport_point, 4.00 * self.zoom, map_style.unwrap().fill_color, map_style.unwrap().border.unwrap());
+                            paint.circle(viewport_point, 4.00 * self.zoom, map_style.fill_color, map_style.border.unwrap());
                         }
                     }
                 }
