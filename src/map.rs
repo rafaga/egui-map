@@ -4,75 +4,10 @@ use kdtree::distance::squared_euclidean;
 use std::collections::HashMap;
 use rand::thread_rng;
 use rand::distributions::{Alphanumeric,Distribution};
-
-// This can by any object or point with its associated metadata
-/// Struct that contains coordinates to help calculate nearest point in space
-#[derive(Clone)]
-#[derive(serde::Deserialize, serde::Serialize)]
-pub struct MapPoint{
-    dimension: usize,
-    /// coordinates of the Solar System
-    pub coords: [f64;3],
-    /// coordinates for lines connecting this point
-    pub lines: Vec<[f64;3]>,
-    /// Object Identifier for search propurses
-    pub id: usize,
-    /// SolarSystem Name
-    pub name: String,
-}
-
-impl MapPoint{
-    /// Creates a new Spatial point with an Id (solarSystemId) and the system's 3D coordinates
-    pub fn new(id: usize, coords: Vec<f64>) -> MapPoint {
-        let mut point = [0.0f64;3];
-        let size= coords.len();
-        point[0] = coords[0];
-        point[1] = coords[1];
-        if size == 3 {
-            point[2] = coords[2];
-        }
-        MapPoint {
-            coords: point,
-            dimension: size,
-            id,
-            lines: Vec::new(),
-            name: String::new(),
-        }
-    }
+use crate::map::objects::*;
 
 
-    /// Get the number of dimensions used in this object
-    pub fn get_dimension(self) -> usize {
-        self.dimension
-    }
-
-}
-
-
-#[derive(Clone)]
-struct MapBounds{
-    pub min: Pos2,
-    pub max: Pos2,
-    pub pos: Pos2,
-    pub dist: f64,
-}
-
-impl MapBounds{
-    pub fn new() -> Self {
-        MapBounds{
-            min: Pos2::new(0.0,0.0),
-            max: Pos2::new(0.0,0.0),
-            pos: Pos2::new(0.0,0.0),
-            dist: 0.0,
-        }
-    }
-}
-
-impl Default for MapBounds {
-    fn default() -> Self {
-        MapBounds::new()
-    }
-}
+pub mod objects;
 
 // This can by any object or point with its associated metadata
 /// Struct that contains coordinates to help calculate nearest point in space
@@ -81,6 +16,9 @@ pub struct Map {
     pub zoom: f32,
     previous_zoom: f32,
     points: Option<HashMap<usize,MapPoint>>,
+    lines: Vec<MapLine>,
+    labels: Vec<MapLabel>,
+    styles: HashMap<String ,MapStyle>,
     tree: Option<KdTree<f64,usize,[f64;2]>>,
     visible_points: Option<Vec<usize>>,
     map_area: Option<Rect>,
@@ -128,15 +66,23 @@ impl Widget for &mut Map {
                 self.set_pos(self.current.pos.x - coords.0, self.current.pos.y -coords.1);
                 self.calculate_visible_points();
             }
-            let gate_stroke = egui::Stroke{ width: 2f32 * self.zoom, color: Color32::DARK_RED};
-            let system_color = Color32::YELLOW;
-            let system_stroke = egui::Stroke{ width: 2f32 -self.zoom, color: system_color};
-            //let debug_stroke = egui::Stroke{ width: 2f32, color: Color32::GOLD};
-            
+            let map_style = self.styles.get("default");
+            if self.zoom > 0.2 {
+                for line in &self.lines{
+                    paint.line_segment(line.points, map_style.unwrap().line.unwrap());
+                }
+            }
+            if self.zoom < 1.5 {
+                for label in &self.labels{
+                    paint.text(label.center,Align2::CENTER_CENTER,label.text.as_str(),map_style.unwrap().font.unwrap(),map_style.unwrap().text_color);
+                }
+            } 
+            // Drawing Mappoints
             for temp_vec_point in &self.visible_points {
                 if let Some(hashm) = self.points.as_mut() {
                     let factor = (self.map_area.unwrap().center().x  + self.map_area.unwrap().min.x,self.map_area.unwrap().center().y  + self.map_area.unwrap().min.y);
                     let min_point = Pos2::new(self.current.pos.x-factor.0, self.current.pos.y-factor.1);
+                    // Drawing Lines
                     if self.zoom > 0.2 {
                         for temp_point in temp_vec_point{
                             if let Some(system) = hashm.get(&temp_point) {
@@ -144,11 +90,12 @@ impl Widget for &mut Map {
                                 let a_point = Pos2::new(center.x-min_point.x,center.y-min_point.y);
                                 for line in &system.lines {
                                     let b_point = Pos2::new((line[0] as f32 * self.zoom)-min_point.x,(line[1] as f32 * self.zoom)-min_point.y);
-                                    paint.line_segment([a_point, b_point], gate_stroke);
+                                    paint.line_segment([a_point, b_point], map_style.unwrap().line.unwrap());
                                 }
                             }
                         } 
                     }
+                    // Drawing Points
                     for temp_point in temp_vec_point{
                         if let Some(system) = hashm.get(&temp_point) { 
                             let center = Pos2::new(system.coords[0] as f32 * self.zoom,system.coords[1] as f32 * self.zoom);
@@ -159,7 +106,7 @@ impl Widget for &mut Map {
                             if self.zoom > 0.58 {
                                 paint.text(viewport_text,Align2::LEFT_BOTTOM,system.name.to_string(),FontId::new(12.00 * self.zoom,FontFamily::Proportional),Color32::LIGHT_GREEN);
                             }
-                            paint.circle(viewport_point, 4.00 * self.zoom, system_color, system_stroke);
+                            paint.circle(viewport_point, 4.00 * self.zoom, map_style.unwrap().fill_color, map_style.unwrap().border.unwrap());
                         }
                     }
                 }
@@ -231,17 +178,22 @@ impl Widget for &mut Map {
 
 impl Map {
     pub fn new() -> Self {
-        Map {
+        let mut obj = Map {
             zoom: 1.0,
             previous_zoom: 1.0,
             map_area: None,
             tree: None,
             points: None,
+            lines: Vec::new(),
+            labels: Vec::new(),
+            styles: HashMap::new(),
             visible_points: None,
             initialized: false,
             current: MapBounds::default(),
             reference: MapBounds::default(),
-        }
+        };
+        obj.styles.insert("default".to_string(), MapStyle::default());
+        obj
     }
 
     fn calculate_visible_points(&mut self) -> () {
@@ -307,9 +259,13 @@ impl Map {
         }
     }
 
-    pub fn add_labels() -> () {
-
+    pub fn add_labels(mut self, labels: Vec<MapLabel>) -> () {
+        self.labels = labels;
     }
+
+    pub fn add_lines(mut self, lines: Vec<MapLine>) -> () {
+         self.lines = lines
+    } 
 
     fn adjust_bounds(&mut self) -> () {
         self.current.max.x = self.reference.max.x * self.zoom;
