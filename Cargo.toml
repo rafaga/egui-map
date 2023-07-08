@@ -1,6 +1,6 @@
 [package]
 name = "egui-map"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 authors = ["Rafael Amador <rafaga@duck.com"]
 description = "Visual component to draw a map on screen."
@@ -37,7 +37,7 @@ maintenance = { status = "actively-developed" }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-egui = { version = "0.21", features = ["bytemuck", "cint", "persistence", "serde", "deadlock_detection", "color-hex", "tracing"], default-features = false }
-kdtree = { version = "0.7.0", features = ["serde", "serde_derive", "serialize"] }
-rand = "0.8.5"
-serde = { version = "1.0.157", features = ["serde_derive"] }
+egui = { version = "0", features = ["bytemuck", "cint", "persistence", "serde", "deadlock_detection", "color-hex", "tracing"], default-features = false }
+kdtree = { version = "0.7", features = ["serde", "serde_derive", "serialize"] }
+rand = "0.8"
+serde = { version = "1", features = ["serde_derive"] }
