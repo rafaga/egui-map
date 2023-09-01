@@ -1,6 +1,6 @@
 [package]
 name = "egui-map"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 authors = ["Rafael Amador <rafaga@duck.com"]
 description = "Visual component to draw a map on screen."
@@ -38,6 +38,6 @@ maintenance = { status = "actively-developed" }
 
 [dependencies]
 egui = { version = "0.22", features = ["bytemuck", "cint", "persistence", "serde", "deadlock_detection", "color-hex"], default-features = false }
-kdtree = { version = "0.7", features = ["serde", "serde_derive", "serialize"] }
-rand = "0.8"
-serde = { version = "1", features = ["serde_derive"] }
+kdtree = { version = "0.7.0", features = ["serde", "serde_derive", "serialize"] }
+rand = "0.8.5"
+serde = { version = "1.0", features = ["serde_derive"] }
