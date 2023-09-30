@@ -6,7 +6,6 @@ use rand::thread_rng;
 use rand::distributions::{Alphanumeric,Distribution};
 use crate::map::objects::*;
 
-
 pub mod objects;
 
 // This can by any object or point with its associated metadata
@@ -259,11 +258,11 @@ impl Map {
         }
     }
 
-    pub fn add_labels(mut self, labels: Vec<MapLabel>) -> () {
+    pub fn add_labels(&mut self, labels: Vec<MapLabel>) -> () {
         self.labels = labels;
     }
 
-    pub fn add_lines(mut self, lines: Vec<MapLine>) -> () {
+    pub fn add_lines(&mut self, lines: Vec<MapLine>) -> () {
          self.lines = lines
     } 
 

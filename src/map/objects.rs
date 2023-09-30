@@ -153,8 +153,8 @@ impl Default for MapLabel {
 }
 
 impl MapLabel {
-    fn new() -> Self {
-        MapLabel { 
+    pub fn new() -> Self {
+        MapLabel {
             text:String::new(), 
             center: Pos2::new(0.00,0.00),
         }
