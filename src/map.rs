@@ -60,7 +60,7 @@ impl Widget for &mut Map {
                                 zoom_modifier *= 5.00;
                             }
                             let precalculated_zoom = self.zoom * zoom_modifier;
-                            if precalculated_zoom > 0.00 && precalculated_zoom <= 2.00 {
+                            if precalculated_zoom > 0.10 && precalculated_zoom <= 2.00 {
                                 self.zoom = precalculated_zoom
                             }
                         },
