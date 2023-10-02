@@ -48,10 +48,24 @@ impl Widget for &mut Map {
         } else {
             self.map_area = Some(ui_obj.ctx().used_rect());
         }
-
+        
+        // Example of MouseWheel Event
+        //MouseWheel { unit: Point, delta: [0.0 -6.0], modifiers: Modifiers { alt: false, ctrl: false, shift: false, mac_cmd: false, command: false } }
         ui_obj.input(|x|{
             if x.events.len() > 0 {
-                println!("event {:?}",x.events);
+                for event in &x.events {
+                    match event {
+                        Event::MouseWheel {unit: _ ,delta,modifiers} => { 
+                            if modifiers.mac_cmd {
+                                self.zoom = self.zoom * delta.y * 10.0;
+                            } else {
+                                self.zoom = self.zoom * delta.y;
+                            }
+                        },
+                        _ => {}
+                    };
+                }
+                //println!("event {:?}",x.events);
             }
         });
 
