@@ -1,4 +1,5 @@
 use egui::{widgets::*, *};
+use egui::Event::MouseWheel;
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
 use std::collections::HashMap;
@@ -47,6 +48,11 @@ impl Widget for &mut Map {
         } else {
             self.map_area = Some(ui_obj.ctx().used_rect());
         }
+
+        ui_obj.input(|x|{
+            println!("event {:?}",x.events);
+        });
+
         if self.zoom != self.previous_zoom {
             self.adjust_bounds();
             self.calculate_visible_points();
