@@ -57,9 +57,9 @@ impl Widget for &mut Map {
                     match event {
                         Event::MouseWheel {unit: _ ,delta,modifiers} => { 
                             if modifiers.mac_cmd {
-                                self.zoom = self.zoom * delta.y * 10.0;
+                                self.zoom = self.zoom + delta.y * 10.0;
                             } else {
-                                self.zoom = self.zoom * delta.y;
+                                self.zoom = self.zoom + delta.y;
                             }
                         },
                         _ => {}
