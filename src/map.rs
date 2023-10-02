@@ -50,7 +50,9 @@ impl Widget for &mut Map {
         }
 
         ui_obj.input(|x|{
-            println!("event {:?}",x.events);
+            if x.events.len() > 0 {
+                println!("event {:?}",x.events);
+            }
         });
 
         if self.zoom != self.previous_zoom {
