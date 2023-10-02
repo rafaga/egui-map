@@ -1,5 +1,4 @@
 use egui::{widgets::*, *};
-use egui::Event::MouseWheel;
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
 use std::collections::HashMap;
@@ -56,11 +55,13 @@ impl Widget for &mut Map {
                 for event in &x.events {
                     match event {
                         Event::MouseWheel {unit: _ ,delta,modifiers} => { 
-                            let zoom_modifier = delta.y / 20.00;
+                            let mut zoom_modifier = delta.y / 20.00;
                             if modifiers.mac_cmd {
-                                self.zoom = self.zoom + (zoom_modifier * 5.00);
-                            } else {
-                                self.zoom = self.zoom + zoom_modifier;
+                                zoom_modifier *= 5.00;
+                            }
+                            let precalculated_zoom = self.zoom * zoom_modifier;
+                            if precalculated_zoom > 0.00 && precalculated_zoom <= 2.00 {
+                                self.zoom = precalculated_zoom
                             }
                         },
                         _ => {}
