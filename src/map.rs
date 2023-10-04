@@ -92,7 +92,7 @@ impl Widget for &mut Map {
         
         
         let canvas = egui::Frame::canvas(ui_obj.style())
-            .stroke(ui_obj.visuals().widgets.active.fg_stroke);
+            .stroke(ui_obj.visuals().widgets.noninteractive.fg_stroke);
         
         let inner_response = canvas.show(ui_obj, |ui_obj| {
             let (resp,paint) = ui_obj.allocate_painter(self.map_area.unwrap().size(), egui::Sense::click_and_drag());
@@ -139,7 +139,7 @@ impl Widget for &mut Map {
                             let mut viewport_text = viewport_point.clone();
                             viewport_text.x += 3.0 * self.zoom;
                             viewport_text.y -= 3.0 * self.zoom;
-                            if self.zoom > 0.58 {
+                            if self.zoom > self.settings.label_visible_zoom {
                                 paint.text(viewport_text,Align2::LEFT_BOTTOM,system.name.to_string(),FontId::new(12.00 * self.zoom,FontFamily::Proportional),ui_obj.visuals().text_color());
                             }
                             paint.circle(viewport_point, 4.00 * self.zoom, map_style.fill_color, map_style.border.unwrap());

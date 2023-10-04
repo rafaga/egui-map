@@ -263,7 +263,7 @@ impl MapSettings {
             max_zoom:0.1,
             min_zoom:2.0,
             line_visible_zoom:0.2,
-            label_visible_zoom:1.5
+            label_visible_zoom:0.58
         }
     }
 }
