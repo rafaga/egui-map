@@ -249,3 +249,21 @@ impl Default for MapBounds {
         MapBounds::new()
     }
 }
+
+pub(crate) struct MapSettings {
+    pub(crate) max_zoom:f32,
+    pub(crate) min_zoom:f32,
+    pub(crate) line_visible_zoom:f32,
+    pub(crate) label_visible_zoom:f32,
+}
+
+impl MapSettings {
+    pub(crate) fn new() -> Self {
+        MapSettings{
+            max_zoom:0.1,
+            min_zoom:2.0,
+            line_visible_zoom:0.2,
+            label_visible_zoom:1.5
+        }
+    }
+}

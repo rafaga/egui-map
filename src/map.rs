@@ -8,6 +8,7 @@ use crate::map::objects::*;
 
 pub mod objects;
 
+
 // This can by any object or point with its associated metadata
 /// Struct that contains coordinates to help calculate nearest point in space
 
@@ -24,6 +25,7 @@ pub struct Map {
     initialized: bool,
     reference: MapBounds,
     current: MapBounds,
+    settings: MapSettings
 }
 
 impl Default for Map {
@@ -31,6 +33,7 @@ impl Default for Map {
         Map::new()
     }
 }
+
 
 impl Widget for &mut Map {
     fn ui(self, ui_obj: &mut egui::Ui) -> Response {
@@ -48,26 +51,34 @@ impl Widget for &mut Map {
             self.map_area = Some(ui_obj.ctx().used_rect());
         }
         
-        // Example of MouseWheel Event
-        //MouseWheel { unit: Point, delta: [0.0 -6.0], modifiers: Modifiers { alt: false, ctrl: false, shift: false, mac_cmd: false, command: false } }
+        // capture MouseWheel Event for Zoom control change
         ui_obj.input(|x|{
             if x.events.len() > 0 {
+                if cfg!(debug_assertions) {
+                    println!("event {:?}",x.events);
+                }
                 for event in &x.events {
                     match event {
                         Event::MouseWheel {unit: _ ,delta,modifiers} => { 
-                            let mut zoom_modifier = delta.y / 20.00;
+                            let mut zoom_modifier = delta.y / 80.00;
                             if modifiers.mac_cmd {
                                 zoom_modifier *= 5.00;
                             }
                             let precalculated_zoom = self.zoom * zoom_modifier;
-                            if precalculated_zoom > 0.10 && precalculated_zoom <= 2.00 {
-                                self.zoom = precalculated_zoom
+                            if precalculated_zoom > self.settings.min_zoom && precalculated_zoom <= self.settings.max_zoom {
+                                self.zoom = precalculated_zoom;
                             }
                         },
-                        _ => {}
+                        Event::PointerMoved(pos) => {
+                            if self.zoom > 0.8 {
+
+                            }
+                        },
+                        _ => {
+                            continue;
+                        }
                     };
                 }
-                //println!("event {:?}",x.events);
             }
         });
 
@@ -78,8 +89,10 @@ impl Widget for &mut Map {
         }
 
         let style = egui::style::Style::default();
+        
+        
         let canvas = egui::Frame::canvas(&style)
-            .stroke(egui::Stroke{width:2.0f32, color:Color32::DARK_GRAY});
+            .stroke(ui_obj.visuals().widgets.active.fg_stroke);
         
         let inner_response = canvas.show(ui_obj, |ui_obj| {
             let (resp,paint) = ui_obj.allocate_painter(self.map_area.unwrap().size(), egui::Sense::click_and_drag());
@@ -90,12 +103,12 @@ impl Widget for &mut Map {
                 self.calculate_visible_points();
             }
             let map_style = self.styles.get("default").unwrap().clone() * self.zoom;
-            if self.zoom > 0.2 {
+            if self.zoom > self.settings.line_visible_zoom {
                 for line in &self.lines{
                     paint.line_segment(line.points, map_style.line.unwrap());
                 }
             }
-            if self.zoom < 1.5 {
+            if self.zoom < self.settings.line_visible_zoom {
                 for label in &self.labels{
                     paint.text(label.center,Align2::CENTER_CENTER,label.text.as_str(),map_style.font.clone().unwrap(),map_style.text_color);
                 }
@@ -106,7 +119,7 @@ impl Widget for &mut Map {
                     let factor = (self.map_area.unwrap().center().x  + self.map_area.unwrap().min.x,self.map_area.unwrap().center().y  + self.map_area.unwrap().min.y);
                     let min_point = Pos2::new(self.current.pos.x-factor.0, self.current.pos.y-factor.1);
                     // Drawing Lines
-                    if self.zoom > 0.2 {
+                    if self.zoom > self.settings.line_visible_zoom {
                         for temp_point in temp_vec_point{
                             if let Some(system) = hashm.get(&temp_point) {
                                 let center = Pos2::new(system.coords[0] as f32 * self.zoom,system.coords[1] as f32 * self.zoom);
@@ -127,7 +140,7 @@ impl Widget for &mut Map {
                             viewport_text.x += 3.0 * self.zoom;
                             viewport_text.y -= 3.0 * self.zoom;
                             if self.zoom > 0.58 {
-                                paint.text(viewport_text,Align2::LEFT_BOTTOM,system.name.to_string(),FontId::new(12.00 * self.zoom,FontFamily::Proportional),Color32::LIGHT_GREEN);
+                                paint.text(viewport_text,Align2::LEFT_BOTTOM,system.name.to_string(),FontId::new(12.00 * self.zoom,FontFamily::Proportional),ui_obj.visuals().text_color());
                             }
                             paint.circle(viewport_point, 4.00 * self.zoom, map_style.fill_color, map_style.border.unwrap());
                         }
@@ -135,7 +148,7 @@ impl Widget for &mut Map {
                 }
             }
             if let Some(rect) = self.map_area{
-                let zoom_slider = egui::Slider::new(&mut self.zoom, 0.1..=2.0)
+                let zoom_slider = egui::Slider::new(&mut self.zoom, self.settings.min_zoom..=self.settings.max_zoom)
                     .show_value(false)
                     //.step_by(0.1)
                     .orientation(SliderOrientation::Vertical);
@@ -214,6 +227,7 @@ impl Map {
             initialized: false,
             current: MapBounds::default(),
             reference: MapBounds::default(),
+            settings: MapSettings::new(),
         };
         obj.styles.insert("default".to_string(), MapStyle::default());
         obj
