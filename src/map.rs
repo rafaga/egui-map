@@ -110,7 +110,7 @@ impl Widget for &mut Map {
             }
             if self.zoom < self.settings.line_visible_zoom {
                 for label in &self.labels{
-                    paint.text(label.center,Align2::CENTER_CENTER,label.text.as_str(),map_style.font.clone().unwrap(),map_style.text_color);
+                    paint.text(label.center,Align2::CENTER_CENTER,label.text.as_str(),map_style.font.clone().unwrap(),ui_obj.visuals().text_color());
                 }
             } 
             // Drawing Mappoints
