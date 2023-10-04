@@ -88,10 +88,10 @@ impl Widget for &mut Map {
             self.previous_zoom = self.zoom;
         }
 
-        let style = egui::style::Style::default();
+        //let style = egui::style::Style::default();
         
         
-        let canvas = egui::Frame::canvas(&style)
+        let canvas = egui::Frame::canvas(ui_obj.style())
             .stroke(ui_obj.visuals().widgets.active.fg_stroke);
         
         let inner_response = canvas.show(ui_obj, |ui_obj| {
