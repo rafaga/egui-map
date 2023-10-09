@@ -52,12 +52,12 @@ impl Widget for &mut Map {
         }
         
         // capture MouseWheel Event for Zoom control change
-        /*ui_obj.input(|x|{
+        ui_obj.input(|x|{
             if x.events.len() > 0 {
-                if cfg!(debug_assertions) {
-                    println!("event {:?}",x.events);
-                }
                 for event in &x.events {
+                    if cfg!(debug_assertions) {
+                        println!("event {:?}",event);
+                    }
                     match event {
                         Event::MouseWheel {unit: _ ,delta,modifiers} => { 
                             let mut zoom_modifier = delta.y / 80.00;
@@ -80,7 +80,7 @@ impl Widget for &mut Map {
                     };
                 }
             }
-        });*/
+        });
 
         if self.zoom != self.previous_zoom {
             self.adjust_bounds();
