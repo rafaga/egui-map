@@ -55,9 +55,6 @@ impl Widget for &mut Map {
         ui_obj.input(|x|{
             if x.events.len() > 0 {
                 for event in &x.events {
-                    if cfg!(debug_assertions) {
-                        println!("event {:?}",event);
-                    }
                     match event {
                         Event::MouseWheel {unit: _ ,delta,modifiers} => { 
                             let mut zoom_modifier = delta.y / 80.00;
@@ -65,7 +62,7 @@ impl Widget for &mut Map {
                                 zoom_modifier *= 5.00;
                             }
                             let precalculated_zoom = self.zoom * zoom_modifier;
-                            if precalculated_zoom > self.settings.min_zoom && precalculated_zoom <= self.settings.max_zoom {
+                            if self.settings.min_zoom < precalculated_zoom  && precalculated_zoom < self.settings.max_zoom {
                                 self.zoom = precalculated_zoom;
                             }
                         },
