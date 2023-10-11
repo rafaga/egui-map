@@ -224,6 +224,15 @@ impl MapPoint{
 
 }
 
+impl From<std::collections::hash_map::OccupiedEntry<'_, usize, MapPoint>> for MapPoint {
+
+    fn from(value: std::collections::hash_map::OccupiedEntry<'_, usize, MapPoint>) -> Self { 
+        let k = value.get();
+        k.clone()
+    }
+
+}
+
 
 #[derive(Clone)]
 pub (crate) struct MapBounds{
@@ -250,20 +259,40 @@ impl Default for MapBounds {
     }
 }
 
-pub(crate) struct MapSettings {
-    pub(crate) max_zoom:f32,
-    pub(crate) min_zoom:f32,
-    pub(crate) line_visible_zoom:f32,
-    pub(crate) label_visible_zoom:f32,
+pub struct MapSettings {
+    pub max_zoom:f32,
+    pub min_zoom:f32,
+    pub line_visible_zoom:f32,
+    pub label_visible_zoom:f32,
+    pub node_text_visibility:VisibilitySetting
 }
 
 impl MapSettings {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         MapSettings{
-            max_zoom:0.1,
-            min_zoom:2.0,
-            line_visible_zoom:0.2,
-            label_visible_zoom:0.58
+            max_zoom:0.0,
+            min_zoom:0.0,
+            line_visible_zoom:0.0,
+            label_visible_zoom:0.0,
+            node_text_visibility:VisibilitySetting::Allways
         }
     }
+}
+
+impl Default for MapSettings {
+    fn default() -> Self {
+        let mut a = MapSettings::new();
+        a.max_zoom = 0.1f32;
+        a.min_zoom = 2.0f32;
+        a.line_visible_zoom = 0.2f32;
+        a.label_visible_zoom = 0.58f32;
+        a
+    }
+}
+
+#[derive(PartialEq)]
+pub enum VisibilitySetting {
+    Hidden,
+    Hover,
+    Allways
 }
