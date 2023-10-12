@@ -120,7 +120,7 @@ impl Widget for &mut Map {
                 if let Some(rect) = self.map_area{
                     let zoom_slider = egui::Slider::new(&mut self.zoom, self.settings.min_zoom..=self.settings.max_zoom)
                         .show_value(false)
-                        //.step_by(0.1)
+                        .step_by(0.1)
                         .orientation(SliderOrientation::Vertical);
                     let mut pos1 = rect.right_top();
                     let mut pos2 = rect.right_top();
@@ -136,11 +136,11 @@ impl Widget for &mut Map {
                 
                 // capture MouseWheel Event for Zoom control change
                 ui_obj.input(|x|{
-                    /*if !x.events.is_empty() {
+                    if !x.events.is_empty() {
                         for event in &x.events {
                             match event {
                                 Event::MouseWheel {unit: _ ,delta,modifiers} => { 
-                                    let mut zoom_modifier = delta.y * 20.00;
+                                    let mut zoom_modifier = delta.y / 40.00;
                                     if modifiers.mac_cmd {
                                         zoom_modifier *= 5.00;
                                     }
@@ -154,15 +154,14 @@ impl Widget for &mut Map {
                                 }
                             };
                         }
-                    }*/
+                    }
                 });
 
 
                 if resp.secondary_clicked() {
                     todo!();
                 }
-                //&& self.settings.node_text_visibility == VisibilitySetting::Hover 
-                /*if resp.hovered() {
+                if resp.hovered() && self.settings.node_text_visibility == VisibilitySetting::Hover {
                     if let Some(pos) = resp.hover_pos() {
                         let point = [pos.x as f64, pos.y as f64];
                         if self.zoom > self.settings.label_visible_zoom {
@@ -219,7 +218,7 @@ impl Widget for &mut Map {
                         msg = "DRG:".to_string() + vec.to_pos2().x.to_string().as_str() + "," + vec.to_pos2().y.to_string().as_str();
                         paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GOLD, msg);
                     }
-                }*/
+                }
             //}
         });
         
