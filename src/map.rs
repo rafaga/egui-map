@@ -135,7 +135,7 @@ impl Widget for &mut Map {
                     }
                 }
                 if let Some(rect) = self.map_area{
-                    let zoom_slider = egui::Slider::new(&mut self.zoom, 0.1..=2.0)
+                    let zoom_slider = egui::Slider::new(&mut self.zoom, self.settings.min_zoom..=self.settings.max_zoom)
                         .show_value(false)
                         //.step_by(0.1)
                         .orientation(SliderOrientation::Vertical);
