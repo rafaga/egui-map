@@ -136,7 +136,7 @@ impl Widget for &mut Map {
                 
                 // capture MouseWheel Event for Zoom control change
                 ui_obj.input(|x|{
-                    if !x.events.is_empty() {
+                    /*if !x.events.is_empty() {
                         for event in &x.events {
                             match event {
                                 Event::MouseWheel {unit: _ ,delta,modifiers} => { 
@@ -154,7 +154,7 @@ impl Widget for &mut Map {
                                 }
                             };
                         }
-                    }
+                    }*/
                 });
 
 
