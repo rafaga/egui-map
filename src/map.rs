@@ -26,7 +26,7 @@ pub struct Map {
     initialized: bool,
     reference: MapBounds,
     current: MapBounds,
-    settings: MapSettings
+    pub settings: MapSettings
 }
 
 impl Default for Map {
