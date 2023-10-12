@@ -77,12 +77,6 @@ impl Widget for &mut Map {
             }
         });
 
-        if self.zoom != self.previous_zoom{
-            self.adjust_bounds();
-            self.calculate_visible_points();
-            self.previous_zoom = self.zoom;
-        }
-
         let canvas = egui::Frame::canvas(ui_obj.style())
             .stroke(ui_obj.visuals().widgets.active.fg_stroke);
         
@@ -156,6 +150,12 @@ impl Widget for &mut Map {
                         ui_obj.add(zoom_slider);
                     });
                 }
+                
+                if self.zoom != self.previous_zoom{
+                    self.adjust_bounds();
+                    self.calculate_visible_points();
+                    self.previous_zoom = self.zoom;
+                }
 
                 if resp.secondary_clicked() {
                     todo!();
@@ -175,6 +175,9 @@ impl Widget for &mut Map {
                         }
                     }
                 }
+
+
+
                 /*if cfg!(debug_assertions) {
                     let mut init_pos = Pos2::new(self.map_area.unwrap().left_top().x + 10.00, self.map_area.unwrap().left_top().y + 10.00);
                     let mut msg = String::from("MIN:".to_string() + self.current.min.x.to_string().as_str() + "," + self.current.min.y.to_string().as_str());
