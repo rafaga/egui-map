@@ -53,36 +53,7 @@ impl Widget for &mut Map {
         }
 
         //let style = egui::style::Style::default();
-        
-
-        // capture MouseWheel Event for Zoom control change
-        ui_obj.input(|x|{
-            if !x.events.is_empty() {
-                for event in &x.events {
-                    match event {
-                        Event::MouseWheel {unit: _ ,delta,modifiers} => { 
-                            let mut zoom_modifier = delta.y / 80.00;
-                            if modifiers.mac_cmd {
-                                zoom_modifier *= 5.00;
-                            }
-                            let precalculated_zoom = self.zoom * zoom_modifier;
-                            if self.settings.min_zoom < precalculated_zoom  && precalculated_zoom < self.settings.max_zoom {
-                                self.zoom = precalculated_zoom;
-                            }
-                        },
-                        _ => {
-                            continue;
-                        }
-                    };
-                }
-            }
-        });
-
-        if self.zoom != self.previous_zoom && self.zoom > self.settings.min_zoom && self.zoom < self.settings.max_zoom && self.zoom > 0.0 {
-            self.adjust_bounds();
-            self.calculate_visible_points();
-            self.previous_zoom = self.zoom;
-        }
+    
 
         let canvas = egui::Frame::canvas(ui_obj.style())
             .stroke(ui_obj.visuals().widgets.active.fg_stroke);
@@ -157,6 +128,37 @@ impl Widget for &mut Map {
                         ui_obj.add(zoom_slider);
                     });
                 }
+                
+                // capture MouseWheel Event for Zoom control change
+                ui_obj.input(|x|{
+                    if !x.events.is_empty() {
+                        for event in &x.events {
+                            match event {
+                                Event::MouseWheel {unit: _ ,delta,modifiers} => { 
+                                    let mut zoom_modifier = delta.y / 80.00;
+                                    if modifiers.mac_cmd {
+                                        zoom_modifier *= 5.00;
+                                    }
+                                    let precalculated_zoom = self.zoom * zoom_modifier;
+                                    if self.settings.min_zoom < precalculated_zoom  && precalculated_zoom < self.settings.max_zoom {
+                                        self.zoom = precalculated_zoom;
+                                    }
+                                },
+                                _ => {
+                                    continue;
+                                }
+                            };
+                        }
+                    }
+                });
+
+                if self.zoom != self.previous_zoom {
+                    self.adjust_bounds();
+                    self.calculate_visible_points();
+                    self.previous_zoom = self.zoom;
+                }
+
+
                 if resp.secondary_clicked() {
                     todo!();
                 }
