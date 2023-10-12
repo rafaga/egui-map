@@ -133,9 +133,7 @@ impl Widget for &mut Map {
                         ui_obj.add(zoom_slider);
                     });
                 }
-
-
-
+                
                 // capture MouseWheel Event for Zoom control change
                 ui_obj.input(|x|{
                     if !x.events.is_empty() {
