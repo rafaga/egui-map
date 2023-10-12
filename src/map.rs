@@ -54,7 +54,7 @@ impl Widget for &mut Map {
 
         //let style = egui::style::Style::default();
     
-        if self.zoom != self.previous_zoom {
+        if self.zoom != self.previous_zoom && self.zoom > 0.0 {
             self.adjust_bounds();
             self.calculate_visible_points();
             self.previous_zoom = self.zoom;
@@ -167,11 +167,11 @@ impl Widget for &mut Map {
                         if self.zoom > self.settings.label_visible_zoom {
                             if let Ok(map_point) = self.tree.as_ref().unwrap().nearest(&point, 1,&squared_euclidean){
                                 let system_id = map_point.get(0).unwrap().1;
-                                //if let Entry::Occupied(retrieved_entry) = self.points.as_mut().unwrap().entry(*system_id){
-                                //    let system:MapPoint = retrieved_entry.into();                                 
-                                //    let text_point = Pos2::new(system.coords[0] as f32 + 3.0, system.coords[1] as f32 + 3.0);
-                                //    paint.text(text_point,Align2::LEFT_BOTTOM,system.name.to_string(),FontId::new(12.00 * self.zoom,FontFamily::Proportional),ui_obj.visuals().text_color());
-                                //}
+                                if let Entry::Occupied(retrieved_entry) = self.points.as_mut().unwrap().entry(*system_id){
+                                    let system:MapPoint = retrieved_entry.into();                                 
+                                    let text_point = Pos2::new(system.coords[0] as f32 + 3.0, system.coords[1] as f32 + 3.0);
+                                    paint.text(text_point,Align2::LEFT_BOTTOM,system.name.to_string(),FontId::new(12.00 * self.zoom,FontFamily::Proportional),ui_obj.visuals().text_color());
+                                }
                             }
                         }
                     }
