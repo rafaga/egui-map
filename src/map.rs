@@ -78,7 +78,7 @@ impl Widget for &mut Map {
             }
         });
 
-        if self.zoom != self.previous_zoom {
+        if self.zoom != self.previous_zoom && self.zoom > self.settings.min_zoom && self.zoom < self.settings.max_zoom && self.zoom > 0.0 {
             self.adjust_bounds();
             self.calculate_visible_points();
             self.previous_zoom = self.zoom;
