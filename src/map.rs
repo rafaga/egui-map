@@ -161,7 +161,8 @@ impl Widget for &mut Map {
                 if resp.secondary_clicked() {
                     todo!();
                 }
-                if resp.hovered() && self.settings.node_text_visibility == VisibilitySetting::Hover {
+                //&& self.settings.node_text_visibility == VisibilitySetting::Hover 
+                /*if resp.hovered() {
                     if let Some(pos) = resp.hover_pos() {
                         let point = [pos.x as f64, pos.y as f64];
                         if self.zoom > self.settings.label_visible_zoom {
@@ -176,7 +177,7 @@ impl Widget for &mut Map {
                         }
                     }
                 }
-                /*if cfg!(debug_assertions) {
+                if cfg!(debug_assertions) {
                     let mut init_pos = Pos2::new(self.map_area.unwrap().left_top().x + 10.00, self.map_area.unwrap().left_top().y + 10.00);
                     let mut msg = String::from("MIN:".to_string() + self.current.min.x.to_string().as_str() + "," + self.current.min.y.to_string().as_str());
                     paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
