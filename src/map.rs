@@ -54,7 +54,30 @@ impl Widget for &mut Map {
 
         //let style = egui::style::Style::default();
     
-        if self.zoom != self.previous_zoom && self.zoom > 0.0 {
+        // capture MouseWheel Event for Zoom control change
+        ui_obj.input(|x|{
+            if !x.events.is_empty() {
+                for event in &x.events {
+                    match event {
+                        Event::MouseWheel {unit: _ ,delta,modifiers} => { 
+                            let mut zoom_modifier = delta.y / 80.00;
+                            if modifiers.mac_cmd {
+                                zoom_modifier *= 5.00;
+                            }
+                            let precalculated_zoom = self.zoom * zoom_modifier;
+                            if self.settings.min_zoom < precalculated_zoom  && precalculated_zoom < self.settings.max_zoom {
+                                self.zoom = precalculated_zoom;
+                            }
+                        },
+                        _ => {
+                            continue;
+                        }
+                    };
+                }
+            }
+        });
+
+        if self.zoom != self.previous_zoom{
             self.adjust_bounds();
             self.calculate_visible_points();
             self.previous_zoom = self.zoom;
@@ -133,30 +156,6 @@ impl Widget for &mut Map {
                         ui_obj.add(zoom_slider);
                     });
                 }
-                
-                // capture MouseWheel Event for Zoom control change
-                ui_obj.input(|x|{
-                    if !x.events.is_empty() {
-                        for event in &x.events {
-                            match event {
-                                Event::MouseWheel {unit: _ ,delta,modifiers} => { 
-                                    let mut zoom_modifier = delta.y / 40.00;
-                                    if modifiers.mac_cmd {
-                                        zoom_modifier *= 5.00;
-                                    }
-                                    let precalculated_zoom = self.zoom * zoom_modifier;
-                                    if self.settings.min_zoom < precalculated_zoom  && precalculated_zoom < self.settings.max_zoom {
-                                        self.zoom = precalculated_zoom;
-                                    }
-                                },
-                                _ => {
-                                    continue;
-                                }
-                            };
-                        }
-                    }
-                });
-
 
                 if resp.secondary_clicked() {
                     todo!();
@@ -176,7 +175,7 @@ impl Widget for &mut Map {
                         }
                     }
                 }
-                if cfg!(debug_assertions) {
+                /*if cfg!(debug_assertions) {
                     let mut init_pos = Pos2::new(self.map_area.unwrap().left_top().x + 10.00, self.map_area.unwrap().left_top().y + 10.00);
                     let mut msg = String::from("MIN:".to_string() + self.current.min.x.to_string().as_str() + "," + self.current.min.y.to_string().as_str());
                     paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
@@ -218,7 +217,7 @@ impl Widget for &mut Map {
                         msg = "DRG:".to_string() + vec.to_pos2().x.to_string().as_str() + "," + vec.to_pos2().y.to_string().as_str();
                         paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GOLD, msg);
                     }
-                }
+                }*/
             //}
         });
         
