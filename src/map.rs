@@ -61,9 +61,9 @@ impl Widget for &mut Map {
                     match event {
                         Event::MouseWheel {unit: _ ,delta,modifiers} => { 
                             let zoom_modifier = if modifiers.mac_cmd {
-                                delta.y / 400.00
-                            } else {
                                 delta.y / 80.00
+                            } else {
+                                delta.y / 400.00
                             };
                             let mut pre_zoom = self.zoom + zoom_modifier;
                             if pre_zoom > self.settings.max_zoom {
