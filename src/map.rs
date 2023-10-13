@@ -73,7 +73,7 @@ impl Widget for &mut Map {
                             }
                             self.zoom = precalculated_zoom;
                             if cfg!(debug_assertions) {
-                                println!("{} {} {}",delta.y,precalculated_zoom,self.zoom);
+                                println!("delta:{} zoom:{} zoom_modifier:{}",delta.y,precalculated_zoom,zoom_modifier);
                             }
                         },
                         _ => {
