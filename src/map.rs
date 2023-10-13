@@ -64,14 +64,14 @@ impl Widget for &mut Map {
                             if modifiers.mac_cmd {
                                 zoom_modifier /= 5.00;
                             }
-                            let mut precalculated_zoom = self.zoom * zoom_modifier;
+                            let mut precalculated_zoom = self.zoom + zoom_modifier;
                             if precalculated_zoom > self.settings.max_zoom {
                                 precalculated_zoom = self.settings.max_zoom;
                             }
                             if precalculated_zoom < self.settings.min_zoom {
                                 precalculated_zoom = self.settings.min_zoom;
                             }
-                            self.zoom += precalculated_zoom;
+                            self.zoom = precalculated_zoom;
                             if cfg!(debug_assertions) {
                                 println!("delta:{} zoom:{} modifier:{}",delta.y,self.zoom,precalculated_zoom);
                             }
