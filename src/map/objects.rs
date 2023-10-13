@@ -282,8 +282,8 @@ impl MapSettings {
 impl Default for MapSettings {
     fn default() -> Self {
         let mut a = MapSettings::new();
-        a.max_zoom = 0.1f32;
-        a.min_zoom = 2.0f32;
+        a.max_zoom = 2.0f32;
+        a.min_zoom = 0.1f32;
         a.line_visible_zoom = 0.2f32;
         a.label_visible_zoom = 0.58f32;
         a
