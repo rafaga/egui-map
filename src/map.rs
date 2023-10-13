@@ -73,10 +73,6 @@ impl Widget for &mut Map {
                                 pre_zoom = self.settings.min_zoom;
                             }
                             self.zoom = pre_zoom;
-                            if cfg!(debug_assertions) {
-                                println!("delta:{} modifier:{}",delta.y,zoom_modifier);
-                                println!("max:{},zoom:{},min:{}",self.settings.max_zoom,self.zoom,self.settings.min_zoom);
-                            }
                         },
                         _ => {
                             continue;
