@@ -60,7 +60,7 @@ impl Widget for &mut Map {
                 for event in &x.events {
                     match event {
                         Event::MouseWheel {unit: _ ,delta,modifiers} => { 
-                            let mut zoom_modifier = delta.y / 80.00;
+                            let mut zoom_modifier = delta.y / 200.00;
                             if modifiers.mac_cmd {
                                 zoom_modifier /= 5.00;
                             }
