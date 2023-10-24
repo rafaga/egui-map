@@ -9,18 +9,7 @@ pub struct MapStyle{
     pub fill_color: Color32,
     pub text_color: Color32,
     pub font: Option<FontId>,
-}
-
-impl Default for MapStyle{
-    fn default() -> Self {
-        MapStyle { 
-            border: Some(egui::Stroke{ width: 2f32, color: Color32::GOLD}),
-            line:  Some(egui::Stroke{ width: 2f32, color: Color32::DARK_RED}),
-            fill_color: Color32::GOLD, 
-            text_color: Color32::LIGHT_GREEN, 
-            font: Some(FontId::new(12.00,FontFamily::Proportional)), 
-        }
-    }
+    pub background_color: Color32,
 }
 
 impl MapStyle{
@@ -31,6 +20,7 @@ impl MapStyle{
             fill_color: Color32::TRANSPARENT, 
             text_color: Color32::TRANSPARENT, 
             font: None, 
+            background_color: Color32::TRANSPARENT,
         }
     }
 }
@@ -264,7 +254,9 @@ pub struct MapSettings {
     pub min_zoom:f32,
     pub line_visible_zoom:f32,
     pub label_visible_zoom:f32,
-    pub node_text_visibility:VisibilitySetting
+    pub node_text_visibility:VisibilitySetting,
+    pub styles: Vec<MapStyle>,
+    pub(crate) is_dark_enabled: bool,
 }
 
 impl MapSettings {
@@ -274,19 +266,45 @@ impl MapSettings {
             min_zoom:0.0,
             line_visible_zoom:0.0,
             label_visible_zoom:0.0,
-            node_text_visibility:VisibilitySetting::Allways
+            node_text_visibility:VisibilitySetting::Allways,
+            styles: vec![MapStyle::new()],
+            is_dark_enabled: false,
         }
     }
 }
 
 impl Default for MapSettings {
     fn default() -> Self {
-        let mut a = MapSettings::new();
-        a.max_zoom = 2.0f32;
-        a.min_zoom = 0.1f32;
-        a.line_visible_zoom = 0.2f32;
-        a.label_visible_zoom = 0.58f32;
-        a
+        let mut obj = MapSettings {
+            max_zoom: 2.0,
+            min_zoom: 0.1,
+            line_visible_zoom: 0.2,
+            label_visible_zoom: 0.58,
+            node_text_visibility: VisibilitySetting::Allways,
+            styles: Vec::new(),
+            is_dark_enabled: false,
+        };
+
+        // light Theme
+        obj.styles.push(MapStyle {
+            border: Some(egui::Stroke{ width: 2f32, color: Color32::from_rgb(216,142,58)}),
+            line:  Some(egui::Stroke{ width: 2f32, color: Color32::DARK_RED}),
+            fill_color: Color32::from_rgb(216,142,58), 
+            text_color: Color32::DARK_GREEN, 
+            font: Some(FontId::new(12.00,FontFamily::Proportional)),
+            background_color: Color32::WHITE,
+        });
+
+        // Dark Theme
+        obj.styles.push(MapStyle {
+            border: Some(egui::Stroke{ width: 2f32, color: Color32::GOLD}),
+            line:  Some(egui::Stroke{ width: 2f32, color: Color32::LIGHT_RED}),
+            fill_color: Color32::GOLD, 
+            text_color: Color32::LIGHT_GREEN, 
+            font: Some(FontId::new(12.00,FontFamily::Proportional)),
+            background_color: Color32::DARK_GRAY,
+        });
+        obj
     }
 }
 

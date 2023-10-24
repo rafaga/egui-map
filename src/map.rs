@@ -6,6 +6,7 @@ use rand::thread_rng;
 use rand::distributions::{Alphanumeric,Distribution};
 use crate::map::objects::*;
 use std::collections::hash_map::Entry;
+use std::sync::Arc;
 
 pub mod objects;
 
@@ -19,13 +20,13 @@ pub struct Map {
     points: Option<HashMap<usize,MapPoint>>,
     lines: Vec<MapLine>,
     labels: Vec<MapLabel>,
-    styles: HashMap<String ,MapStyle>,
     tree: Option<KdTree<f64,usize,[f64;2]>>,
     visible_points: Option<Vec<usize>>,
     map_area: Option<Rect>,
     initialized: bool,
     reference: MapBounds,
     current: MapBounds,
+    active_style: Arc<MapStyle>,
     pub settings: MapSettings
 }
 
@@ -50,6 +51,16 @@ impl Widget for &mut Map {
             self.map_area = Some(ui_obj.available_rect_before_wrap());
         } else {
             self.map_area = Some(ui_obj.ctx().used_rect());
+        }
+
+        if self.settings.is_dark_enabled != ui_obj.visuals().dark_mode {
+            self.settings.is_dark_enabled = ui_obj.visuals().dark_mode;
+            if self.settings.is_dark_enabled {
+                self.active_style = Arc::new(self.settings.styles[0].clone());
+            } else {
+                self.active_style = Arc::new(self.settings.styles[1].clone());
+            }
+            
         }
 
         //let style = egui::style::Style::default();
@@ -94,7 +105,7 @@ impl Widget for &mut Map {
                     self.set_pos(self.current.pos.x - coords.0, self.current.pos.y -coords.1);
                     self.calculate_visible_points();
                 }
-                let map_style = self.styles.get("default").unwrap().clone() * self.zoom;
+                let map_style = self.active_style.as_ref().clone() * self.zoom;
                 if self.zoom > self.settings.line_visible_zoom {
                     for line in &self.lines{
                         paint.line_segment(line.points, map_style.line.unwrap());
@@ -236,7 +247,8 @@ impl Widget for &mut Map {
 
 impl Map {
     pub fn new() -> Self {
-        let mut obj = Map {
+        let settings = MapSettings::new();
+        Map {
             zoom: 1.0,
             previous_zoom: 1.0,
             map_area: None,
@@ -244,15 +256,13 @@ impl Map {
             points: None,
             lines: Vec::new(),
             labels: Vec::new(),
-            styles: HashMap::new(),
             visible_points: None,
             initialized: false,
             current: MapBounds::default(),
             reference: MapBounds::default(),
-            settings: MapSettings::new(),
-        };
-        obj.styles.insert("default".to_string(), MapStyle::default());
-        obj
+            active_style: Arc::new(settings.styles[0].clone()),
+            settings,
+        }
     }
 
     fn calculate_visible_points(&mut self) {
