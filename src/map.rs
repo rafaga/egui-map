@@ -40,6 +40,7 @@ impl Default for Map {
 impl Widget for &mut Map {
     fn ui(self, ui_obj: &mut egui::Ui) -> Response {
         if !self.initialized {
+            self.active_style = Arc::new(self.settings.styles[0].clone());
             let mut rng = thread_rng();
             let component_id: String = Alphanumeric
                 .sample_iter(&mut rng)
@@ -56,11 +57,10 @@ impl Widget for &mut Map {
         if self.settings.is_dark_enabled != ui_obj.visuals().dark_mode {
             self.settings.is_dark_enabled = ui_obj.visuals().dark_mode;
             if self.settings.is_dark_enabled {
-                self.active_style = Arc::new(self.settings.styles[0].clone());
-            } else {
                 self.active_style = Arc::new(self.settings.styles[1].clone());
+            } else {
+                self.active_style = Arc::new(self.settings.styles[0].clone());
             }
-            
         }
 
         //let style = egui::style::Style::default();
