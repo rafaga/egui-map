@@ -256,7 +256,6 @@ pub struct MapSettings {
     pub label_visible_zoom:f32,
     pub node_text_visibility:VisibilitySetting,
     pub styles: Vec<MapStyle>,
-    pub(crate) is_dark_enabled: bool,
 }
 
 impl MapSettings {
@@ -268,7 +267,6 @@ impl MapSettings {
             label_visible_zoom:0.0,
             node_text_visibility:VisibilitySetting::Allways,
             styles: vec![MapStyle::new()],
-            is_dark_enabled: false,
         }
     }
 }
@@ -282,7 +280,6 @@ impl Default for MapSettings {
             label_visible_zoom: 0.58,
             node_text_visibility: VisibilitySetting::Allways,
             styles: Vec::new(),
-            is_dark_enabled: false,
         };
 
         // light Theme

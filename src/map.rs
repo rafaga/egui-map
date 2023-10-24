@@ -6,7 +6,6 @@ use rand::thread_rng;
 use rand::distributions::{Alphanumeric,Distribution};
 use crate::map::objects::*;
 use std::collections::hash_map::Entry;
-use std::sync::Arc;
 
 pub mod objects;
 
@@ -26,7 +25,8 @@ pub struct Map {
     initialized: bool,
     reference: MapBounds,
     current: MapBounds,
-    active_style: Arc<MapStyle>,
+    style: egui::Style,
+    current_index: usize,
     pub settings: MapSettings
 }
 
@@ -40,7 +40,6 @@ impl Default for Map {
 impl Widget for &mut Map {
     fn ui(self, ui_obj: &mut egui::Ui) -> Response {
         if !self.initialized {
-            self.active_style = Arc::new(self.settings.styles[0].clone());
             let mut rng = thread_rng();
             let component_id: String = Alphanumeric
                 .sample_iter(&mut rng)
@@ -48,21 +47,27 @@ impl Widget for &mut Map {
                 .map(char::from)
                 .collect();
             let idx = egui::Id::new(component_id);
-            ui_obj.make_persistent_id(idx);
             self.map_area = Some(ui_obj.available_rect_before_wrap());
         } else {
             self.map_area = Some(ui_obj.ctx().used_rect());
         }
 
-        if self.settings.is_dark_enabled != ui_obj.visuals().dark_mode {
-            self.settings.is_dark_enabled = ui_obj.visuals().dark_mode;
-            if self.settings.is_dark_enabled {
-                self.active_style = Arc::new(self.settings.styles[1].clone());
-            } else {
-                self.active_style = Arc::new(self.settings.styles[0].clone());
-            }
+        let style_index = if !ui_obj.visuals().dark_mode {
+            0
+        } else {
+            1
+        };
+
+        if self.current_index != style_index {
+            self.current_index = style_index;
+            self.style = ui_obj.style_mut().clone();
+            self.style.visuals.extreme_bg_color = self.settings.styles[style_index].background_color;
+            self.style.visuals.window_stroke = self.settings.styles[style_index].line.unwrap();
+            //let widget_style = ui_obj.style_mut();
+            //widget_style.visuals.panel_fill = self.active_style.background_color;
         }
 
+        let canvas = egui::Frame::canvas(ui_obj.style());
         //let style = egui::style::Style::default();
     
         // capture MouseWheel Event for Zoom control change
@@ -93,8 +98,7 @@ impl Widget for &mut Map {
             }
         });
 
-        let canvas = egui::Frame::canvas(ui_obj.style())
-            .stroke(ui_obj.visuals().widgets.active.fg_stroke);
+        
         
         let inner_response = canvas.show(ui_obj, |ui_obj| {
             //if ui_obj.is_rect_visible(self.map_area.unwrap()) {
@@ -105,7 +109,7 @@ impl Widget for &mut Map {
                     self.set_pos(self.current.pos.x - coords.0, self.current.pos.y -coords.1);
                     self.calculate_visible_points();
                 }
-                let map_style = self.active_style.as_ref().clone() * self.zoom;
+                let map_style = self.settings.styles[self.current_index].clone() * self.zoom;
                 if self.zoom > self.settings.line_visible_zoom {
                     for line in &self.lines{
                         paint.line_segment(line.points, map_style.line.unwrap());
@@ -260,8 +264,9 @@ impl Map {
             initialized: false,
             current: MapBounds::default(),
             reference: MapBounds::default(),
-            active_style: Arc::new(settings.styles[0].clone()),
             settings,
+            current_index: 0,
+            style: egui::Style::default(),
         }
     }
 
