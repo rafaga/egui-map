@@ -40,6 +40,9 @@ impl Default for Map {
 impl Widget for &mut Map {
     fn ui(self, ui_obj: &mut egui::Ui) -> Response {
         if !self.initialized {
+            #[cfg(feature = "puffin")]
+            puffin::profile_scope!("map_init");
+
             let mut rng = thread_rng();
             let component_id: String = Alphanumeric
                 .sample_iter(&mut rng)
@@ -56,6 +59,9 @@ impl Widget for &mut Map {
         let style_index = ui_obj.visuals().dark_mode as usize;
 
         if self.current_index != style_index {
+            #[cfg(feature = "puffin")]
+            puffin::profile_scope!("asign_visual_style");
+
             self.current_index = style_index;
             self.style = ui_obj.style_mut().clone();
             self.style.visuals.extreme_bg_color = self.settings.styles[style_index].background_color;
@@ -66,6 +72,9 @@ impl Widget for &mut Map {
     
         // capture MouseWheel Event for Zoom control change
         ui_obj.input(|x|{
+            #[cfg(feature = "puffin")]
+            puffin::profile_scope!("capture_mouse_events");
+
             if !x.events.is_empty() {
                 for event in &x.events {
                     match event {
@@ -95,21 +104,33 @@ impl Widget for &mut Map {
         
         
         let inner_response = canvas.show(ui_obj, |ui_obj| {
+            
+            #[cfg(feature = "puffin")]
+            puffin::profile_scope!("paint_map");
+
             //if ui_obj.is_rect_visible(self.map_area.unwrap()) {
                 let (resp,paint) = ui_obj.allocate_painter(self.map_area.unwrap().size(), egui::Sense::click_and_drag());
                 let vec = resp.drag_delta();
                 if vec.length() != 0.0 {
+
+                    #[cfg(feature = "puffin")]
+                    puffin::profile_scope!("calculating_points_in_visible_area");
+
                     let coords = (vec.to_pos2().x,  vec.to_pos2().y);
                     self.set_pos(self.current.pos.x - coords.0, self.current.pos.y -coords.1);
                     self.calculate_visible_points();
                 }
                 let map_style = self.settings.styles[self.current_index].clone() * self.zoom;
                 if self.zoom > self.settings.line_visible_zoom {
+                    #[cfg(feature = "puffin")]
+                    puffin::profile_scope!("painting_lines");
                     for line in &self.lines{
                         paint.line_segment(line.points, map_style.line.unwrap());
                     }
                 }
                 if self.zoom < self.settings.line_visible_zoom {
+                    #[cfg(feature = "puffin")]
+                    puffin::profile_scope!("painting_labels");
                     for label in &self.labels{
                         paint.text(label.center,Align2::CENTER_CENTER,label.text.as_str(),map_style.font.clone().unwrap(),ui_obj.visuals().text_color());
                     }
@@ -122,6 +143,8 @@ impl Widget for &mut Map {
                         // Drawing Lines
                         if self.zoom > self.settings.line_visible_zoom {
                             for temp_point in temp_vec_point{
+                                #[cfg(feature = "puffin")]
+                                puffin::profile_scope!("painting_lines_m");
                                 if let Some(system) = hashm.get(temp_point) {
                                     let center = Pos2::new(system.coords[0] as f32 * self.zoom,system.coords[1] as f32 * self.zoom);
                                     let a_point = Pos2::new(center.x-min_point.x,center.y-min_point.y);
@@ -134,6 +157,8 @@ impl Widget for &mut Map {
                         }
                         // Drawing Points
                         for temp_point in temp_vec_point{
+                            #[cfg(feature = "puffin")]
+                            puffin::profile_scope!("painting_points_m");
                             if let Some(system) = hashm.get(temp_point) { 
                                 let center = Pos2::new(system.coords[0] as f32 * self.zoom,system.coords[1] as f32 * self.zoom);
                                 let viewport_point = Pos2::new(center.x-min_point.x,center.y-min_point.y);
@@ -149,6 +174,8 @@ impl Widget for &mut Map {
                     }
                 }
                 if let Some(rect) = self.map_area{
+                    #[cfg(feature = "puffin")]
+                    puffin::profile_scope!("positioning zoom slider");
                     let zoom_slider = egui::Slider::new(&mut self.zoom, self.settings.min_zoom..=self.settings.max_zoom)
                         .show_value(false)
                         //.step_by(0.1)
@@ -166,6 +193,8 @@ impl Widget for &mut Map {
                 }
                 
                 if self.zoom != self.previous_zoom{
+                    #[cfg(feature = "puffin")]
+                    puffin::profile_scope!("calculating viewport with zoom");
                     self.adjust_bounds();
                     self.calculate_visible_points();
                     self.previous_zoom = self.zoom;
@@ -174,7 +203,10 @@ impl Widget for &mut Map {
                 if resp.secondary_clicked() {
                     todo!();
                 }
+
                 if resp.hovered() && self.settings.node_text_visibility == VisibilitySetting::Hover {
+                    #[cfg(feature = "puffin")]
+                    puffin::profile_scope!("hover mouse event in map");
                     if let Some(pos) = resp.hover_pos() {
                         let point = [pos.x as f64, pos.y as f64];
                         if self.zoom > self.settings.label_visible_zoom {
@@ -265,6 +297,8 @@ impl Map {
     }
 
     fn calculate_visible_points(&mut self) {
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("calculate_visible_points");
         if self.current.dist > 0.0 {
             if let Some(tree) = &self.tree{
                 let center = [(self.current.pos.x / self.zoom) as f64,(self.current.pos.y / self.zoom) as f64];
@@ -280,6 +314,8 @@ impl Map {
     }
 
     pub fn add_points(&mut self, points: Vec<MapPoint>) {
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("add_points");
         let mut hmap = HashMap::new();
         let mut min = (f64::INFINITY,f64::INFINITY);
         let mut max = (f64::NEG_INFINITY,f64::NEG_INFINITY);
