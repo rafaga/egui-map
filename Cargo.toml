@@ -37,12 +37,17 @@ maintenance = { status = "actively-developed" }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-egui = { version = "0.23", features = ["bytemuck", "cint", "persistence", "serde", "deadlock_detection", "color-hex"], default-features = false }
+egui = { version = "0.23", features = ["bytemuck", "cint", "persistence", "serde", "deadlock_detection", "color-hex"]}
 kdtree = { version = "0.7.0", features = ["serde", "serde_derive", "serialize"] }
 rand = "0.8.5"
 serde = { version = "1.0", features = ["serde_derive"] }
-puffin = { version = "0", optional = true }
 
-[features]
-default = []
-profiling = ["dep:puffin"]
+[dev-dependencies]
+eframe = { version="0.23", features = [
+    "puffin",
+    "__screenshot", # __screenshot is so we can dump a screenshot using EFRAME_SCREENSHOT_TO
+] }
+env_logger = "0.10"
+puffin = "0.16"
+puffin_http = "0.13"
+

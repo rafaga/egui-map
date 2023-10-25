@@ -39,10 +39,6 @@ impl Default for Map {
 
 impl Widget for &mut Map {
     fn ui(self, ui_obj: &mut egui::Ui) -> Response {
-
-        #[cfg(feature = "profiling")]
-        puffin::profile_function!();
-
         if !self.initialized {
             let mut rng = thread_rng();
             let component_id: String = Alphanumeric
