@@ -39,6 +39,10 @@ impl Default for Map {
 
 impl Widget for &mut Map {
     fn ui(self, ui_obj: &mut egui::Ui) -> Response {
+
+        #[cfg(feature = "profiling")]
+        puffin::profile_function!();
+
         if !self.initialized {
             let mut rng = thread_rng();
             let component_id: String = Alphanumeric
@@ -46,29 +50,23 @@ impl Widget for &mut Map {
                 .take(15)
                 .map(char::from)
                 .collect();
-            let idx = egui::Id::new(component_id);
+            // TODO:use this variable
+            let _idx = egui::Id::new(component_id);
             self.map_area = Some(ui_obj.available_rect_before_wrap());
         } else {
             self.map_area = Some(ui_obj.ctx().used_rect());
         }
 
-        let style_index = if !ui_obj.visuals().dark_mode {
-            0
-        } else {
-            1
-        };
+        let style_index = ui_obj.visuals().dark_mode as usize;
 
         if self.current_index != style_index {
             self.current_index = style_index;
             self.style = ui_obj.style_mut().clone();
             self.style.visuals.extreme_bg_color = self.settings.styles[style_index].background_color;
-            self.style.visuals.window_stroke = self.settings.styles[style_index].line.unwrap();
-            //let widget_style = ui_obj.style_mut();
-            //widget_style.visuals.panel_fill = self.active_style.background_color;
+            self.style.visuals.window_stroke = self.settings.styles[style_index].border.unwrap();
         }
 
         let canvas = egui::Frame::canvas(ui_obj.style());
-        //let style = egui::style::Style::default();
     
         // capture MouseWheel Event for Zoom control change
         ui_obj.input(|x|{

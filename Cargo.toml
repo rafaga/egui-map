@@ -41,3 +41,8 @@ egui = { version = "0.23", features = ["bytemuck", "cint", "persistence", "serde
 kdtree = { version = "0.7.0", features = ["serde", "serde_derive", "serialize"] }
 rand = "0.8.5"
 serde = { version = "1.0", features = ["serde_derive"] }
+puffin = { version = "0", optional = true }
+
+[features]
+default = []
+profiling = ["dep:puffin"]
