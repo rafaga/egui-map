@@ -35,6 +35,9 @@ exclude = ["tests/",".github/",".gitignore"]
 maintenance = { status = "actively-developed" }
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
+puffin = ["dep:puffin"]
 
 [dependencies]
 egui = { version = "0.23", features = ["bytemuck", "cint", "persistence", "serde", "deadlock_detection", "color-hex"]}
