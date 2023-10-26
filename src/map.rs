@@ -143,9 +143,9 @@ impl Widget for &mut Map {
                         // Drawing Lines
                         if self.zoom > self.settings.line_visible_zoom {
                             for temp_point in temp_vec_point{
-                                #[cfg(feature = "puffin")]
-                                puffin::profile_scope!("painting_lines_m");
                                 if let Some(system) = hashm.get(temp_point) {
+                                    #[cfg(feature = "puffin")]
+                                    puffin::profile_scope!("painting_lines_m");
                                     let center = Pos2::new(system.coords[0] as f32 * self.zoom,system.coords[1] as f32 * self.zoom);
                                     let a_point = Pos2::new(center.x-min_point.x,center.y-min_point.y);
                                     for line in &system.lines {
@@ -157,9 +157,9 @@ impl Widget for &mut Map {
                         }
                         // Drawing Points
                         for temp_point in temp_vec_point{
-                            #[cfg(feature = "puffin")]
-                            puffin::profile_scope!("painting_points_m");
                             if let Some(system) = hashm.get(temp_point) { 
+                                #[cfg(feature = "puffin")]
+                                puffin::profile_scope!("painting_points_m");
                                 let center = Pos2::new(system.coords[0] as f32 * self.zoom,system.coords[1] as f32 * self.zoom);
                                 let viewport_point = Pos2::new(center.x-min_point.x,center.y-min_point.y);
                                 if self.settings.node_text_visibility == VisibilitySetting::Allways && self.zoom > self.settings.label_visible_zoom {
