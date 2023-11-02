@@ -313,6 +313,47 @@ impl Map {
         }
     }
 
+    pub fn add_hashmap_points(&mut self, hash_map: HashMap<usize,MapPoint>) {
+        let mut min = (f64::INFINITY,f64::INFINITY);
+        let mut max = (f64::NEG_INFINITY,f64::NEG_INFINITY);
+        let mut tree = KdTree::<f64,usize,[f64;2]>::new(2);
+        let mut h_map = hash_map.clone();
+        for entry in h_map.iter_mut() {
+            entry.1.coords[0] *= -1.0;
+            entry.1.coords[1] *= -1.0;
+            if entry.1.coords[0] < min.0 {
+                min.0 = entry.1.coords[0];
+            }
+            if entry.1.coords[1] < min.1 {
+                min.1 = entry.1.coords[1];
+            }
+            if entry.1.coords[0] > max.0 {
+                max.0 = entry.1.coords[0];
+            }
+            if entry.1.coords[1] > max.1 {
+                max.1 = entry.1.coords[1];
+            }
+            let _result = tree.add([entry.1.coords[0],entry.1.coords[1]],*entry.0);
+            for line in &mut entry.1.lines {
+                line[0] *= -1.0;
+                line[1] *= -1.0;
+                line[2] *= -1.0;
+            }
+        }
+        self.reference.min = Pos2::new(min.0 as f32,min.1 as f32);
+        self.reference.max = Pos2::new(max.0 as f32,max.1 as f32);
+        self.points = Some(h_map);
+        self.tree = Some(tree);
+        let rect = Rect::from_min_max(self.reference.min, self.reference.max);
+        self.reference.pos = rect.center();
+        let dist_x = (self.map_area.unwrap().right_bottom().x as f64 - self.map_area.unwrap().left_top().x as f64)/2.0;
+        let dist_y = (self.map_area.unwrap().right_bottom().y as f64 - self.map_area.unwrap().left_top().y as f64)/2.0;
+        self.reference.dist = (dist_x.powi(2) + dist_y.powi(2)/2.0).sqrt();
+        self.current = self.reference.clone();
+        self.calculate_visible_points();
+    }
+
+
     pub fn add_points(&mut self, points: Vec<MapPoint>) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("add_points");
