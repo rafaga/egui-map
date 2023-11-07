@@ -108,7 +108,7 @@ impl Widget for &mut Map {
             #[cfg(feature = "puffin")]
             puffin::profile_scope!("paint_map");
 
-            //if ui_obj.is_rect_visible(self.map_area.unwrap()) {
+            if ui_obj.is_rect_visible(self.map_area.unwrap()) {
                 let (resp,paint) = ui_obj.allocate_painter(self.map_area.unwrap().size(), egui::Sense::click_and_drag());
                 let vec = resp.drag_delta();
                 if vec.length() != 0.0 {
@@ -224,7 +224,7 @@ impl Widget for &mut Map {
 
 
 
-                /*if cfg!(debug_assertions) {
+                if cfg!(debug_assertions) {
                     let mut init_pos = Pos2::new(self.map_area.unwrap().left_top().x + 10.00, self.map_area.unwrap().left_top().y + 10.00);
                     let mut msg = String::from("MIN:".to_string() + self.current.min.x.to_string().as_str() + "," + self.current.min.y.to_string().as_str());
                     paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
@@ -266,8 +266,8 @@ impl Widget for &mut Map {
                         msg = "DRG:".to_string() + vec.to_pos2().x.to_string().as_str() + "," + vec.to_pos2().y.to_string().as_str();
                         paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GOLD, msg);
                     }
-                }*/
-            //}
+                }
+            }
         });
         
         inner_response.response
@@ -352,50 +352,6 @@ impl Map {
         self.current = self.reference.clone();
         self.calculate_visible_points();
     }
-
-
-    pub fn add_points(&mut self, points: Vec<MapPoint>) {
-        #[cfg(feature = "puffin")]
-        puffin::profile_scope!("add_points");
-        let mut hmap = HashMap::new();
-        let mut min = (f64::INFINITY,f64::INFINITY);
-        let mut max = (f64::NEG_INFINITY,f64::NEG_INFINITY);
-        let mut tree = KdTree::<f64,usize,[f64;2]>::new(2);
-        for mut point in points{
-            point.coords[0] *= -1.0;
-            point.coords[1] *= -1.0;
-            if point.coords[0] < min.0 {
-                min.0 = point.coords[0];
-            }
-            if point.coords[1] < min.1 {
-                min.1 = point.coords[1];
-            }
-            if point.coords[0] > max.0 {
-                max.0 = point.coords[0];
-            }
-            if point.coords[1] > max.1 {
-                max.1 = point.coords[1];
-            }
-            let _result = tree.add([point.coords[0],point.coords[1]],point.id);
-            for line in &mut point.lines {
-                line[0] *= -1.0;
-                line[1] *= -1.0;
-                line[2] *= -1.0;
-            }
-            hmap.entry(point.id).or_insert(point);
-        }
-        self.reference.min = Pos2::new(min.0 as f32,min.1 as f32);
-        self.reference.max = Pos2::new(max.0 as f32,max.1 as f32);
-        self.points = Some(hmap);
-        self.tree = Some(tree);
-        let rect = Rect::from_min_max(self.reference.min, self.reference.max);
-        self.reference.pos = rect.center();
-        let dist_x = (self.map_area.unwrap().right_bottom().x as f64 - self.map_area.unwrap().left_top().x as f64)/2.0;
-        let dist_y = (self.map_area.unwrap().right_bottom().y as f64 - self.map_area.unwrap().left_top().y as f64)/2.0;
-        self.reference.dist = (dist_x.powi(2) + dist_y.powi(2)/2.0).sqrt();
-        self.current = self.reference.clone();
-        self.calculate_visible_points();
-    } 
 
     pub fn set_pos(&mut self, x: f32, y:f32) {
         if x <= self.current.max.x && x >= self.current.min.x && y <= self.current.max.y && y >= self.current.min.y{
