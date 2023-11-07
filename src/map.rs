@@ -101,8 +101,6 @@ impl Widget for &mut Map {
             }
         });
 
-        
-        
         let inner_response = canvas.show(ui_obj, |ui_obj| {
             
             #[cfg(feature = "puffin")]
@@ -113,110 +111,109 @@ impl Widget for &mut Map {
                 let vec = resp.drag_delta();
                 if vec.length() != 0.0 {
 
-                    #[cfg(feature = "puffin")]
-                    puffin::profile_scope!("calculating_points_in_visible_area");
+                #[cfg(feature = "puffin")]
+                puffin::profile_scope!("calculating_points_in_visible_area");
 
-                    let coords = (vec.to_pos2().x,  vec.to_pos2().y);
-                    self.set_pos(self.current.pos.x - coords.0, self.current.pos.y -coords.1);
-                    self.calculate_visible_points();
+                let coords = (vec.to_pos2().x,  vec.to_pos2().y);
+                self.set_pos(self.current.pos.x - coords.0, self.current.pos.y -coords.1);
+                self.calculate_visible_points();
+            }
+            let map_style = self.settings.styles[self.current_index].clone() * self.zoom;
+            if self.zoom > self.settings.line_visible_zoom {
+                #[cfg(feature = "puffin")]
+                puffin::profile_scope!("painting_lines");
+                for line in &self.lines{
+                    paint.line_segment(line.points, map_style.line.unwrap());
                 }
-                let map_style = self.settings.styles[self.current_index].clone() * self.zoom;
-                if self.zoom > self.settings.line_visible_zoom {
-                    #[cfg(feature = "puffin")]
-                    puffin::profile_scope!("painting_lines");
-                    for line in &self.lines{
-                        paint.line_segment(line.points, map_style.line.unwrap());
-                    }
+            }
+            if self.zoom < self.settings.line_visible_zoom {
+                #[cfg(feature = "puffin")]
+                puffin::profile_scope!("painting_labels");
+                for label in &self.labels{
+                    paint.text(label.center,Align2::CENTER_CENTER,label.text.as_str(),map_style.font.clone().unwrap(),ui_obj.visuals().text_color());
                 }
-                if self.zoom < self.settings.line_visible_zoom {
-                    #[cfg(feature = "puffin")]
-                    puffin::profile_scope!("painting_labels");
-                    for label in &self.labels{
-                        paint.text(label.center,Align2::CENTER_CENTER,label.text.as_str(),map_style.font.clone().unwrap(),ui_obj.visuals().text_color());
-                    }
-                } 
-                // Drawing Mappoints
-                for temp_vec_point in &self.visible_points {
-                    if let Some(hashm) = self.points.as_mut() {
-                        let factor = (self.map_area.unwrap().center().x  + self.map_area.unwrap().min.x,self.map_area.unwrap().center().y  + self.map_area.unwrap().min.y);
-                        let min_point = Pos2::new(self.current.pos.x-factor.0, self.current.pos.y-factor.1);
-                        // Drawing Lines
-                        if self.zoom > self.settings.line_visible_zoom {
-                            for temp_point in temp_vec_point{
-                                if let Some(system) = hashm.get(temp_point) {
-                                    #[cfg(feature = "puffin")]
-                                    puffin::profile_scope!("painting_lines_m");
-                                    let center = Pos2::new(system.coords[0] as f32 * self.zoom,system.coords[1] as f32 * self.zoom);
-                                    let a_point = Pos2::new(center.x-min_point.x,center.y-min_point.y);
-                                    for line in &system.lines {
-                                        let b_point = Pos2::new((line[0] as f32 * self.zoom)-min_point.x,(line[1] as f32 * self.zoom)-min_point.y);
-                                        paint.line_segment([a_point, b_point], map_style.line.unwrap());
-                                    }
-                                }
-                            } 
-                        }
-                        // Drawing Points
+            } 
+            // Drawing Mappoints
+            for temp_vec_point in &self.visible_points {
+                if let Some(hashm) = self.points.as_mut() {
+                    let factor = (self.map_area.unwrap().center().x  + self.map_area.unwrap().min.x,self.map_area.unwrap().center().y  + self.map_area.unwrap().min.y);
+                    let min_point = Pos2::new(self.current.pos.x-factor.0, self.current.pos.y-factor.1);
+                    // Drawing Lines
+                    if self.zoom > self.settings.line_visible_zoom {
                         for temp_point in temp_vec_point{
-                            if let Some(system) = hashm.get(temp_point) { 
+                            if let Some(system) = hashm.get(temp_point) {
                                 #[cfg(feature = "puffin")]
-                                puffin::profile_scope!("painting_points_m");
+                                puffin::profile_scope!("painting_lines_m");
                                 let center = Pos2::new(system.coords[0] as f32 * self.zoom,system.coords[1] as f32 * self.zoom);
-                                let viewport_point = Pos2::new(center.x-min_point.x,center.y-min_point.y);
-                                if self.settings.node_text_visibility == VisibilitySetting::Allways && self.zoom > self.settings.label_visible_zoom {
-                                    let mut viewport_text = viewport_point;
-                                    viewport_text.x += 3.0 * self.zoom;
-                                    viewport_text.y -= 3.0 * self.zoom;
-                                    paint.text(viewport_text,Align2::LEFT_BOTTOM,system.name.to_string(),FontId::new(12.00 * self.zoom,FontFamily::Proportional),ui_obj.visuals().text_color());
+                                let a_point = Pos2::new(center.x-min_point.x,center.y-min_point.y);
+                                for line in &system.lines {
+                                    let b_point = Pos2::new((line[0] as f32 * self.zoom)-min_point.x,(line[1] as f32 * self.zoom)-min_point.y);
+                                    paint.line_segment([a_point, b_point], map_style.line.unwrap());
                                 }
-                                paint.circle(viewport_point, 4.00 * self.zoom, map_style.fill_color, map_style.border.unwrap());
                             }
+                        } 
+                    }
+                    // Drawing Points
+                    for temp_point in temp_vec_point{
+                        if let Some(system) = hashm.get(temp_point) { 
+                            #[cfg(feature = "puffin")]
+                            puffin::profile_scope!("painting_points_m");
+                            let center = Pos2::new(system.coords[0] as f32 * self.zoom,system.coords[1] as f32 * self.zoom);
+                            let viewport_point = Pos2::new(center.x-min_point.x,center.y-min_point.y);
+                            if self.settings.node_text_visibility == VisibilitySetting::Allways && self.zoom > self.settings.label_visible_zoom {
+                                let mut viewport_text = viewport_point;
+                                viewport_text.x += 3.0 * self.zoom;
+                                viewport_text.y -= 3.0 * self.zoom;
+                                paint.text(viewport_text,Align2::LEFT_BOTTOM,system.name.to_string(),FontId::new(12.00 * self.zoom,FontFamily::Proportional),ui_obj.visuals().text_color());
+                            }
+                            paint.circle(viewport_point, 4.00 * self.zoom, map_style.fill_color, map_style.border.unwrap());
                         }
                     }
                 }
-                if let Some(rect) = self.map_area{
-                    #[cfg(feature = "puffin")]
-                    puffin::profile_scope!("positioning zoom slider");
-                    let zoom_slider = egui::Slider::new(&mut self.zoom, self.settings.min_zoom..=self.settings.max_zoom)
-                        .show_value(false)
-                        //.step_by(0.1)
-                        .orientation(SliderOrientation::Vertical);
-                    let mut pos1 = rect.right_top();
-                    let mut pos2 = rect.right_top();
-                    pos1.x -= 80.0;
-                    pos1.y += 120.0;
-                    pos2.x -= 50.0;
-                    pos2.y += 240.0;
-                    let sub_rect = egui::Rect::from_two_pos(pos1, pos2);
-                    ui_obj.allocate_ui_at_rect(sub_rect,|ui_obj|{
-                        ui_obj.add(zoom_slider);
-                    });
-                }
-                
-                if self.zoom != self.previous_zoom{
-                    #[cfg(feature = "puffin")]
-                    puffin::profile_scope!("calculating viewport with zoom");
-                    self.adjust_bounds();
-                    self.calculate_visible_points();
-                    self.previous_zoom = self.zoom;
-                }
+            }
+            if let Some(rect) = self.map_area{
+                #[cfg(feature = "puffin")]
+                puffin::profile_scope!("positioning zoom slider");
+                let zoom_slider = egui::Slider::new(&mut self.zoom, self.settings.min_zoom..=self.settings.max_zoom)
+                    .show_value(false)
+                    //.step_by(0.1)
+                    .orientation(SliderOrientation::Vertical);
+                let mut pos1 = rect.right_top();
+                let mut pos2 = rect.right_top();
+                pos1.x -= 80.0;
+                pos1.y += 120.0;
+                pos2.x -= 50.0;
+                pos2.y += 240.0;
+                let sub_rect = egui::Rect::from_two_pos(pos1, pos2);
+                ui_obj.allocate_ui_at_rect(sub_rect,|ui_obj|{
+                    ui_obj.add(zoom_slider);
+                });
+            }
+            
+            if self.zoom != self.previous_zoom{
+                #[cfg(feature = "puffin")]
+                puffin::profile_scope!("calculating viewport with zoom");
+                self.adjust_bounds();
+                self.calculate_visible_points();
+                self.previous_zoom = self.zoom;
+            }
 
-                if resp.secondary_clicked() {
-                    todo!();
-                }
+            if resp.secondary_clicked() {
+                todo!();
+            }
 
-                if resp.hovered() && self.settings.node_text_visibility == VisibilitySetting::Hover {
-                    #[cfg(feature = "puffin")]
-                    puffin::profile_scope!("hover mouse event in map");
-                    if let Some(pos) = resp.hover_pos() {
-                        let point = [pos.x as f64, pos.y as f64];
-                        if self.zoom > self.settings.label_visible_zoom {
-                            if let Ok(map_point) = self.tree.as_ref().unwrap().nearest(&point, 1,&squared_euclidean){
-                                let system_id = map_point.get(0).unwrap().1;
-                                if let Entry::Occupied(retrieved_entry) = self.points.as_mut().unwrap().entry(*system_id){
-                                    let system:MapPoint = retrieved_entry.into();                                 
-                                    let text_point = Pos2::new(system.coords[0] as f32 + 3.0, system.coords[1] as f32 + 3.0);
-                                    paint.text(text_point,Align2::LEFT_BOTTOM,system.name.to_string(),FontId::new(12.00 * self.zoom,FontFamily::Proportional),ui_obj.visuals().text_color());
-                                }
+            if resp.hovered() && self.settings.node_text_visibility == VisibilitySetting::Hover {
+                #[cfg(feature = "puffin")]
+                puffin::profile_scope!("hover mouse event in map");
+                if let Some(pos) = resp.hover_pos() {
+                    let point = [pos.x as f64, pos.y as f64];
+                    if self.zoom > self.settings.label_visible_zoom {
+                        if let Ok(map_point) = self.tree.as_ref().unwrap().nearest(&point, 1,&squared_euclidean){
+                            let system_id = map_point.get(0).unwrap().1;
+                            if let Entry::Occupied(retrieved_entry) = self.points.as_mut().unwrap().entry(*system_id){
+                                let system:MapPoint = retrieved_entry.into();                                 
+                                let text_point = Pos2::new(system.coords[0] as f32 + 3.0, system.coords[1] as f32 + 3.0);
+                                paint.text(text_point,Align2::LEFT_BOTTOM,system.name.to_string(),FontId::new(12.00 * self.zoom,FontFamily::Proportional),ui_obj.visuals().text_color());
                             }
                         }
                     }
