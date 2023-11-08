@@ -277,18 +277,21 @@ impl Widget for &mut Map {
                             }
                         }
                     }
-                } 
+                }
+
                 if cfg!(debug_assertions) {
+
+                    #[cfg(feature = "puffin")]
+                    puffin::profile_scope!("printing debug data");
+
                     let mut init_pos = Pos2::new(
                         self.map_area.unwrap().left_top().x + 10.00,
                         self.map_area.unwrap().left_top().y + 10.00,
                     );
-                    let mut msg = String::from(
-                        "MIN:".to_string()
+                    let mut msg = "MIN:".to_string()
                             + self.current.min.x.to_string().as_str()
                             + ","
-                            + self.current.min.y.to_string().as_str(),
-                    );
+                            + self.current.min.y.to_string().as_str();
                     paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
                     init_pos.y += 15.0;
                     msg = "MAX:".to_string()

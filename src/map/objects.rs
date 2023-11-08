@@ -24,6 +24,12 @@ impl MapStyle {
     }
 }
 
+impl Default for MapStyle {
+    fn default() -> Self {
+        MapStyle::new()
+    }
+}
+
 impl Mul<i64> for MapStyle {
     // The multiplication of rational numbers is a closed operation.
     type Output = Self;
