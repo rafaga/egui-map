@@ -277,78 +277,77 @@ impl Widget for &mut Map {
                             }
                         }
                     }
-
-                    if cfg!(debug_assertions) {
-                        let mut init_pos = Pos2::new(
-                            self.map_area.unwrap().left_top().x + 10.00,
-                            self.map_area.unwrap().left_top().y + 10.00,
-                        );
-                        let mut msg = String::from(
-                            "MIN:".to_string()
-                                + self.current.min.x.to_string().as_str()
-                                + ","
-                                + self.current.min.y.to_string().as_str(),
-                        );
-                        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-                        init_pos.y += 15.0;
-                        msg = "MAX:".to_string()
-                            + self.current.max.x.to_string().as_str()
+                } 
+                if cfg!(debug_assertions) {
+                    let mut init_pos = Pos2::new(
+                        self.map_area.unwrap().left_top().x + 10.00,
+                        self.map_area.unwrap().left_top().y + 10.00,
+                    );
+                    let mut msg = String::from(
+                        "MIN:".to_string()
+                            + self.current.min.x.to_string().as_str()
                             + ","
-                            + self.current.max.y.to_string().as_str();
-                        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+                            + self.current.min.y.to_string().as_str(),
+                    );
+                    paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+                    init_pos.y += 15.0;
+                    msg = "MAX:".to_string()
+                        + self.current.max.x.to_string().as_str()
+                        + ","
+                        + self.current.max.y.to_string().as_str();
+                    paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+                    init_pos.y += 15.0;
+                    msg = "CUR:(".to_string()
+                        + self.current.pos.x.to_string().as_str()
+                        + ","
+                        + self.current.pos.y.to_string().as_str()
+                        + ")";
+                    paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+                    init_pos.y += 15.0;
+                    msg = "DST:".to_string() + self.current.dist.to_string().as_str();
+                    paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+                    init_pos.y += 15.0;
+                    msg = "ZOM:".to_string() + self.zoom.to_string().as_str();
+                    paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GREEN, msg);
+                    if let Some(rectz) = self.map_area {
                         init_pos.y += 15.0;
-                        msg = "CUR:(".to_string()
-                            + self.current.pos.x.to_string().as_str()
+                        msg = "REC:(".to_string()
+                            + rectz.left_top().x.to_string().as_str()
                             + ","
-                            + self.current.pos.y.to_string().as_str()
+                            + rectz.left_top().y.to_string().as_str()
+                            + "),("
+                            + rectz.right_bottom().x.to_string().as_str()
+                            + ","
+                            + rectz.right_bottom().y.to_string().as_str()
                             + ")";
                         paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+                    }
+                    if let Some(points) = &self.points {
                         init_pos.y += 15.0;
-                        msg = "DST:".to_string() + self.current.dist.to_string().as_str();
+                        msg = "NUM:".to_string() + points.len().to_string().as_str();
                         paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+                    }
+                    if let Some(vec_k) = self.visible_points.as_ref() {
                         init_pos.y += 15.0;
-                        msg = "ZOM:".to_string() + self.zoom.to_string().as_str();
-                        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GREEN, msg);
-                        if let Some(rectz) = self.map_area {
-                            init_pos.y += 15.0;
-                            msg = "REC:(".to_string()
-                                + rectz.left_top().x.to_string().as_str()
-                                + ","
-                                + rectz.left_top().y.to_string().as_str()
-                                + "),("
-                                + rectz.right_bottom().x.to_string().as_str()
-                                + ","
-                                + rectz.right_bottom().y.to_string().as_str()
-                                + ")";
-                            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-                        }
-                        if let Some(points) = &self.points {
-                            init_pos.y += 15.0;
-                            msg = "NUM:".to_string() + points.len().to_string().as_str();
-                            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-                        }
-                        if let Some(vec_k) = self.visible_points.as_ref() {
-                            init_pos.y += 15.0;
-                            msg = "VIS:".to_string() + vec_k.len().to_string().as_str();
-                            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-                        }
-                        if let Some(pointer_pos) = resp.hover_pos() {
-                            init_pos.y += 15.0;
-                            msg = "HVR:".to_string()
-                                + pointer_pos.x.to_string().as_str()
-                                + ","
-                                + pointer_pos.y.to_string().as_str();
-                            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_BLUE, msg);
-                        }
-                        let vec = resp.drag_delta();
-                        if vec.length() != 0.0 {
-                            init_pos.y += 15.0;
-                            msg = "DRG:".to_string()
-                                + vec.to_pos2().x.to_string().as_str()
-                                + ","
-                                + vec.to_pos2().y.to_string().as_str();
-                            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GOLD, msg);
-                        }
+                        msg = "VIS:".to_string() + vec_k.len().to_string().as_str();
+                        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+                    }
+                    if let Some(pointer_pos) = resp.hover_pos() {
+                        init_pos.y += 15.0;
+                        msg = "HVR:".to_string()
+                            + pointer_pos.x.to_string().as_str()
+                            + ","
+                            + pointer_pos.y.to_string().as_str();
+                        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_BLUE, msg);
+                    }
+                    let vec = resp.drag_delta();
+                    if vec.length() != 0.0 {
+                        init_pos.y += 15.0;
+                        msg = "DRG:".to_string()
+                            + vec.to_pos2().x.to_string().as_str()
+                            + ","
+                            + vec.to_pos2().y.to_string().as_str();
+                        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GOLD, msg);
                     }
                 }
             //}
