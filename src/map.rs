@@ -108,7 +108,7 @@ impl Widget for &mut Map {
             #[cfg(feature = "puffin")]
             puffin::profile_scope!("paint_map");
 
-            if ui_obj.is_rect_visible(self.map_area.unwrap()) {
+            //if ui_obj.is_rect_visible(self.map_area.unwrap()) {
                 let (resp, paint) = ui_obj
                     .allocate_painter(self.map_area.unwrap().size(), egui::Sense::click_and_drag());
                 let vec = resp.drag_delta();
@@ -351,7 +351,7 @@ impl Widget for &mut Map {
                         }
                     }
                 }
-            }
+            //}
         });
         inner_response.response
     }
