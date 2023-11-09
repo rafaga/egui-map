@@ -54,55 +54,11 @@ impl Widget for &mut Map {
             self.map_area = Some(ui_obj.ctx().used_rect());
         }
 
-        let style_index = ui_obj.visuals().dark_mode as usize;
-
-        if self.current_index != style_index {
-            #[cfg(feature = "puffin")]
-            puffin::profile_scope!("asign_visual_style");
-
-            self.current_index = style_index;
-            self.style = ui_obj.style_mut().clone();
-            self.style.visuals.extreme_bg_color =
-                self.settings.styles[style_index].background_color;
-            self.style.visuals.window_stroke = self.settings.styles[style_index].border.unwrap();
-        }
+        self.asign_visual_style(ui_obj);
 
         let canvas = egui::Frame::canvas(ui_obj.style());
 
-        // capture MouseWheel Event for Zoom control change
-        ui_obj.input(|x| {
-            #[cfg(feature = "puffin")]
-            puffin::profile_scope!("capture_mouse_events");
-
-            if !x.events.is_empty() {
-                for event in &x.events {
-                    match event {
-                        Event::MouseWheel {
-                            unit: _,
-                            delta,
-                            modifiers,
-                        } => {
-                            let zoom_modifier = if modifiers.mac_cmd {
-                                delta.y / 80.00
-                            } else {
-                                delta.y / 400.00
-                            };
-                            let mut pre_zoom = self.zoom + zoom_modifier;
-                            if pre_zoom > self.settings.max_zoom {
-                                pre_zoom = self.settings.max_zoom;
-                            }
-                            if pre_zoom < self.settings.min_zoom {
-                                pre_zoom = self.settings.min_zoom;
-                            }
-                            self.zoom = pre_zoom;
-                        }
-                        _ => {
-                            continue;
-                        }
-                    };
-                }
-            }
-        });
+        self.capture_mouse_events(ui_obj);
 
         let inner_response = canvas.show(ui_obj, |ui_obj| {
             #[cfg(feature = "puffin")]
@@ -280,83 +236,13 @@ impl Widget for &mut Map {
                 }
 
                 if cfg!(debug_assertions) {
-
-                    #[cfg(feature = "puffin")]
-                    puffin::profile_scope!("printing debug data");
-
-                    let mut init_pos = Pos2::new(
-                        self.map_area.unwrap().left_top().x + 10.00,
-                        self.map_area.unwrap().left_top().y + 10.00,
-                    );
-                    let mut msg = "MIN:".to_string()
-                            + self.current.min.x.to_string().as_str()
-                            + ","
-                            + self.current.min.y.to_string().as_str();
-                    paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-                    init_pos.y += 15.0;
-                    msg = "MAX:".to_string()
-                        + self.current.max.x.to_string().as_str()
-                        + ","
-                        + self.current.max.y.to_string().as_str();
-                    paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-                    init_pos.y += 15.0;
-                    msg = "CUR:(".to_string()
-                        + self.current.pos.x.to_string().as_str()
-                        + ","
-                        + self.current.pos.y.to_string().as_str()
-                        + ")";
-                    paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-                    init_pos.y += 15.0;
-                    msg = "DST:".to_string() + self.current.dist.to_string().as_str();
-                    paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-                    init_pos.y += 15.0;
-                    msg = "ZOM:".to_string() + self.zoom.to_string().as_str();
-                    paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GREEN, msg);
-                    if let Some(rectz) = self.map_area {
-                        init_pos.y += 15.0;
-                        msg = "REC:(".to_string()
-                            + rectz.left_top().x.to_string().as_str()
-                            + ","
-                            + rectz.left_top().y.to_string().as_str()
-                            + "),("
-                            + rectz.right_bottom().x.to_string().as_str()
-                            + ","
-                            + rectz.right_bottom().y.to_string().as_str()
-                            + ")";
-                        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-                    }
-                    if let Some(points) = &self.points {
-                        init_pos.y += 15.0;
-                        msg = "NUM:".to_string() + points.len().to_string().as_str();
-                        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-                    }
-                    if let Some(vec_k) = self.visible_points.as_ref() {
-                        init_pos.y += 15.0;
-                        msg = "VIS:".to_string() + vec_k.len().to_string().as_str();
-                        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-                    }
-                    if let Some(pointer_pos) = resp.hover_pos() {
-                        init_pos.y += 15.0;
-                        msg = "HVR:".to_string()
-                            + pointer_pos.x.to_string().as_str()
-                            + ","
-                            + pointer_pos.y.to_string().as_str();
-                        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_BLUE, msg);
-                    }
-                    let vec = resp.drag_delta();
-                    if vec.length() != 0.0 {
-                        init_pos.y += 15.0;
-                        msg = "DRG:".to_string()
-                            + vec.to_pos2().x.to_string().as_str()
-                            + ","
-                            + vec.to_pos2().y.to_string().as_str();
-                        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GOLD, msg);
-                    }
+                    self.print_debug_info(paint,resp);
                 }
             //}
         });
         inner_response.response
     }
+
 }
 
 impl Map {
@@ -473,5 +359,131 @@ impl Map {
             self.reference.pos.x * self.zoom,
             self.reference.pos.y * self.zoom,
         );
+    }
+
+    fn capture_mouse_events(&mut self, ui_obj:&Ui){
+        // capture MouseWheel Event for Zoom control change
+        ui_obj.input(|x| {
+            #[cfg(feature = "puffin")]
+            puffin::profile_scope!("capture_mouse_events");
+
+            if !x.events.is_empty() {
+                for event in &x.events {
+                    match event {
+                        Event::MouseWheel {
+                            unit: _,
+                            delta,
+                            modifiers,
+                        } => {
+                            let zoom_modifier = if modifiers.mac_cmd {
+                                delta.y / 80.00
+                            } else {
+                                delta.y / 400.00
+                            };
+                            let mut pre_zoom = self.zoom + zoom_modifier;
+                            if pre_zoom > self.settings.max_zoom {
+                                pre_zoom = self.settings.max_zoom;
+                            }
+                            if pre_zoom < self.settings.min_zoom {
+                                pre_zoom = self.settings.min_zoom;
+                            }
+                            self.zoom = pre_zoom;
+                        }
+                        _ => {
+                            continue;
+                        }
+                    };
+                }
+            }
+        });
+    }
+
+    fn asign_visual_style(&mut self, ui_obj:&mut Ui) {
+        let style_index = ui_obj.visuals().dark_mode as usize;
+
+        if self.current_index != style_index {
+            #[cfg(feature = "puffin")]
+            puffin::profile_scope!("asign_visual_style");
+
+            self.current_index = style_index;
+            self.style = ui_obj.style_mut().clone();
+            self.style.visuals.extreme_bg_color =
+                self.settings.styles[style_index].background_color;
+            self.style.visuals.window_stroke = self.settings.styles[style_index].border.unwrap();
+        }
+    }
+
+    fn print_debug_info(&mut self,paint: Painter, resp: Response){
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("printing debug data");
+
+        let mut init_pos = Pos2::new(
+            self.map_area.unwrap().left_top().x + 10.00,
+            self.map_area.unwrap().left_top().y + 10.00,
+        );
+        let mut msg = "MIN:".to_string()
+                + self.current.min.x.to_string().as_str()
+                + ","
+                + self.current.min.y.to_string().as_str();
+        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+        init_pos.y += 15.0;
+        msg = "MAX:".to_string()
+            + self.current.max.x.to_string().as_str()
+            + ","
+            + self.current.max.y.to_string().as_str();
+        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+        init_pos.y += 15.0;
+        msg = "CUR:(".to_string()
+            + self.current.pos.x.to_string().as_str()
+            + ","
+            + self.current.pos.y.to_string().as_str()
+            + ")";
+        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+        init_pos.y += 15.0;
+        msg = "DST:".to_string() + self.current.dist.to_string().as_str();
+        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+        init_pos.y += 15.0;
+        msg = "ZOM:".to_string() + self.zoom.to_string().as_str();
+        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GREEN, msg);
+        if let Some(rectz) = self.map_area {
+            init_pos.y += 15.0;
+            msg = "REC:(".to_string()
+                + rectz.left_top().x.to_string().as_str()
+                + ","
+                + rectz.left_top().y.to_string().as_str()
+                + "),("
+                + rectz.right_bottom().x.to_string().as_str()
+                + ","
+                + rectz.right_bottom().y.to_string().as_str()
+                + ")";
+            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+        }
+        if let Some(points) = &self.points {
+            init_pos.y += 15.0;
+            msg = "NUM:".to_string() + points.len().to_string().as_str();
+            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+        }
+        if let Some(vec_k) = self.visible_points.as_ref() {
+            init_pos.y += 15.0;
+            msg = "VIS:".to_string() + vec_k.len().to_string().as_str();
+            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+        }
+        if let Some(pointer_pos) = resp.hover_pos() {
+            init_pos.y += 15.0;
+            msg = "HVR:".to_string()
+                + pointer_pos.x.to_string().as_str()
+                + ","
+                + pointer_pos.y.to_string().as_str();
+            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_BLUE, msg);
+        }
+        let vec = resp.drag_delta();
+        if vec.length() != 0.0 {
+            init_pos.y += 15.0;
+            msg = "DRG:".to_string()
+                + vec.to_pos2().x.to_string().as_str()
+                + ","
+                + vec.to_pos2().y.to_string().as_str();
+            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GOLD, msg);
+        }
     }
 }
