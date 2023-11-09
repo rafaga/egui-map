@@ -39,7 +39,7 @@ impl Widget for &mut Map {
     fn ui(self, ui_obj: &mut egui::Ui) -> Response {
         if !self.initialized {
             #[cfg(feature = "puffin")]
-            puffin::profile_scope!("map_init");
+            puffin::profile_scope!("map_ui_initialitize");
 
             let mut rng = thread_rng();
             let component_id: String = Alphanumeric
@@ -58,7 +58,7 @@ impl Widget for &mut Map {
 
         if self.current_index != style_index {
             #[cfg(feature = "puffin")]
-            puffin::profile_scope!("asign_visual_style");
+            puffin::profile_scope!("map_ui_assign_visual_style");
 
             self.current_index = style_index;
             self.style = ui_obj.style_mut().clone();
@@ -72,7 +72,7 @@ impl Widget for &mut Map {
         // capture MouseWheel Event for Zoom control change
         ui_obj.input(|x| {
             #[cfg(feature = "puffin")]
-            puffin::profile_scope!("capture_mouse_events");
+            puffin::profile_scope!("map_ui_capture_mouse_events");
 
             if !x.events.is_empty() {
                 for event in &x.events {
@@ -106,7 +106,7 @@ impl Widget for &mut Map {
 
         let inner_response = canvas.show(ui_obj, |ui_obj| {
             #[cfg(feature = "puffin")]
-            puffin::profile_scope!("paint_map");
+            puffin::profile_scope!("map_ui_paint_map");
 
             //if ui_obj.is_rect_visible(self.map_area.unwrap()) {
                 let (resp, paint) = ui_obj
@@ -114,7 +114,7 @@ impl Widget for &mut Map {
                 let vec = resp.drag_delta();
                 if vec.length() != 0.0 {
                     #[cfg(feature = "puffin")]
-                    puffin::profile_scope!("calculating_points_in_visible_area");
+                    puffin::profile_scope!("map_ui_calculating_points_in_visible_area");
 
                     let coords = (vec.to_pos2().x, vec.to_pos2().y);
                     self.set_pos(self.current.pos.x - coords.0, self.current.pos.y - coords.1);
@@ -123,14 +123,14 @@ impl Widget for &mut Map {
                 let map_style = self.settings.styles[self.current_index].clone() * self.zoom;
                 if self.zoom > self.settings.line_visible_zoom {
                     #[cfg(feature = "puffin")]
-                    puffin::profile_scope!("painting_lines");
+                    puffin::profile_scope!("map_ui_paint_permanent_lines");
                     for line in &self.lines {
                         paint.line_segment(line.points, map_style.line.unwrap());
                     }
                 }
                 if self.zoom < self.settings.line_visible_zoom {
                     #[cfg(feature = "puffin")]
-                    puffin::profile_scope!("painting_labels");
+                    puffin::profile_scope!("map_ui_paint_labels");
                     for label in &self.labels {
                         paint.text(
                             label.center,
