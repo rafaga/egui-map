@@ -77,13 +77,6 @@ impl Widget for &mut Map {
                 self.calculate_visible_points();
             }
             let map_style = self.settings.styles[self.current_index].clone() * self.zoom;
-            if self.zoom > self.settings.line_visible_zoom {
-                #[cfg(feature = "puffin")]
-                puffin::profile_scope!("painting_lines");
-                for line in &self.lines {
-                    paint.line_segment(line.points, map_style.line.unwrap());
-                }
-            }
             if self.zoom < self.settings.line_visible_zoom {
                 self.paint_labels(&paint,&map_style,&ui_obj);
             }
@@ -477,6 +470,9 @@ impl Map {
     }
 
     fn paint_map_lines(&self, vec_points:&Option<Vec<usize>>, hashm:&Option<HashMap<usize,MapPoint>>, paint: &Painter, map_style:&MapStyle, min_point:&Pos2) -> Result<(),()> {
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("paint_map_lines");
+
         if let None = hashm{
             return Err(());
         }
@@ -488,8 +484,6 @@ impl Map {
         if self.zoom > self.settings.line_visible_zoom {
             for temp_point in vec_points.as_ref().unwrap() {
                 if let Some(system) = hashm.as_ref().unwrap().get(&temp_point) {
-                    #[cfg(feature = "puffin")]
-                    puffin::profile_scope!("painting_lines_m");
                     let center = Pos2::new(
                         system.coords[0] as f32 * self.zoom,
                         system.coords[1] as f32 * self.zoom,
@@ -504,6 +498,9 @@ impl Map {
                         paint.line_segment([a_point, b_point], map_style.line.unwrap());
                     }
                 }
+            }
+            for line in &self.lines {
+                paint.line_segment(line.points, map_style.line.unwrap());
             }
         }
         Ok(())
