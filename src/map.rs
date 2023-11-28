@@ -103,8 +103,6 @@ impl Widget for &mut Map {
                 self.previous_zoom = self.zoom;
             }
 
-            self.paint_contextual_menu(&resp);
-
             self.hover_management(ui_obj,&paint,&resp);
 
             if cfg!(debug_assertions) {
@@ -415,10 +413,6 @@ impl Map {
                 }
             }
         }
-    }
-    
-
-    fn paint_contextual_menu(&mut self, resp: &Response) {
         if resp.secondary_clicked() {
             todo!();
         }
