@@ -78,7 +78,7 @@ impl Widget for &mut Map {
             }
             let map_style = self.settings.styles[self.current_index].clone() * self.zoom;
             if self.zoom < self.settings.line_visible_zoom {
-                self.paint_labels(&paint,&map_style,&ui_obj);
+                self.paint_labels(&paint,&map_style, ui_obj);
             }
 
             let vec_points = &self.visible_points;
@@ -90,8 +90,8 @@ impl Widget for &mut Map {
             let min_point =
                 Pos2::new(self.current.pos.x - factor.0, self.current.pos.y - factor.1);
 
-            let _a = self.paint_map_lines(vec_points, &hashm, &paint, &map_style,&min_point);
-            let _b = self.paint_map_points(vec_points, &hashm, &paint, ui_obj, &map_style,&min_point);
+            let _a = self.paint_map_lines(vec_points, hashm, &paint, &map_style,&min_point);
+            let _b = self.paint_map_points(vec_points, hashm, &paint, ui_obj, &map_style,&min_point);
             
             self.paint_sub_components(ui_obj, self.map_area.unwrap());
 
@@ -379,13 +379,13 @@ impl Map {
     } 
 
     fn hover_management(&mut self,ui_obj:&Ui,paint: &Painter,resp: &Response){
-        if resp.hovered() && self.settings.node_text_visibility == VisibilitySetting::Hover {
+        if self.settings.node_text_visibility == VisibilitySetting::Hover && resp.hovered(){
             #[cfg(feature = "puffin")]
             puffin::profile_scope!("hover mouse event in map");
-
             if let Some(pos) = resp.hover_pos() {
                 let point = [pos.x as f64, pos.y as f64];
-                if self.zoom > self.settings.label_visible_zoom {
+                if self.zoom > self.settings.label_visible_zoom 
+                {
                     if let Ok(map_point) =
                         self.tree
                             .as_ref()
@@ -420,16 +420,16 @@ impl Map {
 
     fn paint_map_points(&self, vec_points:&Option<Vec<usize>>, hashm:&Option<HashMap<usize,MapPoint>>, paint: &Painter, ui_obj:&Ui, map_style:&MapStyle, min_point:&Pos2) -> Result<(),()> {
         
-        if let None = hashm{
+        if hashm.is_none(){
             return Err(());
         }
-        if let None = vec_points {
+        if vec_points.is_none() {
             return Err(());
         }
 
         // Drawing Points
         for temp_point in vec_points.as_ref().unwrap() {
-            if let Some(system) = hashm.as_ref().unwrap().get(&temp_point) {
+            if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("painting_points_m");
                 let center = Pos2::new(
@@ -467,17 +467,17 @@ impl Map {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("paint_map_lines");
 
-        if let None = hashm{
+        if hashm.is_none(){
             return Err(());
         }
-        if let None = vec_points {
+        if vec_points.is_none() {
             return Err(());
         }
         
         // Drawing Lines
         if self.zoom > self.settings.line_visible_zoom {
             for temp_point in vec_points.as_ref().unwrap() {
-                if let Some(system) = hashm.as_ref().unwrap().get(&temp_point) {
+                if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
                     let center = Pos2::new(
                         system.coords[0] as f32 * self.zoom,
                         system.coords[1] as f32 * self.zoom,
