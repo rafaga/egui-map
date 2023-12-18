@@ -162,14 +162,14 @@ pub struct MapLine {
 
 impl Default for MapLine {
     fn default() -> Self {
-        MapLine::new()
+        MapLine::new(0.00,0.00,0.00,0.00)
     }
 }
 
 impl MapLine {
-    pub fn new() -> Self {
+    pub fn new(x1:f32, y1:f32, x2:f32, y2:f32) -> Self {
         MapLine {
-            points: [Pos2::new(0.00, 0.00), Pos2::new(0.00, 0.00)],
+            points: [Pos2::new(x1, y1), Pos2::new(x2, y2)],
         }
     }
 }
