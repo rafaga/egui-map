@@ -1,4 +1,4 @@
-use egui::{Color32, FontFamily, FontId, Pos2, Stroke};
+use egui::{Align2, Color32, FontFamily, FontId, Pos2, Stroke};
 use std::ops::{Div, Mul};
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
@@ -162,12 +162,12 @@ pub struct MapLine {
 
 impl Default for MapLine {
     fn default() -> Self {
-        MapLine::new(0.00,0.00,0.00,0.00)
+        MapLine::new(0.00, 0.00, 0.00, 0.00)
     }
 }
 
 impl MapLine {
-    pub fn new(x1:f32, y1:f32, x2:f32, y2:f32) -> Self {
+    pub fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
         MapLine {
             points: [Pos2::new(x1, y1), Pos2::new(x2, y2)],
         }
@@ -244,6 +244,15 @@ impl Default for MapBounds {
     fn default() -> Self {
         MapBounds::new()
     }
+}
+
+pub(crate) struct TextSettings {
+    pub position: Pos2,
+    pub anchor: Align2,
+    pub text: String,
+    pub size: f32,
+    pub family: FontFamily,
+    pub text_color: Color32,
 }
 
 pub struct MapSettings {
