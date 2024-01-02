@@ -420,8 +420,12 @@ impl Map {
         // detecting the nearest hover node
         if self.settings.node_text_visibility == VisibilitySetting::Hover && resp.hovered() {
             if let Some(point) = resp.hover_pos() {
+                let hovered_map_point = Pos2::new(
+                    point.x - min_point.x,
+                    point.y - min_point.y
+                );
                 if let Ok(nearest_node) = self.tree.as_ref().unwrap().nearest(
-                    &[point.x as f64, point.y as f64],
+                    &[hovered_map_point.x as f64, hovered_map_point.y as f64],
                     1,
                     &squared_euclidean,
                 ) {
