@@ -421,8 +421,8 @@ impl Map {
         if self.settings.node_text_visibility == VisibilitySetting::Hover && resp.hovered() {
             if let Some(point) = resp.hover_pos() {
                 let hovered_map_point = Pos2::new(
-                    point.x - min_point.x,
-                    point.y - min_point.y
+                    (min_point.x + point.x)/self.zoom ,
+                    (min_point.y + point.y)/self.zoom
                 );
                 if let Ok(nearest_node) = self.tree.as_ref().unwrap().nearest(
                     &[hovered_map_point.x as f64, hovered_map_point.y as f64],
