@@ -421,8 +421,8 @@ impl Map {
         if self.settings.node_text_visibility == VisibilitySetting::Hover && resp.hovered() {
             if let Some(point) = resp.hover_pos() {
                 let hovered_map_point = Pos2::new(
-                    (min_point.x + point.x)/self.zoom ,
-                    (min_point.y + point.y)/self.zoom
+                    (min_point.x + point.x) / self.zoom,
+                    (min_point.y + point.y) / self.zoom,
                 );
                 if let Ok(nearest_node) = self.tree.as_ref().unwrap().nearest(
                     &[hovered_map_point.x as f64, hovered_map_point.y as f64],
@@ -515,8 +515,16 @@ impl Map {
                 }
             }
             for line in &self.lines {
+                let a = Pos2::new(
+                    (line.points[0].x * self.zoom) - min_point.x,
+                    (line.points[0].y * self.zoom) - min_point.y,
+                );
+                let b = Pos2::new(
+                    (line.points[1].x * self.zoom) - min_point.x,
+                    (line.points[1].y * self.zoom) - min_point.y,
+                );
                 paint.line_segment(
-                    line.points,
+                    [a, b],
                     self.settings.styles[self.current_index].line.unwrap(),
                 );
             }
