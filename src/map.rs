@@ -497,20 +497,21 @@ impl Map {
         if self.zoom > self.settings.line_visible_zoom {
             for temp_point in vec_points.as_ref().unwrap() {
                 if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
-                    let center = Pos2::new(
-                        system.coords[0] as f32 * self.zoom,
-                        system.coords[1] as f32 * self.zoom,
+                    let a_point = Pos2::new(
+                        (system.coords[0] as f32 * self.zoom) - min_point.x,
+                        (system.coords[1] as f32 * self.zoom) - min_point.y,
                     );
-                    let a_point = Pos2::new(center.x - min_point.x, center.y - min_point.y);
                     for line in &system.lines {
                         let b_point = Pos2::new(
                             (line[0] as f32 * self.zoom) - min_point.x,
                             (line[1] as f32 * self.zoom) - min_point.y,
                         );
-                        paint.line_segment(
-                            [a_point, b_point],
-                            self.settings.styles[self.current_index].line.unwrap(),
-                        );
+                        {
+                            paint.line_segment(
+                                [a_point, b_point],
+                                self.settings.styles[self.current_index].line.unwrap(),
+                            );
+                        }
                     }
                 }
             }
