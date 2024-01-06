@@ -133,7 +133,7 @@ impl Widget for &mut Map {
 
 impl Map {
     pub fn new() -> Self {
-        let settings = MapSettings::new();
+        let settings = MapSettings::default();
         Map {
             zoom: 1.0,
             previous_zoom: 1.0,
