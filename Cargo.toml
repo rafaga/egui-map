@@ -40,7 +40,7 @@ default = []
 puffin = ["dep:puffin"]
 
 [dependencies]
-egui = { version = "0.24", features = ["bytemuck", "cint", "persistence", "serde", "deadlock_detection", "color-hex"]}
+egui = { version = "0.25", features = ["bytemuck", "cint", "persistence", "serde", "deadlock_detection", "color-hex"]}
 kdtree = { version = "0.7.0", features = ["serde", "serde_derive", "serialize"] }
 rand = "0.8.5"
 serde = { version = "1.0", features = ["serde_derive"] }
