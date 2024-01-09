@@ -19,8 +19,7 @@ pub struct Map {
     labels: Vec<MapLabel>,
     tree: Option<KdTree<f64, usize, [f64; 2]>>,
     visible_points: Option<Vec<usize>>,
-    map_area: Option<Rect>,
-    initialized: bool,
+    map_area: Rect,
     reference: MapBounds,
     current: MapBounds,
     style: egui::Style,
@@ -36,13 +35,7 @@ impl Default for Map {
 
 impl Widget for &mut Map {
     fn ui(self, ui: &mut egui::Ui) -> Response {
-        if !self.initialized {
-            #[cfg(feature = "puffin")]
-            puffin::profile_scope!("map_init");
-            self.map_area = Some(ui.available_rect_before_wrap());
-        } else {
-            self.map_area = Some(ui.ctx().used_rect());
-        }
+        self.map_area = ui.available_rect_before_wrap();
 
         self.asign_visual_style(ui);
 
@@ -54,9 +47,9 @@ impl Widget for &mut Map {
             #[cfg(feature = "puffin")]
             puffin::profile_scope!("paint_map");
 
-            //if ui_obj.is_rect_visible(self.map_area.unwrap()) {
+            //if ui_obj.is_rect_visible(self.map_area) {
             let (resp, paint) = ui
-                .allocate_painter(self.map_area.unwrap().size(), egui::Sense::click_and_drag());
+                .allocate_painter(self.map_area.size(), egui::Sense::click_and_drag());
             let vec = resp.drag_delta();
             if vec.length() != 0.0 {
                 #[cfg(feature = "puffin")]
@@ -93,15 +86,15 @@ impl Widget for &mut Map {
             let vec_points = &self.visible_points;
             let hashm = &self.points;
             let factor = (
-                self.map_area.unwrap().center().x + self.map_area.unwrap().min.x,
-                self.map_area.unwrap().center().y + self.map_area.unwrap().min.y,
+                self.map_area.center().x + self.map_area.min.x,
+                self.map_area.center().y + self.map_area.min.y,
             );
             let min_point = Pos2::new(self.current.pos.x - factor.0, self.current.pos.y - factor.1);
 
             let _a = self.paint_map_lines(vec_points, hashm, &paint, &min_point);
             let _b = self.paint_map_points(vec_points, hashm, &paint, ui, &min_point, &resp);
 
-            self.paint_sub_components(ui, self.map_area.unwrap());
+            self.paint_sub_components(ui, self.map_area);
 
             if self.zoom != self.previous_zoom {
                 #[cfg(feature = "puffin")]
@@ -136,13 +129,12 @@ impl Map {
         Map {
             zoom: 1.0,
             previous_zoom: 1.0,
-            map_area: None,
+            map_area: Rect::NOTHING,
             tree: None,
             points: None,
             lines: Vec::new(),
             labels: Vec::new(),
             visible_points: None,
-            initialized: false,
             current: MapBounds::default(),
             reference: MapBounds::default(),
             settings,
@@ -204,11 +196,11 @@ impl Map {
         self.tree = Some(tree);
         let rect = Rect::from_min_max(self.reference.min, self.reference.max);
         self.reference.pos = rect.center();
-        let dist_x = (self.map_area.unwrap().right_bottom().x as f64
-            - self.map_area.unwrap().left_top().x as f64)
+        let dist_x = (self.map_area.right_bottom().x as f64
+            - self.map_area.left_top().x as f64)
             / 2.0;
-        let dist_y = (self.map_area.unwrap().right_bottom().y as f64
-            - self.map_area.unwrap().left_top().y as f64)
+        let dist_y = (self.map_area.right_bottom().y as f64
+            - self.map_area.left_top().y as f64)
             / 2.0;
         self.reference.dist = (dist_x.powi(2) + dist_y.powi(2) / 2.0).sqrt();
         self.current = self.reference.clone();
@@ -303,8 +295,8 @@ impl Map {
         puffin::profile_scope!("printing debug data");
 
         let mut init_pos = Pos2::new(
-            self.map_area.unwrap().left_top().x + 10.00,
-            self.map_area.unwrap().left_top().y + 10.00,
+            self.map_area.left_top().x + 10.00,
+            self.map_area.left_top().y + 10.00,
         );
         let mut msg = "MIN:".to_string()
             + self.current.min.x.to_string().as_str()
@@ -330,19 +322,17 @@ impl Map {
         init_pos.y += 15.0;
         msg = "ZOM:".to_string() + self.zoom.to_string().as_str();
         paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GREEN, msg);
-        if let Some(rectz) = self.map_area {
-            init_pos.y += 15.0;
-            msg = "REC:(".to_string()
-                + rectz.left_top().x.to_string().as_str()
-                + ","
-                + rectz.left_top().y.to_string().as_str()
-                + "),("
-                + rectz.right_bottom().x.to_string().as_str()
-                + ","
-                + rectz.right_bottom().y.to_string().as_str()
-                + ")";
-            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-        }
+        init_pos.y += 15.0;
+        msg = "REC:(".to_string()
+            + self.map_area.left_top().x.to_string().as_str()
+            + ","
+            + self.map_area.left_top().y.to_string().as_str()
+            + "),("
+            + self.map_area.right_bottom().x.to_string().as_str()
+            + ","
+            + self.map_area.right_bottom().y.to_string().as_str()
+            + ")";
+        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
         if let Some(points) = &self.points {
             init_pos.y += 15.0;
             msg = "NUM:".to_string() + points.len().to_string().as_str();
