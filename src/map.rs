@@ -2,8 +2,8 @@ use crate::map::objects::*;
 use egui::{widgets::*, *};
 use kdtree::distance::squared_euclidean;
 use kdtree::KdTree;
-use rand::distributions::{Alphanumeric, Distribution};
-use rand::thread_rng;
+//use rand::distributions::{Alphanumeric, Distribution};
+//use rand::thread_rng;
 use std::collections::HashMap;
 
 pub mod objects;
@@ -35,36 +35,27 @@ impl Default for Map {
 }
 
 impl Widget for &mut Map {
-    fn ui(self, ui_obj: &mut egui::Ui) -> Response {
+    fn ui(self, ui: &mut egui::Ui) -> Response {
         if !self.initialized {
             #[cfg(feature = "puffin")]
             puffin::profile_scope!("map_init");
-
-            let mut rng = thread_rng();
-            let component_id: String = Alphanumeric
-                .sample_iter(&mut rng)
-                .take(15)
-                .map(char::from)
-                .collect();
-            // TODO:use this variable
-            let _idx = egui::Id::new(component_id);
-            self.map_area = Some(ui_obj.available_rect_before_wrap());
+            self.map_area = Some(ui.available_rect_before_wrap());
         } else {
-            self.map_area = Some(ui_obj.ctx().used_rect());
+            self.map_area = Some(ui.ctx().used_rect());
         }
 
-        self.asign_visual_style(ui_obj);
+        self.asign_visual_style(ui);
 
-        let canvas = egui::Frame::canvas(ui_obj.style());
+        let canvas = egui::Frame::canvas(ui.style());
 
-        self.capture_mouse_events(ui_obj);
+        self.capture_mouse_events(ui);
 
-        let inner_response = canvas.show(ui_obj, |ui_obj| {
+        let inner_response = canvas.show(ui, |ui| {
             #[cfg(feature = "puffin")]
             puffin::profile_scope!("paint_map");
 
             //if ui_obj.is_rect_visible(self.map_area.unwrap()) {
-            let (resp, paint) = ui_obj
+            let (resp, paint) = ui
                 .allocate_painter(self.map_area.unwrap().size(), egui::Sense::click_and_drag());
             let vec = resp.drag_delta();
             if vec.length() != 0.0 {
@@ -84,7 +75,7 @@ impl Widget for &mut Map {
                     family: FontFamily::Proportional,
                     text: String::new(),
                     position: Pos2::new(0.00, 0.00),
-                    text_color: ui_obj.visuals().text_color(),
+                    text_color: ui.visuals().text_color(),
                 };
                 for label in &self.labels {
                     text_settings.text = label.text.clone();
@@ -93,7 +84,7 @@ impl Widget for &mut Map {
                         Align2::CENTER_CENTER,
                         label.text.as_str(),
                         map_style.font.clone().unwrap(),
-                        ui_obj.visuals().text_color(),
+                        ui.visuals().text_color(),
                     );
                     self.paint_label(&paint, &text_settings);
                 }
@@ -108,9 +99,9 @@ impl Widget for &mut Map {
             let min_point = Pos2::new(self.current.pos.x - factor.0, self.current.pos.y - factor.1);
 
             let _a = self.paint_map_lines(vec_points, hashm, &paint, &min_point);
-            let _b = self.paint_map_points(vec_points, hashm, &paint, ui_obj, &min_point, &resp);
+            let _b = self.paint_map_points(vec_points, hashm, &paint, ui, &min_point, &resp);
 
-            self.paint_sub_components(ui_obj, self.map_area.unwrap());
+            self.paint_sub_components(ui, self.map_area.unwrap());
 
             if self.zoom != self.previous_zoom {
                 #[cfg(feature = "puffin")]
@@ -120,7 +111,7 @@ impl Widget for &mut Map {
                 self.previous_zoom = self.zoom;
             }
 
-            self.hover_management(ui_obj, &paint, &resp);
+            self.hover_management(ui, &paint, &resp);
 
             if cfg!(debug_assertions) {
                 self.print_debug_info(paint, resp);
@@ -134,6 +125,14 @@ impl Widget for &mut Map {
 impl Map {
     pub fn new() -> Self {
         let settings = MapSettings::default();
+        /*let mut rng = thread_rng();
+        let component_id: String = Alphanumeric
+            .sample_iter(&mut rng)
+            .take(15)
+            .map(char::from)
+            .collect();
+        // TODO:use this variable
+        let _idx = egui::Id::new(component_id);*/
         Map {
             zoom: 1.0,
             previous_zoom: 1.0,
