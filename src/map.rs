@@ -18,7 +18,7 @@ pub struct Map {
     lines: Vec<MapLine>,
     labels: Vec<MapLabel>,
     tree: Option<KdTree<f64, usize, [f64; 2]>>,
-    visible_points: Option<Vec<usize>>,
+    visible_points: Vec<usize>,
     map_area: Rect,
     reference: MapBounds,
     current: MapBounds,
@@ -134,7 +134,7 @@ impl Map {
             points: None,
             lines: Vec::new(),
             labels: Vec::new(),
-            visible_points: None,
+            visible_points: Vec::new(),
             current: MapBounds::default(),
             reference: MapBounds::default(),
             settings,
@@ -154,11 +154,10 @@ impl Map {
                 ];
                 let radius = self.current.dist.powi(2);
                 let vis_pos = tree.within(&center, radius, &squared_euclidean).unwrap();
-                let mut visible_points = vec![];
+                self.visible_points.clear();
                 for point in vis_pos {
-                    visible_points.push(*point.1);
+                    self.visible_points.push(*point.1);
                 }
-                self.visible_points = Some(visible_points);
             }
         }
     }
@@ -223,7 +222,7 @@ impl Map {
     }
 
     pub fn add_lines(&mut self, lines: Vec<MapLine>) {
-        self.lines = lines
+        self.lines = lines;
     }
 
     fn adjust_bounds(&mut self) {
@@ -238,9 +237,9 @@ impl Map {
         );
     }
 
-    fn capture_mouse_events(&mut self, ui_obj: &Ui) {
+    fn capture_mouse_events(&mut self, ui: &Ui) {
         // capture MouseWheel Event for Zoom control change
-        ui_obj.input(|x| {
+        ui.input(|x| {
             #[cfg(feature = "puffin")]
             puffin::profile_scope!("capture_mouse_events");
 
@@ -338,9 +337,9 @@ impl Map {
             msg = "NUM:".to_string() + points.len().to_string().as_str();
             paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
         }
-        if let Some(vec_k) = self.visible_points.as_ref() {
+        if !self.visible_points.is_empty() {
             init_pos.y += 15.0;
-            msg = "VIS:".to_string() + vec_k.len().to_string().as_str();
+            msg = "VIS:".to_string() + self.visible_points.len().to_string().as_str();
             paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
         }
         if let Some(pointer_pos) = resp.hover_pos() {
@@ -392,7 +391,7 @@ impl Map {
 
     fn paint_map_points(
         &self,
-        vec_points: &Option<Vec<usize>>,
+        vec_points: &Vec<usize>,
         hashm: &Option<HashMap<usize, MapPoint>>,
         paint: &Painter,
         ui_obj: &Ui,
@@ -403,7 +402,7 @@ impl Map {
         if hashm.is_none() {
             return Err(());
         }
-        if vec_points.is_none() {
+        if vec_points.is_empty() {
             return Err(());
         }
         // detecting the nearest hover node
@@ -433,7 +432,7 @@ impl Map {
         };
 
         // Drawing Points
-        for temp_point in vec_points.as_ref().unwrap() {
+        for temp_point in vec_points {
             if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("painting_points_m");
@@ -467,7 +466,7 @@ impl Map {
 
     fn paint_map_lines(
         &self,
-        vec_points: &Option<Vec<usize>>,
+        vec_points: &Vec<usize>,
         hashm: &Option<HashMap<usize, MapPoint>>,
         paint: &Painter,
         min_point: &Pos2,
@@ -478,13 +477,13 @@ impl Map {
         if hashm.is_none() {
             return Err(());
         }
-        if vec_points.is_none() {
+        if vec_points.is_empty() {
             return Err(());
         }
 
         // Drawing Lines
         if self.zoom > self.settings.line_visible_zoom {
-            for temp_point in vec_points.as_ref().unwrap() {
+            for temp_point in vec_points {
                 if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
                     let a_point = Pos2::new(
                         (system.coords[0] as f32 * self.zoom) - min_point.x,
