@@ -54,8 +54,9 @@ impl Widget for &mut Map {
             if vec.length() != 0.0 {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("calculating_points_in_visible_area");
-
+                
                 let coords = (vec.to_pos2().x, vec.to_pos2().y);
+
                 self.set_pos(self.current.pos.x - coords.0, self.current.pos.y - coords.1);
                 self.calculate_visible_points();
             }
@@ -118,14 +119,6 @@ impl Widget for &mut Map {
 impl Map {
     pub fn new() -> Self {
         let settings = MapSettings::default();
-        /*let mut rng = thread_rng();
-        let component_id: String = Alphanumeric
-            .sample_iter(&mut rng)
-            .take(15)
-            .map(char::from)
-            .collect();
-        // TODO:use this variable
-        let _idx = egui::Id::new(component_id);*/
         Map {
             zoom: 1.0,
             previous_zoom: 1.0,
@@ -251,11 +244,20 @@ impl Map {
                             delta,
                             modifiers,
                         } => {
+                            #[cfg(target_os = "macos")]
                             let zoom_modifier = if modifiers.mac_cmd {
                                 delta.y / 80.00
                             } else {
                                 delta.y / 400.00
                             };
+
+                            #[cfg(not(target_os = "macos"))]
+                            let zoom_modifier = if modifiers.ctrl {
+                                delta.y / 8.00
+                            } else {
+                                delta.y / 40.00
+                            };
+
                             let mut pre_zoom = self.zoom + zoom_modifier;
                             if pre_zoom > self.settings.max_zoom {
                                 pre_zoom = self.settings.max_zoom;
@@ -503,7 +505,8 @@ impl Map {
                     }
                 }
             }
-            for line in &self.lines {
+            // check this
+            /*for line in &self.lines {
                 let a = Pos2::new(
                     (line.points[0].x * self.zoom) - min_point.x,
                     (line.points[0].y * self.zoom) - min_point.y,
@@ -516,7 +519,7 @@ impl Map {
                     [a, b],
                     self.settings.styles[self.current_index].line.unwrap(),
                 );
-            }
+            }*/
         }
         Ok(())
     }
