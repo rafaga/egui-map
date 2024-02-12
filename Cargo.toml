@@ -40,7 +40,7 @@ default = []
 puffin = ["dep:puffin"]
 
 [dependencies]
-egui = { version = "0.25", features = ["bytemuck", "log"]}
+egui = { version = "0.26", features = ["bytemuck", "log"]}
 kdtree = { version = "0.7.0" }
 # rand = "0.8.5"
 puffin = { version = "0.18", optional=true, default-features = false}
