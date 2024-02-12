@@ -206,6 +206,76 @@ impl MapPoint {
     }
 }
 
+impl Mul<f64> for MapPoint {
+    
+    type Output = Self;
+
+    fn mul(mut self, rhs: f64) -> Self::Output {
+        self.coords[0] *= rhs;
+        self.coords[1] *= rhs;
+        self.coords[2] *= rhs;
+        for indx in 0..self.lines.len() {
+            self.lines[indx][0] *= rhs;
+            self.lines[indx][1] *= rhs;
+            self.lines[indx][2] *= rhs;
+        }
+        self
+    }
+}
+
+impl Mul<f32> for MapPoint {
+    
+    type Output = Self;
+
+    fn mul(mut self, rhs: f32) -> Self::Output {
+        self.coords[0] *= rhs as f64;
+        self.coords[1] *= rhs as f64;
+        self.coords[2] *= rhs as f64;
+        for indx in 0..self.lines.len() {
+            self.lines[indx][0] *= rhs as f64;
+            self.lines[indx][1] *= rhs as f64;
+            self.lines[indx][2] *= rhs as f64;
+        }
+        self
+    }
+
+}
+
+impl Div<f64> for MapPoint {
+    
+    type Output = Self;
+
+    fn div(mut self, rhs: f64) -> Self::Output {
+        self.coords[0] /= rhs;
+        self.coords[1] /= rhs;
+        self.coords[2] /= rhs;
+        for indx in 0..self.lines.len() {
+            self.lines[indx][0] /= rhs;
+            self.lines[indx][1] /= rhs;
+            self.lines[indx][2] /= rhs;
+        }
+        self
+    }
+}
+
+impl Div<f32> for MapPoint {
+    
+    type Output = Self;
+
+    fn div(mut self, rhs: f32) -> Self::Output {
+        self.coords[0] /= rhs as f64;
+        self.coords[1] /= rhs as f64;
+        self.coords[2] /= rhs as f64;
+        for indx in 0..self.lines.len() {
+            self.lines[indx][0] /= rhs as f64;
+            self.lines[indx][1] /= rhs as f64;
+            self.lines[indx][2] /= rhs as f64;
+        }
+        self
+    }
+
+}
+
 impl From<std::collections::hash_map::OccupiedEntry<'_, usize, MapPoint>> for MapPoint {
     fn from(value: std::collections::hash_map::OccupiedEntry<'_, usize, MapPoint>) -> Self {
         let k = value.get();

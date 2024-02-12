@@ -2,17 +2,22 @@ use crate::map::objects::*;
 use egui::{widgets::*, *};
 use kdtree::distance::squared_euclidean;
 use kdtree::KdTree;
+use std::collections::hash_map::Entry;
 //use rand::distributions::{Alphanumeric, Distribution};
 //use rand::thread_rng;
 use std::collections::HashMap;
+use std::fmt::Error;
+
+
+use self::animation::AnimationManager;
 
 pub mod objects;
-
+pub mod animation;
 // This can by any object or point with its associated metadata
 /// Struct that contains coordinates to help calculate nearest point in space
 
 pub struct Map {
-    pub zoom: f32,
+    zoom: f32,
     previous_zoom: f32,
     points: Option<HashMap<usize, MapPoint>>,
     lines: Vec<MapLine>,
@@ -24,6 +29,7 @@ pub struct Map {
     current: MapBounds,
     style: egui::Style,
     current_index: usize,
+    animon: AnimationManager,
     pub settings: MapSettings,
 }
 
@@ -48,13 +54,13 @@ impl Widget for &mut Map {
             puffin::profile_scope!("paint_map");
 
             //if ui_obj.is_rect_visible(self.map_area) {
-            let (resp, paint) = ui
-                .allocate_painter(self.map_area.size(), egui::Sense::click_and_drag());
+            let (resp, paint) =
+                ui.allocate_painter(self.map_area.size(), egui::Sense::click_and_drag());
             let vec = resp.drag_delta();
             if vec.length() != 0.0 {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("calculating_points_in_visible_area");
-                
+
                 let coords = (vec.to_pos2().x, vec.to_pos2().y);
 
                 self.set_pos(self.current.pos.x - coords.0, self.current.pos.y - coords.1);
@@ -64,7 +70,7 @@ impl Widget for &mut Map {
             if self.zoom < self.settings.line_visible_zoom {
                 // filling text settings
                 let mut text_settings = TextSettings {
-                    size: 12.00 * self.zoom,
+                    size: 12.00 * self.zoom * 2.00,
                     anchor: Align2::CENTER_CENTER,
                     family: FontFamily::Proportional,
                     text: String::new(),
@@ -107,6 +113,9 @@ impl Widget for &mut Map {
 
             self.hover_management(ui, &paint, &resp);
 
+            // paint notification
+            self.paint_notifications();
+
             if cfg!(debug_assertions) {
                 self.print_debug_info(paint, resp);
             }
@@ -119,7 +128,7 @@ impl Widget for &mut Map {
 impl Map {
     pub fn new() -> Self {
         let settings = MapSettings::default();
-        Map {
+        Self {
             zoom: 1.0,
             previous_zoom: 1.0,
             map_area: Rect::NOTHING,
@@ -130,6 +139,7 @@ impl Map {
             visible_points: Vec::new(),
             current: MapBounds::default(),
             reference: MapBounds::default(),
+            animon: AnimationManager::new(),
             settings,
             current_index: 0,
             style: egui::Style::default(),
@@ -153,6 +163,12 @@ impl Map {
                 }
             }
         }
+    }
+
+    fn paint_notifications(&self) {
+        //for indx in 0..self.notifications.len(){
+            //Animation::animate(self.notifications[indx]);
+        //}
     }
 
     pub fn add_hashmap_points(&mut self, hash_map: HashMap<usize, MapPoint>) {
@@ -188,12 +204,10 @@ impl Map {
         self.tree = Some(tree);
         let rect = Rect::from_min_max(self.reference.min, self.reference.max);
         self.reference.pos = rect.center();
-        let dist_x = (self.map_area.right_bottom().x as f64
-            - self.map_area.left_top().x as f64)
-            / 2.0;
-        let dist_y = (self.map_area.right_bottom().y as f64
-            - self.map_area.left_top().y as f64)
-            / 2.0;
+        let dist_x =
+            (self.map_area.right_bottom().x as f64 - self.map_area.left_top().x as f64) / 2.0;
+        let dist_y =
+            (self.map_area.right_bottom().y as f64 - self.map_area.left_top().y as f64) / 2.0;
         self.reference.dist = (dist_x.powi(2) + dist_y.powi(2) / 2.0).sqrt();
         self.current = self.reference.clone();
         self.calculate_visible_points();
@@ -210,12 +224,28 @@ impl Map {
         }
     }
 
+    pub fn get_pos(self) -> Pos2 {
+        self.current.pos
+    }
+
     pub fn add_labels(&mut self, labels: Vec<MapLabel>) {
-        self.labels = labels;
+        let mut converted_labels = Vec::new();
+        for mut label in labels {
+            label.center[0] *= -1.00;
+            label.center[1] *= -1.00;
+            converted_labels.push(label);
+        }
+        self.labels = converted_labels;
     }
 
     pub fn add_lines(&mut self, lines: Vec<MapLine>) {
-        self.lines = lines;
+        let mut converted_lines = Vec::new();
+        for mut line in lines {
+            line.points[0] = line.points[0] * -1.00;
+            line.points[1] = line.points[1] * -1.00;
+            converted_lines.push(line);
+        }
+        self.lines = converted_lines;
     }
 
     fn adjust_bounds(&mut self) {
@@ -274,6 +304,16 @@ impl Map {
                 }
             }
         });
+    }
+
+    pub fn set_zoom(mut self, value: f32) {
+        if value >= self.settings.min_zoom && value <= self.settings.max_zoom {
+            self.zoom = value;
+        }
+    }
+
+    pub fn  get_zoom(self) -> f32 {
+        self.zoom
     }
 
     fn asign_visual_style(&mut self, ui_obj: &mut Ui) {
@@ -486,6 +526,14 @@ impl Map {
         // Drawing Lines
         if self.zoom > self.settings.line_visible_zoom {
             for temp_point in vec_points {
+                let mut stroke = self.settings.styles[self.current_index].line.unwrap();
+                if self.zoom - self.settings.line_visible_zoom <= 0.20 {
+                    let mut tup_stroke = self.settings.styles[self.current_index].line.unwrap().color.to_tuple();
+                    let transparency = (self.zoom - self.settings.line_visible_zoom) / 0.20;
+                    tup_stroke.3 = (tup_stroke.3 as f32 / transparency).round() as u8;
+                    let color = Color32::from_rgba_unmultiplied(tup_stroke.0,tup_stroke.1,tup_stroke.2,tup_stroke.3);
+                    stroke = Stroke::new(self.settings.styles[self.current_index].line.unwrap().width,color);
+                }
                 if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
                     let a_point = Pos2::new(
                         (system.coords[0] as f32 * self.zoom) - min_point.x,
@@ -499,14 +547,14 @@ impl Map {
                         {
                             paint.line_segment(
                                 [a_point, b_point],
-                                self.settings.styles[self.current_index].line.unwrap(),
+                                stroke,
                             );
                         }
                     }
                 }
             }
-            // check this
-            /*for line in &self.lines {
+            // Drawing permanent lines
+            for line in &self.lines {
                 let a = Pos2::new(
                     (line.points[0].x * self.zoom) - min_point.x,
                     (line.points[0].y * self.zoom) - min_point.y,
@@ -519,7 +567,7 @@ impl Map {
                     [a, b],
                     self.settings.styles[self.current_index].line.unwrap(),
                 );
-            }*/
+            }
         }
         Ok(())
     }
@@ -535,4 +583,18 @@ impl Map {
             text_settings.text_color,
         );
     }
+
+    pub fn notify(mut self,id_node: usize,center_map:bool) ->Result<bool,Error> {
+        if let Entry::Occupied(system_entry) = self.points.clone().unwrap().entry(id_node){
+            if center_map == true {       
+                let system = system_entry.get();
+                self.set_pos(system.coords[0] as f32, system.coords[1] as f32);
+            }
+        }
+        else{
+            //self.notifications.push((id_node,Utc::now()));
+        }
+        Ok(true)
+    }
+
 }
