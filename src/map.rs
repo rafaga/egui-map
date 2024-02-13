@@ -7,7 +7,8 @@ use std::collections::hash_map::Entry;
 //use rand::thread_rng;
 use std::collections::HashMap;
 use std::fmt::Error;
-
+use std::time::Instant;
+use crate::map::animation::AnimationPoint;
 
 use self::animation::AnimationManager;
 
@@ -114,7 +115,7 @@ impl Widget for &mut Map {
             self.hover_management(ui, &paint, &resp);
 
             // paint notification
-            self.paint_notifications();
+            self.animon.animation_loop(ui);
 
             if cfg!(debug_assertions) {
                 self.print_debug_info(paint, resp);
@@ -163,12 +164,6 @@ impl Map {
                 }
             }
         }
-    }
-
-    fn paint_notifications(&self) {
-        //for indx in 0..self.notifications.len(){
-            //Animation::animate(self.notifications[indx]);
-        //}
     }
 
     pub fn add_hashmap_points(&mut self, hash_map: HashMap<usize, MapPoint>) {
@@ -586,10 +581,12 @@ impl Map {
 
     pub fn notify(mut self,id_node: usize,center_map:bool) ->Result<bool,Error> {
         if let Entry::Occupied(system_entry) = self.points.clone().unwrap().entry(id_node){
+            let system = system_entry.get();
             if center_map == true {       
-                let system = system_entry.get();
                 self.set_pos(system.coords[0] as f32, system.coords[1] as f32);
             }
+            let node = AnimationPoint::new(system.coords[0] as f32, system.coords[1] as f32,Instant::now());
+            self.animon.notifications.push(node);
         }
         else{
             //self.notifications.push((id_node,Utc::now()));
