@@ -1,19 +1,16 @@
-use crate::map::objects::*;
+use crate::map::animation::Animation;
+use crate::map::objects::{
+    MapBounds, MapLabel, MapLine, MapPoint, MapSettings, TextSettings, VisibilitySetting,
+};
 use egui::{widgets::*, *};
 use kdtree::distance::squared_euclidean;
 use kdtree::KdTree;
-use std::collections::hash_map::Entry;
-//use rand::distributions::{Alphanumeric, Distribution};
-//use rand::thread_rng;
 use std::collections::HashMap;
 use std::fmt::Error;
 use std::time::Instant;
-use crate::map::animation::AnimationPoint;
 
-use self::animation::AnimationManager;
-
-pub mod objects;
 pub mod animation;
+pub mod objects;
 // This can by any object or point with its associated metadata
 /// Struct that contains coordinates to help calculate nearest point in space
 
@@ -30,7 +27,7 @@ pub struct Map {
     current: MapBounds,
     style: egui::Style,
     current_index: usize,
-    animon: AnimationManager,
+    entities: HashMap<usize, Instant>,
     pub settings: MapSettings,
 }
 
@@ -91,16 +88,24 @@ impl Widget for &mut Map {
                 }
             }
 
-            let vec_points = &self.visible_points;
-            let hashm = &self.points;
+            //let vec_points = &self.visible_points;
+            //let hashm = &self.points;
             let factor = (
                 self.map_area.center().x + self.map_area.min.x,
                 self.map_area.center().y + self.map_area.min.y,
             );
             let min_point = Pos2::new(self.current.pos.x - factor.0, self.current.pos.y - factor.1);
 
+            let vec_points = &self.visible_points;
+            let hashm = &self.points;
             let _a = self.paint_map_lines(vec_points, hashm, &paint, &min_point);
-            let _b = self.paint_map_points(vec_points, hashm, &paint, ui, &min_point, &resp);
+            if let Ok(nodes_to_remove) =
+                self.paint_map_points(vec_points, hashm, &paint, ui, &min_point, &resp)
+            {
+                for node in nodes_to_remove {
+                    self.entities.remove(&node);
+                }
+            }
 
             self.paint_sub_components(ui, self.map_area);
 
@@ -113,9 +118,6 @@ impl Widget for &mut Map {
             }
 
             self.hover_management(ui, &paint, &resp);
-
-            // paint notification
-            self.animon.animation_loop(ui);
 
             if cfg!(debug_assertions) {
                 self.print_debug_info(paint, resp);
@@ -140,9 +142,9 @@ impl Map {
             visible_points: Vec::new(),
             current: MapBounds::default(),
             reference: MapBounds::default(),
-            animon: AnimationManager::new(),
             settings,
             current_index: 0,
+            entities: HashMap::new(),
             style: egui::Style::default(),
         }
     }
@@ -307,7 +309,7 @@ impl Map {
         }
     }
 
-    pub fn  get_zoom(self) -> f32 {
+    pub fn get_zoom(self) -> f32 {
         self.zoom
     }
 
@@ -434,8 +436,10 @@ impl Map {
         ui_obj: &Ui,
         min_point: &Pos2,
         resp: &Response,
-    ) -> Result<(), ()> {
+    ) -> Result<Vec<usize>, ()> {
         let mut nearest_id = None;
+        let mut nodes_to_remove = Vec::new();
+
         if hashm.is_none() {
             return Err(());
         }
@@ -496,9 +500,15 @@ impl Map {
                     self.settings.styles[self.current_index].fill_color,
                     self.settings.styles[self.current_index].border.unwrap(),
                 );
+                if let Some(init_time) = self.entities.get(&system.id) {
+                    let position = Pos2::new(system.coords[0] as f32, system.coords[1] as f32);
+                    if let Ok(false) = Animation::pulse(ui_obj, position, self.zoom, *init_time) {
+                        nodes_to_remove.push(system.id);
+                    }
+                }
             }
         }
-        Ok(())
+        Ok(nodes_to_remove)
     }
 
     fn paint_map_lines(
@@ -523,11 +533,23 @@ impl Map {
             for temp_point in vec_points {
                 let mut stroke = self.settings.styles[self.current_index].line.unwrap();
                 if self.zoom - self.settings.line_visible_zoom <= 0.20 {
-                    let mut tup_stroke = self.settings.styles[self.current_index].line.unwrap().color.to_tuple();
+                    let mut tup_stroke = self.settings.styles[self.current_index]
+                        .line
+                        .unwrap()
+                        .color
+                        .to_tuple();
                     let transparency = (self.zoom - self.settings.line_visible_zoom) / 0.20;
                     tup_stroke.3 = (tup_stroke.3 as f32 / transparency).round() as u8;
-                    let color = Color32::from_rgba_unmultiplied(tup_stroke.0,tup_stroke.1,tup_stroke.2,tup_stroke.3);
-                    stroke = Stroke::new(self.settings.styles[self.current_index].line.unwrap().width,color);
+                    let color = Color32::from_rgba_unmultiplied(
+                        tup_stroke.0,
+                        tup_stroke.1,
+                        tup_stroke.2,
+                        tup_stroke.3,
+                    );
+                    stroke = Stroke::new(
+                        self.settings.styles[self.current_index].line.unwrap().width,
+                        color,
+                    );
                 }
                 if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
                     let a_point = Pos2::new(
@@ -540,10 +562,7 @@ impl Map {
                             (line[1] as f32 * self.zoom) - min_point.y,
                         );
                         {
-                            paint.line_segment(
-                                [a_point, b_point],
-                                stroke,
-                            );
+                            paint.line_segment([a_point, b_point], stroke);
                         }
                     }
                 }
@@ -579,19 +598,18 @@ impl Map {
         );
     }
 
-    pub fn notify(mut self,id_node: usize,center_map:bool) ->Result<bool,Error> {
-        if let Entry::Occupied(system_entry) = self.points.clone().unwrap().entry(id_node){
-            let system = system_entry.get();
-            if center_map == true {       
-                self.set_pos(system.coords[0] as f32, system.coords[1] as f32);
+    pub fn notify(&mut self, id_node: usize, center_map: bool) -> Result<bool, Error> {
+        let systems = self.points.as_ref().unwrap();
+        let sys = systems.get(&id_node);
+        if center_map {
+            if let Some(system) = sys {
+                self.set_pos(system.coords[0] as f32, system.coords[1] as f32)
             }
-            let node = AnimationPoint::new(system.coords[0] as f32, system.coords[1] as f32,Instant::now());
-            self.animon.notifications.push(node);
         }
-        else{
-            //self.notifications.push((id_node,Utc::now()));
-        }
+        self.entities
+            .entry(id_node)
+            .and_modify(|value| *value = Instant::now())
+            .or_insert(Instant::now());
         Ok(true)
     }
-
 }

@@ -207,7 +207,6 @@ impl MapPoint {
 }
 
 impl Mul<f64> for MapPoint {
-    
     type Output = Self;
 
     fn mul(mut self, rhs: f64) -> Self::Output {
@@ -224,7 +223,6 @@ impl Mul<f64> for MapPoint {
 }
 
 impl Mul<f32> for MapPoint {
-    
     type Output = Self;
 
     fn mul(mut self, rhs: f32) -> Self::Output {
@@ -238,11 +236,9 @@ impl Mul<f32> for MapPoint {
         }
         self
     }
-
 }
 
 impl Div<f64> for MapPoint {
-    
     type Output = Self;
 
     fn div(mut self, rhs: f64) -> Self::Output {
@@ -259,7 +255,6 @@ impl Div<f64> for MapPoint {
 }
 
 impl Div<f32> for MapPoint {
-    
     type Output = Self;
 
     fn div(mut self, rhs: f32) -> Self::Output {
@@ -273,7 +268,6 @@ impl Div<f32> for MapPoint {
         }
         self
     }
-
 }
 
 impl From<std::collections::hash_map::OccupiedEntry<'_, usize, MapPoint>> for MapPoint {

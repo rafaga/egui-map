@@ -1,46 +1,34 @@
-use egui::{epaint::CircleShape, Color32, Pos2, Rect, Shape, Ui};
-use std::time::{Duration, Instant};
+use crate::map::Error;
+use egui::{epaint::CircleShape, Color32, Pos2, Shape, Ui};
+use std::time::Instant;
 
-pub(crate) struct AnimationPoint{
-    pub position: Pos2,
-    pub time: Instant
-}
+pub(crate) struct Animation {}
 
-impl AnimationPoint{
-    pub(crate) fn new(x:f32,y:f32,time:Instant) -> Self {
-        Self {
-            position: Pos2::new(x,y),
-            time
-        }
-    }
-}
-
-pub struct AnimationManager{
-    pub(crate) notifications: Vec<AnimationPoint>,
-    rect: Rect,
-}
-
-impl AnimationManager {
-    pub(crate) fn new() -> Self{
-        AnimationManager{
-            notifications: vec![],
-            rect: Rect::NOTHING,
-        }
-    }
-
-    pub(crate) fn animation_loop(&self, ui: &mut Ui) {
-        for node in &self.notifications {
-            Self::star_animation(&ui, node.position, node.time);
-        }
-    }
-
-    fn star_animation(ui:&Ui, center: Pos2, initial_time:Instant){
+impl Animation {
+    pub(crate) fn pulse(
+        ui: &Ui,
+        center: Pos2,
+        zoom: f32,
+        initial_time: Instant,
+    ) -> Result<bool, Error> {
+        let time_diff = initial_time - Instant::now();
+        let secs_played = time_diff.as_secs_f32();
+        let mut result = true;
         let current_instant = Instant::now();
         let duration = current_instant.duration_since(initial_time);
-        let radius = duration.as_secs_f32();
-        let color = Color32::from_rgba_unmultiplied(128, 12, 67, 100);
+        // This is in beta state
+        let radius = (4.00 + (40.00 * duration.as_secs_f32())) * zoom;
+        let mut transparency = secs_played / 3.50;
+        if transparency > 1.00 {
+            transparency = 1.00;
+        }
+        let color =
+            Color32::from_rgba_unmultiplied(128, 12, 67, (255.00 * transparency).round() as u8);
         let circle = Shape::Circle(CircleShape::filled(center, radius, color));
         ui.painter().extend(vec![circle]);
-        //ui.allocate_painter(desired_size, sense)
+        if secs_played >= 3.50 {
+            result = false;
+        }
+        Ok(result)
     }
 }
