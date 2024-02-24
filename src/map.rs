@@ -598,13 +598,7 @@ impl Map {
         );
     }
 
-    pub fn notify(&mut self, id_node: usize, center_map: bool) -> Result<bool, Error> {
-        let systems = self.points.as_ref().unwrap();
-        if center_map {
-            if let Some(system) = systems.get(&id_node) {
-                self.set_pos(system.coords[0] as f32, system.coords[1] as f32)
-            }
-        }
+    pub fn notify(&mut self, id_node: usize) -> Result<bool, Error> {
         self.entities
             .entry(id_node)
             .and_modify(|value| *value = Instant::now())
