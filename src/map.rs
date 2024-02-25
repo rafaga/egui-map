@@ -96,7 +96,7 @@ impl Widget for &mut Map {
             );
             let min_point = Pos2::new(self.current.pos.x - factor.0, self.current.pos.y - factor.1);*/
 
-            let min_point = Pos2::new(self.current.pos.x, self.current.pos.y);
+            let min_point = Pos2::new(self.current.pos.x - self.map_area.center().x, self.current.pos.y - self.map_area.center().y);
 
             let vec_points = &self.visible_points;
             let hashm = &self.points;
