@@ -87,15 +87,8 @@ impl Widget for &mut Map {
                     self.paint_label(&paint, &text_settings);
                 }
             }
-
-            //let vec_points = &self.visible_points;
-            //let hashm = &self.points;
-            /*let factor = (
-                self.map_area.center().x + self.map_area.min.x,
-                self.map_area.center().y + self.map_area.min.y,
-            );
-            let min_point = Pos2::new(self.current.pos.x - factor.0, self.current.pos.y - factor.1);*/
-
+            
+            // Here we determine the widget center to print all nodes
             let min_point = Pos2::new(self.current.pos.x - self.map_area.center().x, self.current.pos.y - self.map_area.center().y);
 
             let vec_points = &self.visible_points;
