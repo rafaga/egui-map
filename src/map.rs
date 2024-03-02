@@ -87,9 +87,12 @@ impl Widget for &mut Map {
                     self.paint_label(&paint, &text_settings);
                 }
             }
-            
+
             // Here we determine the widget center to print all nodes
-            let min_point = Pos2::new(self.current.pos.x - self.map_area.center().x, self.current.pos.y - self.map_area.center().y);
+            let min_point = Pos2::new(
+                self.current.pos.x - self.map_area.center().x,
+                self.current.pos.y - self.map_area.center().y,
+            );
 
             let vec_points = &self.visible_points;
             let hashm = &self.points;
@@ -304,7 +307,7 @@ impl Map {
         }
     }
 
-    pub fn get_zoom(self) -> f32 {
+    pub fn get_zoom(&mut self) -> f32 {
         self.zoom
     }
 
