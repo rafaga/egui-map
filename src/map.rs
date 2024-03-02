@@ -257,48 +257,50 @@ impl Map {
 
     fn capture_mouse_events(&mut self, ui: &Ui) {
         // capture MouseWheel Event for Zoom control change
-        ui.input(|x| {
-            #[cfg(feature = "puffin")]
-            puffin::profile_scope!("capture_mouse_events");
-
-            if !x.events.is_empty() {
-                for event in &x.events {
-                    match event {
-                        Event::MouseWheel {
-                            unit: _,
-                            delta,
-                            modifiers,
-                        } => {
-                            #[cfg(target_os = "macos")]
-                            let zoom_modifier = if modifiers.mac_cmd {
-                                delta.y / 80.00
-                            } else {
-                                delta.y / 400.00
-                            };
-
-                            #[cfg(not(target_os = "macos"))]
-                            let zoom_modifier = if modifiers.ctrl {
-                                delta.y / 8.00
-                            } else {
-                                delta.y / 40.00
-                            };
-
-                            let mut pre_zoom = self.zoom + zoom_modifier;
-                            if pre_zoom > self.settings.max_zoom {
-                                pre_zoom = self.settings.max_zoom;
+        if ui.rect_contains_pointer(self.map_area) {
+            ui.input(|x| {
+                #[cfg(feature = "puffin")]
+                puffin::profile_scope!("capture_mouse_events");
+    
+                if !x.events.is_empty() {
+                    for event in &x.events {
+                        match event {
+                            Event::MouseWheel {
+                                unit: _,
+                                delta,
+                                modifiers,
+                            } => {
+                                #[cfg(target_os = "macos")]
+                                let zoom_modifier = if modifiers.mac_cmd {
+                                    delta.y / 80.00
+                                } else {
+                                    delta.y / 400.00
+                                };
+    
+                                #[cfg(not(target_os = "macos"))]
+                                let zoom_modifier = if modifiers.ctrl {
+                                    delta.y / 8.00
+                                } else {
+                                    delta.y / 40.00
+                                };
+    
+                                let mut pre_zoom = self.zoom + zoom_modifier;
+                                if pre_zoom > self.settings.max_zoom {
+                                    pre_zoom = self.settings.max_zoom;
+                                }
+                                if pre_zoom < self.settings.min_zoom {
+                                    pre_zoom = self.settings.min_zoom;
+                                }
+                                self.zoom = pre_zoom;
                             }
-                            if pre_zoom < self.settings.min_zoom {
-                                pre_zoom = self.settings.min_zoom;
+                            _ => {
+                                continue;
                             }
-                            self.zoom = pre_zoom;
-                        }
-                        _ => {
-                            continue;
-                        }
-                    };
+                        };
+                    }
                 }
-            }
-        });
+            });
+        }
     }
 
     pub fn set_zoom(mut self, value: f32) {
