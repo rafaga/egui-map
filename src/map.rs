@@ -106,7 +106,7 @@ impl Widget for &mut Map {
             self.paint_sub_components(ui, self.map_area);
 
             self.capture_mouse_events(ui);
-            
+
             if self.zoom != self.previous_zoom {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("calculating viewport with zoom");
@@ -224,7 +224,7 @@ impl Map {
     }
 
     pub fn get_pos(self) -> Pos2 {
-        self.current.pos
+        self.reference.pos
     }
 
     pub fn add_labels(&mut self, labels: Vec<MapLabel>) {
@@ -534,7 +534,8 @@ impl Map {
         if self.zoom > self.settings.line_visible_zoom {
             for temp_point in vec_points {
                 let mut stroke = self.settings.styles[self.current_index].line.unwrap();
-                if self.zoom - self.settings.line_visible_zoom <= 0.20 {
+                let tranparency_range = self.zoom - self.settings.line_visible_zoom;
+                if tranparency_range > 0.00 && tranparency_range < 2.00 {
                     let mut tup_stroke = self.settings.styles[self.current_index]
                         .line
                         .unwrap()
