@@ -503,8 +503,7 @@ impl Map {
                     self.settings.styles[self.current_index].border.unwrap(),
                 );
                 if let Some(init_time) = self.entities.get(&system.id) {
-                    let position = Pos2::new(system.coords[0] as f32, system.coords[1] as f32);
-                    if let Ok(false) = Animation::pulse(ui_obj, position, self.zoom, *init_time) {
+                    if let Ok(false) = Animation::pulse(ui_obj, center, self.zoom, *init_time) {
                         nodes_to_remove.push(system.id);
                     }
                 }
