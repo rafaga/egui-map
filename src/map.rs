@@ -45,8 +45,6 @@ impl Widget for &mut Map {
 
         let canvas = egui::Frame::canvas(ui.style());
 
-        self.capture_mouse_events(ui);
-
         let inner_response = canvas.show(ui, |ui| {
             #[cfg(feature = "puffin")]
             puffin::profile_scope!("paint_map");
@@ -107,6 +105,8 @@ impl Widget for &mut Map {
 
             self.paint_sub_components(ui, self.map_area);
 
+            self.capture_mouse_events(ui);
+            
             if self.zoom != self.previous_zoom {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("calculating viewport with zoom");
