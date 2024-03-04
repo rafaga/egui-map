@@ -532,28 +532,28 @@ impl Map {
 
         // Drawing Lines
         if self.zoom > self.settings.line_visible_zoom {
+            let mut stroke = self.settings.styles[self.current_index].line.unwrap();
+            let transparency_range = self.zoom - self.settings.line_visible_zoom;
+            if transparency_range >= 0.00 && transparency_range < 0.20 {
+                let mut tup_stroke = self.settings.styles[self.current_index]
+                    .line
+                    .unwrap()
+                    .color
+                    .to_tuple();
+                let transparency = (self.zoom - self.settings.line_visible_zoom) / 0.20;
+                tup_stroke.3 = (255.0 * transparency).round() as u8;
+                let color = Color32::from_rgba_unmultiplied(
+                    tup_stroke.0,
+                    tup_stroke.1,
+                    tup_stroke.2,
+                    tup_stroke.3,
+                );
+                stroke = Stroke::new(
+                    self.settings.styles[self.current_index].line.unwrap().width,
+                    color,
+                );
+            }
             for temp_point in vec_points {
-                let mut stroke = self.settings.styles[self.current_index].line.unwrap();
-                let tranparency_range = self.zoom - self.settings.line_visible_zoom;
-                if tranparency_range >= 0.00 && tranparency_range < 2.00 {
-                    let mut tup_stroke = self.settings.styles[self.current_index]
-                        .line
-                        .unwrap()
-                        .color
-                        .to_tuple();
-                    let transparency = (self.zoom - self.settings.line_visible_zoom) / 0.20;
-                    tup_stroke.3 = (255.0 * transparency).round() as u8;
-                    let color = Color32::from_rgba_unmultiplied(
-                        tup_stroke.0,
-                        tup_stroke.1,
-                        tup_stroke.2,
-                        tup_stroke.3,
-                    );
-                    stroke = Stroke::new(
-                        self.settings.styles[self.current_index].line.unwrap().width,
-                        color,
-                    );
-                }
                 if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
                     let a_point = Pos2::new(
                         (system.coords[0] as f32 * self.zoom) - min_point.x,
@@ -582,7 +582,7 @@ impl Map {
                 );
                 paint.line_segment(
                     [a, b],
-                    self.settings.styles[self.current_index].line.unwrap(),
+                    stroke,
                 );
             }
         }
