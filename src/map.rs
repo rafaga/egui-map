@@ -59,10 +59,10 @@ impl Widget for &mut Map {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("calculating_points_in_visible_area");
 
-                let coords = (vec.to_pos2().x, vec.to_pos2().y);
-
-                self.set_pos(self.current.pos.x - coords.0, self.current.pos.y - coords.1);
-                self.calculate_visible_points();
+                let coords = vec.to_pos2();
+                let new_pos = (self.reference.pos.x - (coords.x / self.zoom), self.reference.pos.y - (coords.y / self.zoom));
+                self.set_pos(new_pos.0, new_pos.1);
+                //self.calculate_visible_points();
             }
             let map_style = self.settings.styles[self.current_index].clone() * self.zoom;
             if self.zoom < self.settings.line_visible_zoom {
@@ -253,10 +253,8 @@ impl Map {
         self.current.min.x = self.reference.min.x * self.zoom;
         self.current.min.y = self.reference.min.y * self.zoom;
         self.current.dist = self.reference.dist / self.zoom as f64;
-        self.set_pos(
-            self.reference.pos.x * self.zoom,
-            self.reference.pos.y * self.zoom,
-        );
+        self.current.pos.x = self.reference.pos.x * self.zoom;
+        self.current.pos.y = self.reference.pos.y * self.zoom;
     }
 
     fn capture_mouse_events(&mut self, ui: &Ui) {
