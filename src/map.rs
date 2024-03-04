@@ -534,13 +534,13 @@ impl Map {
         if self.zoom > self.settings.line_visible_zoom {
             let mut stroke = self.settings.styles[self.current_index].line.unwrap();
             let transparency_range = self.zoom - self.settings.line_visible_zoom;
-            if transparency_range >= 0.00 && transparency_range < 0.20 {
+            if transparency_range >= 0.00 && transparency_range < 0.80 {
                 let mut tup_stroke = self.settings.styles[self.current_index]
                     .line
                     .unwrap()
                     .color
                     .to_tuple();
-                let transparency = (self.zoom - self.settings.line_visible_zoom) / 0.20;
+                let transparency = (self.zoom - self.settings.line_visible_zoom) / 0.80;
                 tup_stroke.3 = (255.0 * transparency).round() as u8;
                 let color = Color32::from_rgba_unmultiplied(
                     tup_stroke.0,
