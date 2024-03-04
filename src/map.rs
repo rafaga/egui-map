@@ -219,6 +219,7 @@ impl Map {
         {
             self.reference.pos = Pos2::new(x, y);
             self.adjust_bounds();
+            self.calculate_visible_points();
         }
     }
 
