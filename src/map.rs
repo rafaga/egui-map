@@ -193,11 +193,14 @@ impl Map {
                 line[2] *= -1.0;
             }
         }
+        // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
         self.reference.min = Pos2::new(min.0 as f32, min.1 as f32);
         self.reference.max = Pos2::new(max.0 as f32, max.1 as f32);
         self.points = Some(h_map);
         self.tree = Some(tree);
+        // we create a rect that include every node in the map
         let rect = Rect::from_min_max(self.reference.min, self.reference.max);
+        // we define the initial coordinate as the center of such rectangle
         self.reference.pos = rect.center();
         let dist_x =
             (self.map_area.right_bottom().x as f64 - self.map_area.left_top().x as f64) / 2.0;
@@ -209,13 +212,13 @@ impl Map {
     }
 
     pub fn set_pos(&mut self, x: f32, y: f32) {
-        if x <= self.current.max.x
-            && x >= self.current.min.x
-            && y <= self.current.max.y
-            && y >= self.current.min.y
+        if x <= self.reference.max.x
+            && x >= self.reference.min.x
+            && y <= self.reference.max.y
+            && y >= self.reference.min.y
         {
-            self.current.pos = Pos2::new(x, y);
-            self.reference.pos = Pos2::new(x / self.zoom, y / self.zoom);
+            self.reference.pos = Pos2::new(x, y);
+            self.adjust_bounds();
         }
     }
 
