@@ -17,9 +17,9 @@ impl Animation {
         let secs_played = time_diff.as_secs_f32();
         // This is in beta state
         let radius = (4.00 + (40.00 * secs_played)) * zoom;
-        let mut transparency = secs_played / 3.50;
-        if transparency > 1.00 {
-            transparency = 1.00;
+        let mut transparency = 1.00 - (secs_played / 3.50).abs();
+        if transparency < 0.00 {
+            transparency = 0.00;
         }
         let color =
             Color32::from_rgba_unmultiplied(128, 12, 67, (255.00 * transparency).round() as u8);
