@@ -503,7 +503,7 @@ impl Map {
                     self.settings.styles[self.current_index].border.unwrap(),
                 );
                 if let Some(init_time) = self.entities.get(&system.id) {
-                    match Animation::pulse(paint, center, self.zoom, *init_time){
+                    match Animation::pulse(paint, viewport_point, self.zoom, *init_time){
                         Ok(true) => {
                             ui_obj.ctx().request_repaint();
                         },
