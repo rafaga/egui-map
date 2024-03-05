@@ -11,13 +11,12 @@ impl Animation {
         zoom: f32,
         initial_time: Instant,
     ) -> Result<bool, Error> {
-        let time_diff = initial_time - Instant::now();
-        let secs_played = time_diff.as_secs_f32();
-        let mut result = true;
         let current_instant = Instant::now();
-        let duration = current_instant.duration_since(initial_time);
+        let mut result = false;
+        let time_diff = current_instant.duration_since(initial_time);
+        let secs_played = time_diff.as_secs_f32();
         // This is in beta state
-        let radius = (4.00 + (40.00 * duration.as_secs_f32())) * zoom;
+        let radius = (4.00 + (40.00 * secs_played)) * zoom;
         let mut transparency = secs_played / 3.50;
         if transparency > 1.00 {
             transparency = 1.00;
@@ -26,8 +25,8 @@ impl Animation {
             Color32::from_rgba_unmultiplied(128, 12, 67, (255.00 * transparency).round() as u8);
         let circle = Shape::Circle(CircleShape::filled(center, radius, color));
         ui.painter().extend(vec![circle]);
-        if secs_played >= 3.50 {
-            result = false;
+        if secs_played < 3.50 {
+            result = true;
         }
         Ok(result)
     }
