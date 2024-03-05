@@ -1,7 +1,7 @@
 use egui::{Align2, Color32, FontFamily, FontId, Pos2, Stroke};
 use std::ops::{Div, Mul};
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone)]
 pub struct MapStyle {
     pub border: Option<Stroke>,
     pub line: Option<Stroke>,
@@ -9,6 +9,7 @@ pub struct MapStyle {
     pub text_color: Color32,
     pub font: Option<FontId>,
     pub background_color: Color32,
+    pub alert_color: Color32,
 }
 
 impl MapStyle {
@@ -20,6 +21,7 @@ impl MapStyle {
             text_color: Color32::TRANSPARENT,
             font: None,
             background_color: Color32::TRANSPARENT,
+            alert_color: Color32::TRANSPARENT,
         }
     }
 }
@@ -34,12 +36,11 @@ impl Mul<i64> for MapStyle {
     // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn mul(self, rhs: i64) -> Self::Output {
-        let mut a = self.clone();
-        a.border.unwrap().width *= rhs as f32;
-        a.line.unwrap().width *= rhs as f32;
-        a.font.as_mut().unwrap().size *= rhs as f32;
-        a
+    fn mul(mut self, rhs: i64) -> Self::Output {
+        self.border.unwrap().width *= rhs as f32;
+        self.line.unwrap().width *= rhs as f32;
+        self.font.as_mut().unwrap().size *= rhs as f32;
+        self
     }
 }
 
@@ -47,12 +48,11 @@ impl Mul<i32> for MapStyle {
     // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn mul(self, rhs: i32) -> Self::Output {
-        let mut a = self.clone();
-        a.border.unwrap().width *= rhs as f32;
-        a.line.unwrap().width *= rhs as f32;
-        a.font.as_mut().unwrap().size *= rhs as f32;
-        a
+    fn mul(mut self, rhs: i32) -> Self::Output {
+        self.border.unwrap().width *= rhs as f32;
+        self.line.unwrap().width *= rhs as f32;
+        self.font.as_mut().unwrap().size *= rhs as f32;
+        self
     }
 }
 
@@ -60,12 +60,11 @@ impl Mul<f32> for MapStyle {
     // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn mul(self, rhs: f32) -> Self::Output {
-        let mut a = self.clone();
-        a.border.unwrap().width *= rhs;
-        a.line.unwrap().width *= rhs;
-        a.font.as_mut().unwrap().size *= rhs;
-        a
+    fn mul(mut self, rhs: f32) -> Self::Output {
+        self.border.unwrap().width *= rhs;
+        self.line.unwrap().width *= rhs;
+        self.font.as_mut().unwrap().size *= rhs;
+        self
     }
 }
 
@@ -73,12 +72,11 @@ impl Mul<f64> for MapStyle {
     // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn mul(self, rhs: f64) -> Self::Output {
-        let mut a = self.clone();
-        a.border.unwrap().width *= rhs as f32;
-        a.line.unwrap().width *= rhs as f32;
-        a.font.as_mut().unwrap().size *= rhs as f32;
-        a
+    fn mul(mut self, rhs: f64) -> Self::Output {
+        self.border.unwrap().width *= rhs as f32;
+        self.line.unwrap().width *= rhs as f32;
+        self.font.as_mut().unwrap().size *= rhs as f32;
+        self
     }
 }
 
@@ -86,12 +84,11 @@ impl Div<i64> for MapStyle {
     // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn div(self, rhs: i64) -> Self::Output {
-        let mut a = self.clone();
-        a.border.unwrap().width /= rhs as f32;
-        a.line.unwrap().width /= rhs as f32;
-        a.font.as_mut().unwrap().size /= rhs as f32;
-        a
+    fn div(mut self, rhs: i64) -> Self::Output {
+        self.border.unwrap().width /= rhs as f32;
+        self.line.unwrap().width /= rhs as f32;
+        self.font.as_mut().unwrap().size /= rhs as f32;
+        self
     }
 }
 
@@ -99,12 +96,11 @@ impl Div<i32> for MapStyle {
     // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn div(self, rhs: i32) -> Self::Output {
-        let mut a = self.clone();
-        a.border.unwrap().width /= rhs as f32;
-        a.line.unwrap().width /= rhs as f32;
-        a.font.as_mut().unwrap().size /= rhs as f32;
-        a
+    fn div(mut self, rhs: i32) -> Self::Output {
+        self.border.unwrap().width /= rhs as f32;
+        self.line.unwrap().width /= rhs as f32;
+        self.font.as_mut().unwrap().size /= rhs as f32;
+        self
     }
 }
 
@@ -112,12 +108,11 @@ impl Div<f32> for MapStyle {
     // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn div(self, rhs: f32) -> Self::Output {
-        let mut a = self.clone();
-        a.border.unwrap().width /= rhs;
-        a.line.unwrap().width /= rhs;
-        a.font.as_mut().unwrap().size /= rhs;
-        a
+    fn div(mut self, rhs: f32) -> Self::Output {
+        self.border.unwrap().width /= rhs;
+        self.line.unwrap().width /= rhs;
+        self.font.as_mut().unwrap().size /= rhs;
+        self
     }
 }
 
@@ -125,16 +120,15 @@ impl Div<f64> for MapStyle {
     // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn div(self, rhs: f64) -> Self::Output {
-        let mut a = self.clone();
-        a.border.unwrap().width /= rhs as f32;
-        a.line.unwrap().width /= rhs as f32;
-        a.font.as_mut().unwrap().size /= rhs as f32;
-        a
+    fn div(mut self, rhs: f64) -> Self::Output {
+        self.border.unwrap().width /= rhs as f32;
+        self.line.unwrap().width /= rhs as f32;
+        self.font.as_mut().unwrap().size /= rhs as f32;
+        self
     }
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone)]
 pub struct MapLabel {
     pub text: String,
     pub center: Pos2,
@@ -155,7 +149,7 @@ impl MapLabel {
     }
 }
 
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone)]
 pub struct MapLine {
     pub points: [Pos2; 2],
 }
@@ -176,7 +170,7 @@ impl MapLine {
 
 // This can by any object or point with its associated metadata
 /// Struct that contains coordinates to help calculate nearest point in space
-#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[derive(Clone)]
 pub struct MapPoint {
     dimension: usize,
     /// coordinates of the Solar System
@@ -211,6 +205,70 @@ impl MapPoint {
     /// Get the number of dimensions used in this object
     pub fn get_dimension(self) -> usize {
         self.dimension
+    }
+}
+
+impl Mul<f64> for MapPoint {
+    type Output = Self;
+
+    fn mul(mut self, rhs: f64) -> Self::Output {
+        self.coords[0] *= rhs;
+        self.coords[1] *= rhs;
+        self.coords[2] *= rhs;
+        for indx in 0..self.lines.len() {
+            self.lines[indx][0] *= rhs;
+            self.lines[indx][1] *= rhs;
+            self.lines[indx][2] *= rhs;
+        }
+        self
+    }
+}
+
+impl Mul<f32> for MapPoint {
+    type Output = Self;
+
+    fn mul(mut self, rhs: f32) -> Self::Output {
+        self.coords[0] *= rhs as f64;
+        self.coords[1] *= rhs as f64;
+        self.coords[2] *= rhs as f64;
+        for indx in 0..self.lines.len() {
+            self.lines[indx][0] *= rhs as f64;
+            self.lines[indx][1] *= rhs as f64;
+            self.lines[indx][2] *= rhs as f64;
+        }
+        self
+    }
+}
+
+impl Div<f64> for MapPoint {
+    type Output = Self;
+
+    fn div(mut self, rhs: f64) -> Self::Output {
+        self.coords[0] /= rhs;
+        self.coords[1] /= rhs;
+        self.coords[2] /= rhs;
+        for indx in 0..self.lines.len() {
+            self.lines[indx][0] /= rhs;
+            self.lines[indx][1] /= rhs;
+            self.lines[indx][2] /= rhs;
+        }
+        self
+    }
+}
+
+impl Div<f32> for MapPoint {
+    type Output = Self;
+
+    fn div(mut self, rhs: f32) -> Self::Output {
+        self.coords[0] /= rhs as f64;
+        self.coords[1] /= rhs as f64;
+        self.coords[2] /= rhs as f64;
+        for indx in 0..self.lines.len() {
+            self.lines[indx][0] /= rhs as f64;
+            self.lines[indx][1] /= rhs as f64;
+            self.lines[indx][2] /= rhs as f64;
+        }
+        self
     }
 }
 
@@ -302,6 +360,7 @@ impl Default for MapSettings {
             text_color: Color32::DARK_GREEN,
             font: Some(FontId::new(12.00, FontFamily::Proportional)),
             background_color: Color32::WHITE,
+            alert_color: Color32::from_rgb(246, 30, 131),
         });
 
         // Dark Theme
@@ -318,6 +377,7 @@ impl Default for MapSettings {
             text_color: Color32::LIGHT_GREEN,
             font: Some(FontId::new(12.00, FontFamily::Proportional)),
             background_color: Color32::DARK_GRAY,
+            alert_color: Color32::from_rgb(128, 12, 67),
         });
         obj
     }

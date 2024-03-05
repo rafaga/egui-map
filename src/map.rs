@@ -1,30 +1,33 @@
-use crate::map::objects::*;
+use crate::map::animation::Animation;
+use crate::map::objects::{
+    MapBounds, MapLabel, MapLine, MapPoint, MapSettings, TextSettings, VisibilitySetting,
+};
 use egui::{widgets::*, *};
 use kdtree::distance::squared_euclidean;
 use kdtree::KdTree;
-use rand::distributions::{Alphanumeric, Distribution};
-use rand::thread_rng;
 use std::collections::HashMap;
+use std::fmt::Error;
+use std::time::Instant;
 
+pub mod animation;
 pub mod objects;
-
 // This can by any object or point with its associated metadata
 /// Struct that contains coordinates to help calculate nearest point in space
 
 pub struct Map {
-    pub zoom: f32,
+    zoom: f32,
     previous_zoom: f32,
     points: Option<HashMap<usize, MapPoint>>,
     lines: Vec<MapLine>,
     labels: Vec<MapLabel>,
     tree: Option<KdTree<f64, usize, [f64; 2]>>,
-    visible_points: Option<Vec<usize>>,
-    map_area: Option<Rect>,
-    initialized: bool,
+    visible_points: Vec<usize>,
+    map_area: Rect,
     reference: MapBounds,
     current: MapBounds,
     style: egui::Style,
     current_index: usize,
+    entities: HashMap<usize, Instant>,
     pub settings: MapSettings,
 }
 
@@ -35,56 +38,43 @@ impl Default for Map {
 }
 
 impl Widget for &mut Map {
-    fn ui(self, ui_obj: &mut egui::Ui) -> Response {
-        if !self.initialized {
-            #[cfg(feature = "puffin")]
-            puffin::profile_scope!("map_init");
+    fn ui(self, ui: &mut egui::Ui) -> Response {
+        self.map_area = ui.available_rect_before_wrap();
 
-            let mut rng = thread_rng();
-            let component_id: String = Alphanumeric
-                .sample_iter(&mut rng)
-                .take(15)
-                .map(char::from)
-                .collect();
-            // TODO:use this variable
-            let _idx = egui::Id::new(component_id);
-            self.map_area = Some(ui_obj.available_rect_before_wrap());
-        } else {
-            self.map_area = Some(ui_obj.ctx().used_rect());
-        }
+        self.asign_visual_style(ui);
 
-        self.asign_visual_style(ui_obj);
+        let canvas = egui::Frame::canvas(ui.style());
 
-        let canvas = egui::Frame::canvas(ui_obj.style());
-
-        self.capture_mouse_events(ui_obj);
-
-        let inner_response = canvas.show(ui_obj, |ui_obj| {
+        let inner_response = canvas.show(ui, |ui| {
             #[cfg(feature = "puffin")]
             puffin::profile_scope!("paint_map");
 
-            //if ui_obj.is_rect_visible(self.map_area.unwrap()) {
-            let (resp, paint) = ui_obj
-                .allocate_painter(self.map_area.unwrap().size(), egui::Sense::click_and_drag());
+            //if ui_obj.is_rect_visible(self.map_area) {
+            let (resp, paint) =
+                ui.allocate_painter(self.map_area.size(), egui::Sense::click_and_drag());
             let vec = resp.drag_delta();
             if vec.length() != 0.0 {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("calculating_points_in_visible_area");
 
-                let coords = (vec.to_pos2().x, vec.to_pos2().y);
-                self.set_pos(self.current.pos.x - coords.0, self.current.pos.y - coords.1);
-                self.calculate_visible_points();
+                let coords = vec.to_pos2();
+                let new_pos = (
+                    self.reference.pos.x - (coords.x / self.zoom),
+                    self.reference.pos.y - (coords.y / self.zoom),
+                );
+                self.set_pos(new_pos.0, new_pos.1);
+                //self.calculate_visible_points();
             }
             let map_style = self.settings.styles[self.current_index].clone() * self.zoom;
             if self.zoom < self.settings.line_visible_zoom {
                 // filling text settings
                 let mut text_settings = TextSettings {
-                    size: 12.00 * self.zoom,
+                    size: 12.00 * self.zoom * 2.00,
                     anchor: Align2::CENTER_CENTER,
                     family: FontFamily::Proportional,
                     text: String::new(),
                     position: Pos2::new(0.00, 0.00),
-                    text_color: ui_obj.visuals().text_color(),
+                    text_color: ui.visuals().text_color(),
                 };
                 for label in &self.labels {
                     text_settings.text = label.text.clone();
@@ -93,24 +83,32 @@ impl Widget for &mut Map {
                         Align2::CENTER_CENTER,
                         label.text.as_str(),
                         map_style.font.clone().unwrap(),
-                        ui_obj.visuals().text_color(),
+                        ui.visuals().text_color(),
                     );
                     self.paint_label(&paint, &text_settings);
                 }
             }
 
+            // Here we determine the widget center to print all nodes
+            let min_point = Pos2::new(
+                self.current.pos.x - self.map_area.center().x,
+                self.current.pos.y - self.map_area.center().y,
+            );
+
             let vec_points = &self.visible_points;
             let hashm = &self.points;
-            let factor = (
-                self.map_area.unwrap().center().x + self.map_area.unwrap().min.x,
-                self.map_area.unwrap().center().y + self.map_area.unwrap().min.y,
-            );
-            let min_point = Pos2::new(self.current.pos.x - factor.0, self.current.pos.y - factor.1);
-
             let _a = self.paint_map_lines(vec_points, hashm, &paint, &min_point);
-            let _b = self.paint_map_points(vec_points, hashm, &paint, ui_obj, &min_point, &resp);
+            if let Ok(nodes_to_remove) =
+                self.paint_map_points(vec_points, hashm, &paint, ui, &min_point, &resp)
+            {
+                for node in nodes_to_remove {
+                    self.entities.remove(&node);
+                }
+            }
 
-            self.paint_sub_components(ui_obj, self.map_area.unwrap());
+            self.paint_sub_components(ui, self.map_area);
+
+            self.capture_mouse_events(ui);
 
             if self.zoom != self.previous_zoom {
                 #[cfg(feature = "puffin")]
@@ -120,7 +118,7 @@ impl Widget for &mut Map {
                 self.previous_zoom = self.zoom;
             }
 
-            self.hover_management(ui_obj, &paint, &resp);
+            self.hover_management(ui, &paint, &resp);
 
             if cfg!(debug_assertions) {
                 self.print_debug_info(paint, resp);
@@ -134,20 +132,20 @@ impl Widget for &mut Map {
 impl Map {
     pub fn new() -> Self {
         let settings = MapSettings::default();
-        Map {
+        Self {
             zoom: 1.0,
             previous_zoom: 1.0,
-            map_area: None,
+            map_area: Rect::NOTHING,
             tree: None,
             points: None,
             lines: Vec::new(),
             labels: Vec::new(),
-            visible_points: None,
-            initialized: false,
+            visible_points: Vec::new(),
             current: MapBounds::default(),
             reference: MapBounds::default(),
             settings,
             current_index: 0,
+            entities: HashMap::new(),
             style: egui::Style::default(),
         }
     }
@@ -163,11 +161,10 @@ impl Map {
                 ];
                 let radius = self.current.dist.powi(2);
                 let vis_pos = tree.within(&center, radius, &squared_euclidean).unwrap();
-                let mut visible_points = vec![];
+                self.visible_points.clear();
                 for point in vis_pos {
-                    visible_points.push(*point.1);
+                    self.visible_points.push(*point.1);
                 }
-                self.visible_points = Some(visible_points);
             }
         }
     }
@@ -199,40 +196,58 @@ impl Map {
                 line[2] *= -1.0;
             }
         }
+        // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
         self.reference.min = Pos2::new(min.0 as f32, min.1 as f32);
         self.reference.max = Pos2::new(max.0 as f32, max.1 as f32);
         self.points = Some(h_map);
         self.tree = Some(tree);
+        // we create a rect that include every node in the map
         let rect = Rect::from_min_max(self.reference.min, self.reference.max);
+        // we define the initial coordinate as the center of such rectangle
         self.reference.pos = rect.center();
-        let dist_x = (self.map_area.unwrap().right_bottom().x as f64
-            - self.map_area.unwrap().left_top().x as f64)
-            / 2.0;
-        let dist_y = (self.map_area.unwrap().right_bottom().y as f64
-            - self.map_area.unwrap().left_top().y as f64)
-            / 2.0;
+        let dist_x =
+            (self.map_area.right_bottom().x as f64 - self.map_area.left_top().x as f64) / 2.0;
+        let dist_y =
+            (self.map_area.right_bottom().y as f64 - self.map_area.left_top().y as f64) / 2.0;
         self.reference.dist = (dist_x.powi(2) + dist_y.powi(2) / 2.0).sqrt();
         self.current = self.reference.clone();
         self.calculate_visible_points();
     }
 
     pub fn set_pos(&mut self, x: f32, y: f32) {
-        if x <= self.current.max.x
-            && x >= self.current.min.x
-            && y <= self.current.max.y
-            && y >= self.current.min.y
+        if x <= self.reference.max.x
+            && x >= self.reference.min.x
+            && y <= self.reference.max.y
+            && y >= self.reference.min.y
         {
-            self.current.pos = Pos2::new(x, y);
-            self.reference.pos = Pos2::new(x / self.zoom, y / self.zoom);
+            self.reference.pos = Pos2::new(x, y);
+            self.adjust_bounds();
+            self.calculate_visible_points();
         }
     }
 
+    pub fn get_pos(self) -> Pos2 {
+        self.reference.pos
+    }
+
     pub fn add_labels(&mut self, labels: Vec<MapLabel>) {
-        self.labels = labels;
+        let mut converted_labels = Vec::new();
+        for mut label in labels {
+            label.center[0] *= -1.00;
+            label.center[1] *= -1.00;
+            converted_labels.push(label);
+        }
+        self.labels = converted_labels;
     }
 
     pub fn add_lines(&mut self, lines: Vec<MapLine>) {
-        self.lines = lines
+        let mut converted_lines = Vec::new();
+        for mut line in lines {
+            line.points[0] = line.points[0] * -1.00;
+            line.points[1] = line.points[1] * -1.00;
+            converted_lines.push(line);
+        }
+        self.lines = converted_lines;
     }
 
     fn adjust_bounds(&mut self) {
@@ -241,47 +256,66 @@ impl Map {
         self.current.min.x = self.reference.min.x * self.zoom;
         self.current.min.y = self.reference.min.y * self.zoom;
         self.current.dist = self.reference.dist / self.zoom as f64;
-        self.set_pos(
-            self.reference.pos.x * self.zoom,
-            self.reference.pos.y * self.zoom,
-        );
+        self.current.pos.x = self.reference.pos.x * self.zoom;
+        self.current.pos.y = self.reference.pos.y * self.zoom;
     }
 
-    fn capture_mouse_events(&mut self, ui_obj: &Ui) {
+    fn capture_mouse_events(&mut self, ui: &Ui) {
         // capture MouseWheel Event for Zoom control change
-        ui_obj.input(|x| {
-            #[cfg(feature = "puffin")]
-            puffin::profile_scope!("capture_mouse_events");
+        if ui.rect_contains_pointer(self.map_area) {
+            ui.input(|x| {
+                #[cfg(feature = "puffin")]
+                puffin::profile_scope!("capture_mouse_events");
 
-            if !x.events.is_empty() {
-                for event in &x.events {
-                    match event {
-                        Event::MouseWheel {
-                            unit: _,
-                            delta,
-                            modifiers,
-                        } => {
-                            let zoom_modifier = if modifiers.mac_cmd {
-                                delta.y / 80.00
-                            } else {
-                                delta.y / 400.00
-                            };
-                            let mut pre_zoom = self.zoom + zoom_modifier;
-                            if pre_zoom > self.settings.max_zoom {
-                                pre_zoom = self.settings.max_zoom;
+                if !x.events.is_empty() {
+                    for event in &x.events {
+                        match event {
+                            Event::MouseWheel {
+                                unit: _,
+                                delta,
+                                modifiers,
+                            } => {
+                                #[cfg(target_os = "macos")]
+                                let zoom_modifier = if modifiers.mac_cmd {
+                                    delta.y / 80.00
+                                } else {
+                                    delta.y / 400.00
+                                };
+
+                                #[cfg(not(target_os = "macos"))]
+                                let zoom_modifier = if modifiers.ctrl {
+                                    delta.y / 8.00
+                                } else {
+                                    delta.y / 40.00
+                                };
+
+                                let mut pre_zoom = self.zoom + zoom_modifier;
+                                if pre_zoom > self.settings.max_zoom {
+                                    pre_zoom = self.settings.max_zoom;
+                                }
+                                if pre_zoom < self.settings.min_zoom {
+                                    pre_zoom = self.settings.min_zoom;
+                                }
+                                self.zoom = pre_zoom;
                             }
-                            if pre_zoom < self.settings.min_zoom {
-                                pre_zoom = self.settings.min_zoom;
+                            _ => {
+                                continue;
                             }
-                            self.zoom = pre_zoom;
-                        }
-                        _ => {
-                            continue;
-                        }
-                    };
+                        };
+                    }
                 }
-            }
-        });
+            });
+        }
+    }
+
+    pub fn set_zoom(mut self, value: f32) {
+        if value >= self.settings.min_zoom && value <= self.settings.max_zoom {
+            self.zoom = value;
+        }
+    }
+
+    pub fn get_zoom(&mut self) -> f32 {
+        self.zoom
     }
 
     fn asign_visual_style(&mut self, ui_obj: &mut Ui) {
@@ -304,8 +338,8 @@ impl Map {
         puffin::profile_scope!("printing debug data");
 
         let mut init_pos = Pos2::new(
-            self.map_area.unwrap().left_top().x + 10.00,
-            self.map_area.unwrap().left_top().y + 10.00,
+            self.map_area.left_top().x + 10.00,
+            self.map_area.left_top().y + 10.00,
         );
         let mut msg = "MIN:".to_string()
             + self.current.min.x.to_string().as_str()
@@ -331,27 +365,25 @@ impl Map {
         init_pos.y += 15.0;
         msg = "ZOM:".to_string() + self.zoom.to_string().as_str();
         paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GREEN, msg);
-        if let Some(rectz) = self.map_area {
-            init_pos.y += 15.0;
-            msg = "REC:(".to_string()
-                + rectz.left_top().x.to_string().as_str()
-                + ","
-                + rectz.left_top().y.to_string().as_str()
-                + "),("
-                + rectz.right_bottom().x.to_string().as_str()
-                + ","
-                + rectz.right_bottom().y.to_string().as_str()
-                + ")";
-            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-        }
+        init_pos.y += 15.0;
+        msg = "REC:(".to_string()
+            + self.map_area.left_top().x.to_string().as_str()
+            + ","
+            + self.map_area.left_top().y.to_string().as_str()
+            + "),("
+            + self.map_area.right_bottom().x.to_string().as_str()
+            + ","
+            + self.map_area.right_bottom().y.to_string().as_str()
+            + ")";
+        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
         if let Some(points) = &self.points {
             init_pos.y += 15.0;
             msg = "NUM:".to_string() + points.len().to_string().as_str();
             paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
         }
-        if let Some(vec_k) = self.visible_points.as_ref() {
+        if !self.visible_points.is_empty() {
             init_pos.y += 15.0;
-            msg = "VIS:".to_string() + vec_k.len().to_string().as_str();
+            msg = "VIS:".to_string() + self.visible_points.len().to_string().as_str();
             paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
         }
         if let Some(pointer_pos) = resp.hover_pos() {
@@ -403,18 +435,20 @@ impl Map {
 
     fn paint_map_points(
         &self,
-        vec_points: &Option<Vec<usize>>,
+        vec_points: &Vec<usize>,
         hashm: &Option<HashMap<usize, MapPoint>>,
         paint: &Painter,
         ui_obj: &Ui,
         min_point: &Pos2,
         resp: &Response,
-    ) -> Result<(), ()> {
+    ) -> Result<Vec<usize>, ()> {
         let mut nearest_id = None;
+        let mut nodes_to_remove = Vec::new();
+
         if hashm.is_none() {
             return Err(());
         }
-        if vec_points.is_none() {
+        if vec_points.is_empty() {
             return Err(());
         }
         // detecting the nearest hover node
@@ -444,15 +478,14 @@ impl Map {
         };
 
         // Drawing Points
-        for temp_point in vec_points.as_ref().unwrap() {
+        for temp_point in vec_points {
             if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("painting_points_m");
-                let center = Pos2::new(
-                    system.coords[0] as f32 * self.zoom,
-                    system.coords[1] as f32 * self.zoom,
+                let viewport_point = Pos2::new(
+                    (system.coords[0] as f32 * self.zoom) - min_point.x,
+                    (system.coords[1] as f32 * self.zoom) - min_point.y,
                 );
-                let viewport_point = Pos2::new(center.x - min_point.x, center.y - min_point.y);
                 if self.zoom > self.settings.label_visible_zoom
                     && (self.settings.node_text_visibility == VisibilitySetting::Allways
                         || (self.settings.node_text_visibility == VisibilitySetting::Hover
@@ -471,14 +504,29 @@ impl Map {
                     self.settings.styles[self.current_index].fill_color,
                     self.settings.styles[self.current_index].border.unwrap(),
                 );
+                if let Some(init_time) = self.entities.get(&system.id) {
+                    match Animation::pulse(
+                        paint,
+                        viewport_point,
+                        self.zoom,
+                        *init_time,
+                        self.settings.styles[self.current_index].alert_color,
+                    ) {
+                        Ok(true) => {
+                            ui_obj.ctx().request_repaint();
+                        }
+                        Ok(false) => nodes_to_remove.push(system.id),
+                        Err(_) => (),
+                    }
+                }
             }
         }
-        Ok(())
+        Ok(nodes_to_remove)
     }
 
     fn paint_map_lines(
         &self,
-        vec_points: &Option<Vec<usize>>,
+        vec_points: &Vec<usize>,
         hashm: &Option<HashMap<usize, MapPoint>>,
         paint: &Painter,
         min_point: &Pos2,
@@ -489,13 +537,34 @@ impl Map {
         if hashm.is_none() {
             return Err(());
         }
-        if vec_points.is_none() {
+        if vec_points.is_empty() {
             return Err(());
         }
 
         // Drawing Lines
         if self.zoom > self.settings.line_visible_zoom {
-            for temp_point in vec_points.as_ref().unwrap() {
+            let mut stroke = self.settings.styles[self.current_index].line.unwrap();
+            let transparency_range = self.zoom - self.settings.line_visible_zoom;
+            if (0.00..0.80).contains(&transparency_range) {
+                let mut tup_stroke = self.settings.styles[self.current_index]
+                    .line
+                    .unwrap()
+                    .color
+                    .to_tuple();
+                let transparency = (self.zoom - self.settings.line_visible_zoom) / 0.80;
+                tup_stroke.3 = (255.0 * transparency).round() as u8;
+                let color = Color32::from_rgba_unmultiplied(
+                    tup_stroke.0,
+                    tup_stroke.1,
+                    tup_stroke.2,
+                    tup_stroke.3,
+                );
+                stroke = Stroke::new(
+                    self.settings.styles[self.current_index].line.unwrap().width,
+                    color,
+                );
+            }
+            for temp_point in vec_points {
                 if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
                     let a_point = Pos2::new(
                         (system.coords[0] as f32 * self.zoom) - min_point.x,
@@ -507,14 +576,12 @@ impl Map {
                             (line[1] as f32 * self.zoom) - min_point.y,
                         );
                         {
-                            paint.line_segment(
-                                [a_point, b_point],
-                                self.settings.styles[self.current_index].line.unwrap(),
-                            );
+                            paint.line_segment([a_point, b_point], stroke);
                         }
                     }
                 }
             }
+            // Drawing permanent lines
             for line in &self.lines {
                 let a = Pos2::new(
                     (line.points[0].x * self.zoom) - min_point.x,
@@ -524,10 +591,7 @@ impl Map {
                     (line.points[1].x * self.zoom) - min_point.x,
                     (line.points[1].y * self.zoom) - min_point.y,
                 );
-                paint.line_segment(
-                    [a, b],
-                    self.settings.styles[self.current_index].line.unwrap(),
-                );
+                paint.line_segment([a, b], stroke);
             }
         }
         Ok(())
@@ -543,5 +607,13 @@ impl Map {
             FontId::new(text_settings.size, text_settings.family.clone()),
             text_settings.text_color,
         );
+    }
+
+    pub fn notify(&mut self, id_node: usize) -> Result<bool, Error> {
+        self.entities
+            .entry(id_node)
+            .and_modify(|value| *value = Instant::now())
+            .or_insert(Instant::now());
+        Ok(true)
     }
 }
