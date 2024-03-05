@@ -28,6 +28,7 @@ impl Animation {
         if secs_played < 3.50 {
             result = true;
         }
+        ui.ctx().request_repaint();
         Ok(result)
     }
 }
