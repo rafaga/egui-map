@@ -9,6 +9,7 @@ pub struct MapStyle {
     pub text_color: Color32,
     pub font: Option<FontId>,
     pub background_color: Color32,
+    pub alert_color: Color32,
 }
 
 impl MapStyle {
@@ -20,6 +21,7 @@ impl MapStyle {
             text_color: Color32::TRANSPARENT,
             font: None,
             background_color: Color32::TRANSPARENT,
+            alert_color: Color32::TRANSPARENT,
         }
     }
 }
@@ -358,6 +360,7 @@ impl Default for MapSettings {
             text_color: Color32::DARK_GREEN,
             font: Some(FontId::new(12.00, FontFamily::Proportional)),
             background_color: Color32::WHITE,
+            alert_color: Color32::from_rgb(246, 30, 131),
         });
 
         // Dark Theme
@@ -374,6 +377,7 @@ impl Default for MapSettings {
             text_color: Color32::LIGHT_GREEN,
             font: Some(FontId::new(12.00, FontFamily::Proportional)),
             background_color: Color32::DARK_GRAY,
+            alert_color: Color32::from_rgb(128, 12, 67),
         });
         obj
     }
