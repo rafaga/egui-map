@@ -1,5 +1,5 @@
 use crate::map::Error;
-use egui::{epaint::CircleShape, Color32, Pos2, Shape, Painter};
+use egui::{epaint::CircleShape, Color32, Painter, Pos2, Shape};
 use std::time::Instant;
 
 pub(crate) struct Animation {}

@@ -58,7 +58,10 @@ impl Widget for &mut Map {
                 puffin::profile_scope!("calculating_points_in_visible_area");
 
                 let coords = vec.to_pos2();
-                let new_pos = (self.reference.pos.x - (coords.x / self.zoom), self.reference.pos.y - (coords.y / self.zoom));
+                let new_pos = (
+                    self.reference.pos.x - (coords.x / self.zoom),
+                    self.reference.pos.y - (coords.y / self.zoom),
+                );
                 self.set_pos(new_pos.0, new_pos.1);
                 //self.calculate_visible_points();
             }
@@ -263,7 +266,7 @@ impl Map {
             ui.input(|x| {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("capture_mouse_events");
-    
+
                 if !x.events.is_empty() {
                     for event in &x.events {
                         match event {
@@ -278,14 +281,14 @@ impl Map {
                                 } else {
                                     delta.y / 400.00
                                 };
-    
+
                                 #[cfg(not(target_os = "macos"))]
                                 let zoom_modifier = if modifiers.ctrl {
                                     delta.y / 8.00
                                 } else {
                                     delta.y / 40.00
                                 };
-    
+
                                 let mut pre_zoom = self.zoom + zoom_modifier;
                                 if pre_zoom > self.settings.max_zoom {
                                     pre_zoom = self.settings.max_zoom;
@@ -479,11 +482,10 @@ impl Map {
             if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("painting_points_m");
-                let center = Pos2::new(
-                    system.coords[0] as f32 * self.zoom,
-                    system.coords[1] as f32 * self.zoom,
+                let viewport_point = Pos2::new(
+                    (system.coords[0] as f32 * self.zoom) - min_point.x,
+                    (system.coords[1] as f32 * self.zoom) - min_point.y,
                 );
-                let viewport_point = Pos2::new(center.x - min_point.x, center.y - min_point.y);
                 if self.zoom > self.settings.label_visible_zoom
                     && (self.settings.node_text_visibility == VisibilitySetting::Allways
                         || (self.settings.node_text_visibility == VisibilitySetting::Hover
@@ -503,14 +505,12 @@ impl Map {
                     self.settings.styles[self.current_index].border.unwrap(),
                 );
                 if let Some(init_time) = self.entities.get(&system.id) {
-                    match Animation::pulse(paint, viewport_point, self.zoom, *init_time){
+                    match Animation::pulse(paint, viewport_point, self.zoom, *init_time) {
                         Ok(true) => {
                             ui_obj.ctx().request_repaint();
-                        },
-                        Ok(false) => nodes_to_remove.push(system.id),
-                        Err(t_error) => {
-
                         }
+                        Ok(false) => nodes_to_remove.push(system.id),
+                        Err(_) => (),
                     }
                 }
             }
@@ -539,7 +539,7 @@ impl Map {
         if self.zoom > self.settings.line_visible_zoom {
             let mut stroke = self.settings.styles[self.current_index].line.unwrap();
             let transparency_range = self.zoom - self.settings.line_visible_zoom;
-            if transparency_range >= 0.00 && transparency_range < 0.80 {
+            if (0.00..0.80).contains(&transparency_range) {
                 let mut tup_stroke = self.settings.styles[self.current_index]
                     .line
                     .unwrap()
@@ -585,10 +585,7 @@ impl Map {
                     (line.points[1].x * self.zoom) - min_point.x,
                     (line.points[1].y * self.zoom) - min_point.y,
                 );
-                paint.line_segment(
-                    [a, b],
-                    stroke,
-                );
+                paint.line_segment([a, b], stroke);
             }
         }
         Ok(())
