@@ -503,8 +503,14 @@ impl Map {
                     self.settings.styles[self.current_index].border.unwrap(),
                 );
                 if let Some(init_time) = self.entities.get(&system.id) {
-                    if let Ok(false) = Animation::pulse(ui_obj, center, self.zoom, *init_time) {
-                        nodes_to_remove.push(system.id);
+                    match Animation::pulse(paint, center, self.zoom, *init_time){
+                        Ok(true) => {
+                            ui_obj.ctx().request_repaint();
+                        },
+                        Ok(false) => nodes_to_remove.push(system.id),
+                        Err(t_error) => {
+
+                        }
                     }
                 }
             }

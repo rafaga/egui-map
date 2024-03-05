@@ -1,12 +1,12 @@
 use crate::map::Error;
-use egui::{epaint::CircleShape, Color32, Pos2, Shape, Ui};
+use egui::{epaint::CircleShape, Color32, Pos2, Shape, Painter};
 use std::time::Instant;
 
 pub(crate) struct Animation {}
 
 impl Animation {
     pub(crate) fn pulse(
-        ui: &Ui,
+        painter: &Painter,
         center: Pos2,
         zoom: f32,
         initial_time: Instant,
@@ -24,11 +24,10 @@ impl Animation {
         let color =
             Color32::from_rgba_unmultiplied(128, 12, 67, (255.00 * transparency).round() as u8);
         let circle = Shape::Circle(CircleShape::filled(center, radius, color));
-        ui.painter().extend(vec![circle]);
+        painter.extend(vec![circle]);
         if secs_played < 3.50 {
             result = true;
         }
-        ui.ctx().request_repaint();
         Ok(result)
     }
 }
