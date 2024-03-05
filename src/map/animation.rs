@@ -21,9 +21,10 @@ impl Animation {
         if transparency < 0.00 {
             transparency = 0.00;
         }
+        let center_corrected = Pos2::new(center.x * zoom, center.y * zoom);
         let color =
             Color32::from_rgba_unmultiplied(128, 12, 67, (255.00 * transparency).round() as u8);
-        let circle = Shape::Circle(CircleShape::filled(center, radius, color));
+        let circle = Shape::Circle(CircleShape::filled(center_corrected, radius, color));
         painter.extend(vec![circle]);
         if secs_played < 3.50 {
             result = true;
