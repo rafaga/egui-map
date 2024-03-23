@@ -11,6 +11,7 @@ use std::time::Instant;
 
 pub mod animation;
 pub mod objects;
+pub mod context;
 // This can by any object or point with its associated metadata
 /// Struct that contains coordinates to help calculate nearest point in space
 
@@ -427,7 +428,7 @@ impl Map {
         });
     }
 
-    fn hover_management(&mut self, ui: &mut Ui, _paint: &Painter, resp: &Response) {
+    fn hover_management(&mut self, _ui: &mut Ui, _paint: &Painter, resp: &Response) {
         if resp.secondary_clicked() {
             resp.context_menu(|ui|{
                 if ui.button("Settings").clicked() {
