@@ -496,12 +496,6 @@ impl Map {
                     text_settings.text = system.name.to_string();
                     self.paint_label(paint, &text_settings);
                 }
-                paint.circle(
-                    viewport_point,
-                    4.00 * self.zoom,
-                    self.settings.styles[self.current_index].fill_color,
-                    self.settings.styles[self.current_index].border.unwrap(),
-                );
                 if let Some(init_time) = self.entities.get(&system.id) {
                     match Animation::pulse(paint, center, self.zoom, *init_time){
                         Ok(true) => {
@@ -513,6 +507,12 @@ impl Map {
                         }
                     }
                 }
+                paint.circle(
+                    viewport_point,
+                    4.00 * self.zoom,
+                    self.settings.styles[self.current_index].fill_color,
+                    self.settings.styles[self.current_index].border.unwrap(),
+                );
             }
         }
         Ok(nodes_to_remove)
