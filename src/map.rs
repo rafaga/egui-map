@@ -427,9 +427,13 @@ impl Map {
         });
     }
 
-    fn hover_management(&mut self, _ui_obj: &Ui, _paint: &Painter, resp: &Response) {
+    fn hover_management(&mut self, ui: &mut Ui, _paint: &Painter, resp: &Response) {
         if resp.secondary_clicked() {
-            todo!();
+            ui.menu_button("Context Menu", |ui|{
+                if ui.button("Settings").clicked() {
+
+                }
+            });
         }
     }
 
