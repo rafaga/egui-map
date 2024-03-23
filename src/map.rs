@@ -429,7 +429,7 @@ impl Map {
 
     fn hover_management(&mut self, ui: &mut Ui, _paint: &Painter, resp: &Response) {
         if resp.secondary_clicked() {
-            ui.menu_button("Context Menu", |ui|{
+            resp.context_menu(|ui|{
                 if ui.button("Settings").clicked() {
 
                 }
