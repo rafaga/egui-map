@@ -9,6 +9,8 @@ use std::collections::HashMap;
 use std::fmt::Error;
 use std::time::Instant;
 
+use self::context::{ContextMenuManager, MenuManager};
+
 pub mod animation;
 pub mod objects;
 pub mod context;
@@ -29,6 +31,7 @@ pub struct Map {
     style: egui::Style,
     current_index: usize,
     entities: HashMap<usize, Instant>,
+    context_manager: ContextMenuManager,
     pub settings: MapSettings,
 }
 
@@ -121,6 +124,10 @@ impl Widget for &mut Map {
 
             self.hover_management(ui, &paint, &resp);
 
+            if self.context_manager.opened {
+                self.context_manager.ui(ui);
+            }
+
             if cfg!(debug_assertions) {
                 self.print_debug_info(paint, resp);
             }
@@ -148,6 +155,7 @@ impl Map {
             current_index: 0,
             entities: HashMap::new(),
             style: egui::Style::default(),
+            context_manager: ContextMenuManager::new(),
         }
     }
 
@@ -430,11 +438,7 @@ impl Map {
 
     fn hover_management(&mut self, _ui: &mut Ui, _paint: &Painter, resp: &Response) {
         if resp.secondary_clicked() {
-            resp.context_menu(|ui|{
-                if ui.button("Settings").clicked() {
-
-                }
-            });
+            self.context_manager.open(&resp.rect);
         }
     }
 

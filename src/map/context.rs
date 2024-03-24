@@ -1,34 +1,40 @@
-use egui::{Response,Ui,Pos2};
+use egui::{Rect,Ui,Vec2,Sense};
 
 pub trait MenuManager{
-    fn ui(&mut self,ui: &mut Ui) -> Response;
-    fn open(&mut self, response: &Response);
+    fn ui(&mut self,ui: &mut Ui);
+    fn open(&mut self, rect: &Rect);
     fn close(&mut self);
 }
 
-pub struct ContextMenu{
-    opened: bool,
-    position: Option<Pos2>,
+pub struct ContextMenuManager{
+    pub(crate) opened: bool,
+    size: Option<Vec2>,
 }
 
-impl ContextMenu{
+impl ContextMenuManager{
     pub fn new() -> Self {
         Self {
             opened: false,
-            position: None,
+            size: None,
         }
     }
 }
 
-impl MenuManager for ContextMenu{
-    fn ui(&mut self,ui: &mut Ui) -> Response {
-        ui.allocate_response(ui.max_rect().size(), egui::Sense::click_and_drag())
+impl MenuManager for ContextMenuManager{
+    fn ui(&mut self,ui: &mut Ui){
+        let resp = ui.allocate_response(self.size.unwrap(),Sense::click());
+        resp.context_menu(|ui|{
+            if ui.button("Settings").clicked() {
+
+            }
+        });
     }
-    fn open(&mut self, response: &Response) {
+    fn open(&mut self, rect: &Rect) {
         self.opened = true;
-        self.position = response.interact_pointer_pos();
+        self.size = Some(rect.size());
     }
     fn close(&mut self) {
         self.opened = false;
+        self.size = None;
     }
 } 
