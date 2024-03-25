@@ -1,4 +1,4 @@
-use egui::{Align2, Color32, FontFamily, FontId, Pos2, Stroke};
+use egui::{Align2, Color32, FontFamily, FontId, Pos2, Stroke, Response, Ui};
 use std::ops::{Div, Mul};
 
 #[derive(Clone)]
@@ -388,4 +388,12 @@ pub enum VisibilitySetting {
     Hidden,
     Hover,
     Allways,
+}
+
+pub trait ContextMenuManager {
+    fn ui(&mut self, ui: &Ui) -> Response;
+}
+
+pub trait NodeTemplate {
+    fn node_ui(&self, ui: &Ui, viewport_point: Pos2) -> Response;
 }

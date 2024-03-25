@@ -1,6 +1,6 @@
 use crate::map::animation::Animation;
 use crate::map::objects::{
-    MapBounds, MapLabel, MapLine, MapPoint, MapSettings, TextSettings, VisibilitySetting,
+    MapBounds, MapLabel, MapLine, MapPoint, MapSettings, TextSettings, VisibilitySetting, ContextMenuManager
 };
 use egui::{widgets::*, *};
 use kdtree::distance::squared_euclidean;
@@ -9,11 +9,11 @@ use std::collections::HashMap;
 use std::fmt::Error;
 use std::time::Instant;
 
-use self::context::{ContextMenuManager, MenuManager};
+use self::objects::NodeTemplate;
+
 
 pub mod animation;
 pub mod objects;
-pub mod context;
 // This can by any object or point with its associated metadata
 /// Struct that contains coordinates to help calculate nearest point in space
 
@@ -31,8 +31,9 @@ pub struct Map {
     style: egui::Style,
     current_index: usize,
     entities: HashMap<usize, Instant>,
-    context_manager: ContextMenuManager,
     pub settings: MapSettings,
+    menu_manager: Option<Box <dyn ContextMenuManager>>,
+    node_template: Option<Box <dyn NodeTemplate>>,
 }
 
 impl Default for Map {
@@ -45,7 +46,7 @@ impl Widget for &mut Map {
     fn ui(self, ui: &mut egui::Ui) -> Response {
         self.map_area = ui.available_rect_before_wrap();
 
-        self.asign_visual_style(ui);
+        self.assign_visual_style(ui);
 
         let canvas = egui::Frame::canvas(ui.style());
 
@@ -112,7 +113,7 @@ impl Widget for &mut Map {
 
             self.paint_sub_components(ui, self.map_area);
 
-            self.capture_mouse_events(ui);
+            self.capture_mouse_events(ui, &resp);
 
             if self.zoom != self.previous_zoom {
                 #[cfg(feature = "puffin")]
@@ -122,11 +123,20 @@ impl Widget for &mut Map {
                 self.previous_zoom = self.zoom;
             }
 
-            self.hover_management(ui, &paint, &resp);
-
-            if self.context_manager.opened {
-                self.context_manager.ui(ui);
+            if let Some(ref mut menu_mon) = &mut self.menu_manager {
+                resp.context_menu(|ui|{
+                    menu_mon.ui(ui);
+                });
+                /*if ui.button("set beacon").clicked() {
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui.button("⚙ settings").clicked() {
+                    ui.close_menu();
+                }*/
             }
+            
+
 
             if cfg!(debug_assertions) {
                 self.print_debug_info(paint, resp);
@@ -155,7 +165,8 @@ impl Map {
             current_index: 0,
             entities: HashMap::new(),
             style: egui::Style::default(),
-            context_manager: ContextMenuManager::new(),
+            menu_manager: None,
+            node_template: None,
         }
     }
 
@@ -179,13 +190,15 @@ impl Map {
     }
 
     pub fn add_hashmap_points(&mut self, hash_map: HashMap<usize, MapPoint>) {
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("add_hashmap_points");
         let mut min = (f64::INFINITY, f64::INFINITY);
         let mut max = (f64::NEG_INFINITY, f64::NEG_INFINITY);
         let mut tree = KdTree::<f64, usize, [f64; 2]>::new(2);
         let mut h_map = hash_map.clone();
+
+        //this need to be migrated to sde
         for entry in h_map.iter_mut() {
-            entry.1.coords[0] *= -1.0;
-            entry.1.coords[1] *= -1.0;
             if entry.1.coords[0] < min.0 {
                 min.0 = entry.1.coords[0];
             }
@@ -199,12 +212,9 @@ impl Map {
                 max.1 = entry.1.coords[1];
             }
             let _result = tree.add([entry.1.coords[0], entry.1.coords[1]], *entry.0);
-            for line in &mut entry.1.lines {
-                line[0] *= -1.0;
-                line[1] *= -1.0;
-                line[2] *= -1.0;
-            }
         }
+        // -----------------------------
+
         // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
         self.reference.min = Pos2::new(min.0 as f32, min.1 as f32);
         self.reference.max = Pos2::new(max.0 as f32, max.1 as f32);
@@ -224,6 +234,8 @@ impl Map {
     }
 
     pub fn set_pos(&mut self, x: f32, y: f32) {
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("set_pos");
         if x <= self.reference.max.x
             && x >= self.reference.min.x
             && y <= self.reference.max.y
@@ -240,26 +252,20 @@ impl Map {
     }
 
     pub fn add_labels(&mut self, labels: Vec<MapLabel>) {
-        let mut converted_labels = Vec::new();
-        for mut label in labels {
-            label.center[0] *= -1.00;
-            label.center[1] *= -1.00;
-            converted_labels.push(label);
-        }
-        self.labels = converted_labels;
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("add_labels");
+        self.labels = labels;
     }
 
     pub fn add_lines(&mut self, lines: Vec<MapLine>) {
-        let mut converted_lines = Vec::new();
-        for mut line in lines {
-            line.points[0] = line.points[0] * -1.00;
-            line.points[1] = line.points[1] * -1.00;
-            converted_lines.push(line);
-        }
-        self.lines = converted_lines;
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("add_lines");
+        self.lines = lines;
     }
 
     fn adjust_bounds(&mut self) {
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("adjust_bounds");
         self.current.max.x = self.reference.max.x * self.zoom;
         self.current.max.y = self.reference.max.y * self.zoom;
         self.current.min.x = self.reference.min.x * self.zoom;
@@ -269,7 +275,9 @@ impl Map {
         self.current.pos.y = self.reference.pos.y * self.zoom;
     }
 
-    fn capture_mouse_events(&mut self, ui: &Ui) {
+    fn capture_mouse_events(&mut self, ui: &Ui, resp: &Response) {
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("capture_mouse_events");
         // capture MouseWheel Event for Zoom control change
         if ui.rect_contains_pointer(self.map_area) {
             ui.input(|x| {
@@ -315,6 +323,8 @@ impl Map {
                 }
             });
         }
+        if resp.secondary_clicked() {
+        }
     }
 
     pub fn set_zoom(mut self, value: f32) {
@@ -327,7 +337,7 @@ impl Map {
         self.zoom
     }
 
-    fn asign_visual_style(&mut self, ui_obj: &mut Ui) {
+    fn assign_visual_style(&mut self, ui_obj: &mut Ui) {
         let style_index = ui_obj.visuals().dark_mode as usize;
 
         if self.current_index != style_index {
@@ -428,18 +438,12 @@ impl Map {
         let mut pos2 = rect.right_top();
         pos1.x -= 80.0;
         pos1.y += 120.0;
-        pos2.x -= 50.0;
+        pos2.x -= 60.0;
         pos2.y += 240.0;
         let sub_rect = egui::Rect::from_two_pos(pos1, pos2);
         ui_obj.allocate_ui_at_rect(sub_rect, |ui_obj| {
             ui_obj.add(zoom_slider);
         });
-    }
-
-    fn hover_management(&mut self, _ui: &mut Ui, _paint: &Painter, resp: &Response) {
-        if resp.secondary_clicked() {
-            self.context_manager.open(&resp.rect);
-        }
     }
 
     fn paint_map_points(
@@ -522,12 +526,16 @@ impl Map {
                         Err(_) => (),
                     }
                 }
-                paint.circle(
-                    viewport_point,
-                    4.00 * self.zoom,
-                    self.settings.styles[self.current_index].fill_color,
-                    self.settings.styles[self.current_index].border.unwrap(),
-                );
+                if let Some(node_template) = &self.node_template {
+                    node_template.node_ui(ui_obj, viewport_point);
+                } else {
+                    paint.circle(
+                        viewport_point,
+                        4.00 * self.zoom,
+                        self.settings.styles[self.current_index].fill_color,
+                        self.settings.styles[self.current_index].border.unwrap(),
+                    );
+                }
             }
         }
         Ok(nodes_to_remove)
@@ -619,10 +627,16 @@ impl Map {
     }
 
     pub fn notify(&mut self, id_node: usize) -> Result<bool, Error> {
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("notify");
         self.entities
             .entry(id_node)
             .and_modify(|value| *value = Instant::now())
             .or_insert(Instant::now());
         Ok(true)
+    }
+
+    pub fn set_context_manager(&mut self, manager: Box<dyn ContextMenuManager>) {
+        self.menu_manager=Some(manager);
     }
 }
