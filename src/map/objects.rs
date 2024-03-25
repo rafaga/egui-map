@@ -391,9 +391,9 @@ pub enum VisibilitySetting {
 }
 
 pub trait ContextMenuManager {
-    fn ui(&mut self, ui: &Ui);
+    fn ui(&mut self, ui: &mut Ui);
 }
 
 pub trait NodeTemplate {
-    fn node_ui(&self, ui: &Ui, viewport_point: Pos2);
+    fn node_ui(&self, ui: &mut Ui, viewport_point: Pos2);
 }
