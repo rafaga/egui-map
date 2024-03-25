@@ -1,6 +1,7 @@
 use crate::map::animation::Animation;
 use crate::map::objects::{
-    MapBounds, MapLabel, MapLine, MapPoint, MapSettings, TextSettings, VisibilitySetting, ContextMenuManager
+    ContextMenuManager, MapBounds, MapLabel, MapLine, MapPoint, MapSettings, TextSettings,
+    VisibilitySetting,
 };
 use egui::{widgets::*, *};
 use kdtree::distance::squared_euclidean;
@@ -10,7 +11,6 @@ use std::fmt::Error;
 use std::time::Instant;
 
 use self::objects::NodeTemplate;
-
 
 pub mod animation;
 pub mod objects;
@@ -32,8 +32,8 @@ pub struct Map {
     current_index: usize,
     entities: HashMap<usize, Instant>,
     pub settings: MapSettings,
-    menu_manager: Option<Box <dyn ContextMenuManager>>,
-    node_template: Option<Box <dyn NodeTemplate>>,
+    menu_manager: Option<Box<dyn ContextMenuManager>>,
+    node_template: Option<Box<dyn NodeTemplate>>,
 }
 
 impl Default for Map {
@@ -124,7 +124,7 @@ impl Widget for &mut Map {
             }
 
             if let Some(ref mut menu_mon) = &mut self.menu_manager {
-                resp.context_menu(|ui|{
+                resp.context_menu(|ui| {
                     menu_mon.ui(ui);
                 });
             }
@@ -314,8 +314,7 @@ impl Map {
                 }
             });
         }
-        if resp.secondary_clicked() {
-        }
+        if resp.secondary_clicked() {}
     }
 
     pub fn set_zoom(mut self, value: f32) {
@@ -442,7 +441,7 @@ impl Map {
         vec_points: &Vec<usize>,
         hashm: &Option<HashMap<usize, MapPoint>>,
         paint: &Painter,
-        ui_obj: &Ui,
+        ui_obj: &mut Ui,
         min_point: &Pos2,
         resp: &Response,
     ) -> Result<Vec<usize>, ()> {
@@ -628,6 +627,6 @@ impl Map {
     }
 
     pub fn set_context_manager(&mut self, manager: Box<dyn ContextMenuManager>) {
-        self.menu_manager=Some(manager);
+        self.menu_manager = Some(manager);
     }
 }
