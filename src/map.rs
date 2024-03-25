@@ -127,16 +127,7 @@ impl Widget for &mut Map {
                 resp.context_menu(|ui|{
                     menu_mon.ui(ui);
                 });
-                /*if ui.button("set beacon").clicked() {
-                    ui.close_menu();
-                }
-                ui.separator();
-                if ui.button("⚙ settings").clicked() {
-                    ui.close_menu();
-                }*/
             }
-            
-
 
             if cfg!(debug_assertions) {
                 self.print_debug_info(paint, resp);
