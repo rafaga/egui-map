@@ -1,4 +1,4 @@
-use egui::{Align2, Color32, FontFamily, FontId, Pos2, Stroke, Response, Ui};
+use egui::{Align2, Color32, FontFamily, FontId, Pos2, Stroke, Ui};
 use std::ops::{Div, Mul};
 
 #[derive(Clone)]
@@ -391,7 +391,7 @@ pub enum VisibilitySetting {
 }
 
 pub trait ContextMenuManager {
-    fn ui(&mut self, ui: &Ui);
+    fn ui(&self, ui: &Ui);
 }
 
 pub trait NodeTemplate {
