@@ -492,16 +492,17 @@ impl Map {
                 if self.zoom > self.settings.label_visible_zoom
                     && (self.settings.node_text_visibility == VisibilitySetting::Allways
                         || (self.settings.node_text_visibility == VisibilitySetting::Hover
-                            && nearest_id.unwrap_or(&0usize) == &system.id))
+                            && nearest_id.unwrap_or(&0usize) == &system.get_id()))
                 {
                     let mut viewport_text = viewport_point;
                     viewport_text.x += 3.0 * self.zoom;
                     viewport_text.y -= 3.0 * self.zoom;
                     text_settings.position = viewport_text;
-                    text_settings.text = system.name.to_string();
+                    text_settings.text = system.get_name();
                     self.paint_label(paint, &text_settings);
                 }
-                if let Some(init_time) = self.entities.get(&system.id) {
+                let system_id = system.get_id();
+                if let Some(init_time) = self.entities.get(&system_id) {
                     match Animation::pulse(
                         paint,
                         viewport_point,
@@ -512,7 +513,7 @@ impl Map {
                         Ok(true) => {
                             ui_obj.ctx().request_repaint();
                         }
-                        Ok(false) => nodes_to_remove.push(system.id),
+                        Ok(false) => nodes_to_remove.push(system_id),
                         Err(_) => (),
                     }
                 }
