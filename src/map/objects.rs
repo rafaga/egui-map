@@ -1,5 +1,250 @@
 use egui::{Align2, Color32, FontFamily, FontId, Pos2, Stroke, Ui};
-use std::ops::{Div, Mul};
+use std::io::ErrorKind;
+use std::ops::{Div, DivAssign, Mul, MulAssign};
+use std::convert::{From,Into,TryInto};
+
+#[derive(Clone)]
+pub struct RawPoint{
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+impl RawPoint{
+    pub fn new(x:f32, y:f32, z:f32) -> Self {
+        Self {
+            x,
+            y,
+            z
+        }
+    }
+}
+
+impl Default for RawPoint{
+    fn default() -> Self {
+        Self::new(0.00,0.00,0.00)
+    }
+}
+
+impl Mul<i64> for RawPoint {
+    type Output = Self;
+
+    fn mul(mut self, rhs: i64) -> Self::Output {
+        self.x *= rhs as f32;
+        self.y *= rhs as f32;
+        self.z *= rhs as f32;
+        self
+    }
+}
+
+impl Mul<i32> for RawPoint {
+    type Output = Self;
+
+    fn mul(mut self, rhs: i32) -> Self::Output {
+        self.x *= rhs as f32;
+        self.y *= rhs as f32;
+        self.z *= rhs as f32;
+        self
+    }
+}
+
+impl Mul<f32> for RawPoint {
+    type Output = Self;
+
+    fn mul(mut self, rhs: f32) -> Self::Output {
+        self.x *= rhs;
+        self.y *= rhs;
+        self.z *= rhs;
+        self
+    }
+}
+
+impl MulAssign<i64> for RawPoint{
+    fn mul_assign(&mut self, rhs: i64) {
+        self.x = self.x * rhs as f32;
+        self.y = self.y * rhs as f32;
+        self.z = self.z * rhs as f32;
+    }
+}
+
+impl MulAssign<i32> for RawPoint{
+    fn mul_assign(&mut self, rhs: i32) {
+        self.x = self.x * rhs as f32;
+        self.y = self.y * rhs as f32;
+        self.z = self.z * rhs as f32;
+    }
+}
+
+impl MulAssign<f32> for RawPoint{
+    fn mul_assign(&mut self, rhs: f32) {
+        self.x = self.x * rhs;
+        self.y = self.y * rhs;
+        self.z = self.z * rhs;
+    }
+}
+
+impl Div<i64> for RawPoint {
+    type Output = Self;
+
+    fn div(mut self, rhs: i64) -> Self::Output {
+        self.x /= rhs as f32;
+        self.y /= rhs as f32;
+        self.z /= rhs as f32;
+        self
+    }
+}
+
+impl Div<i32> for RawPoint {
+    type Output = Self;
+
+    fn div(mut self, rhs: i32) -> Self::Output {
+        self.x /= rhs as f32;
+        self.y /= rhs as f32;
+        self.z /= rhs as f32;
+        self
+    }
+}
+
+impl Div<f32> for RawPoint {
+    type Output = Self;
+
+    fn div(mut self, rhs: f32) -> Self::Output {
+        self.x /= rhs;
+        self.y /= rhs;
+        self.z /= rhs;
+        self
+    }
+}
+
+impl DivAssign<i64> for RawPoint{
+    fn div_assign(&mut self, rhs: i64) {
+        self.x = self.x / rhs as f32;
+        self.y = self.y / rhs as f32;
+        self.z = self.z / rhs as f32;
+    }
+}
+
+impl DivAssign<i32> for RawPoint{
+    fn div_assign(&mut self, rhs: i32) {
+        self.x = self.x / rhs as f32;
+        self.y = self.y / rhs as f32;
+        self.z = self.z / rhs as f32;
+    }
+}
+
+impl DivAssign<f32> for RawPoint{
+    fn div_assign(&mut self, rhs: f32) {
+        self.x = self.x / rhs;
+        self.y = self.y / rhs;
+        self.z = self.z / rhs;
+    }
+}
+
+impl From<[f32;3]> for RawPoint{
+    fn from(value: [f32;3]) -> Self {
+        Self {
+            x: value[0],
+            y: value[1],
+            z: value[2]
+        }
+    }
+}
+
+impl From<[i64;3]> for RawPoint{
+    fn from(value: [i64;3]) -> Self {
+        Self {
+            x: value[0] as f32,
+            y: value[1] as f32,
+            z: value[2] as f32
+        }
+    }
+}
+
+impl From<[i32;3]> for RawPoint{
+    fn from(value: [i32;3]) -> Self {
+        Self {
+            x: value[0] as f32,
+            y: value[1] as f32,
+            z: value[2] as f32
+        }
+    }
+}
+
+impl From<[i16;3]> for RawPoint{
+    fn from(value: [i16;3]) -> Self {
+        Self {
+            x: value[0] as f32,
+            y: value[1] as f32,
+            z: value[2] as f32
+        }
+    }
+}
+
+impl From<[i8;3]> for RawPoint{
+    fn from(value: [i8;3]) -> Self {
+        Self {
+            x: value[0] as f32,
+            y: value[1] as f32,
+            z: value[2] as f32
+        }
+    }
+}
+
+impl Into<[f32;3]> for RawPoint{
+    fn into(self) -> [f32;3] {
+        [self.x,self.y,self.z]
+    }
+}
+
+impl TryInto<[i64;3]> for RawPoint{
+    type Error = std::io::Error;
+
+    fn try_into(self) -> Result<[i64;3], <RawPoint as TryInto<[i64;3]>>::Error> {
+        if self.x > i64::MAX as f32 || self.y > i64::MAX as f32 || self.z > i64::MAX as f32{
+            Err(std::io::Error::new(ErrorKind::Other,"Value overflow."))
+        } else {
+            Ok([self.x as i64,self.y as i64,self.z as i64])
+        }
+    }
+}
+
+impl TryInto<Pos2> for RawPoint{
+    type Error = std::io::Error;
+
+    fn try_into(self) -> Result<Pos2, <RawPoint as TryInto<Pos2>>::Error> {
+        if self.x != 0.0 && self.y != 0.0 && self.z != 0.0 {
+            Err(std::io::Error::new(ErrorKind::InvalidData,""))
+        } else {
+            if self.x == 0.0 {
+                return Ok(Pos2::new(self.y,self.z));
+            }
+            if self.y == 0.0 {
+                Ok(Pos2::new(self.x,self.z))
+            } else {
+                Ok(Pos2::new(self.x,self.y))
+            }
+        }
+    }
+}
+
+impl TryInto<[f32;2]> for RawPoint{
+    type Error = std::io::Error;
+
+    fn try_into(self) -> Result<[f32;2], <RawPoint as TryInto<[f32;2]>>::Error> {
+        if self.x != 0.0 && self.y != 0.0 && self.z != 0.0 {
+            Err(std::io::Error::new(ErrorKind::InvalidData,""))
+        } else {
+            if self.x == 0.0 {
+                return Ok([self.y,self.z]);
+            }
+            if self.y == 0.0 {
+                Ok([self.x,self.z])
+            } else {
+                Ok([self.x,self.y])
+            }
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct MapStyle {
@@ -151,26 +396,38 @@ impl MapLabel {
 
 #[derive(Clone)]
 pub struct MapLine {
-    pub points: [Pos2; 2],
-}
-
-impl Default for MapLine {
-    fn default() -> Self {
-        MapLine::new(0.00, 0.00, 0.00, 0.00)
-    }
+    pub id:Option<String>,
+    pub points: [RawPoint; 2],
 }
 
 impl MapLine {
-    pub fn new(x1: f32, y1: f32, x2: f32, y2: f32) -> Self {
+    pub fn new(point1: RawPoint, point2:RawPoint) -> Self {
         MapLine {
-            points: [Pos2::new(x1, y1), Pos2::new(x2, y2)],
+            id:None,
+            points: [point1, point2],
         }
+    }
+
+    pub fn distance(self) -> f32 {
+        let [mut x,mut y,mut z]:[f32;3]= [0.00,0.00,0.00];
+        x = self.points[0].x - self.points[1].x;
+        y = self.points[0].y - self.points[1].y;
+        z = self.points[0].z - self.points[1].z;
+        (x.powi(2)+y.powi(2)+z.powi(2)).sqrt()
+    }
+
+    pub fn center(self) -> f32 {
+        0.0
     }
 }
 
-impl From<([f32; 2], [f32; 2])> for MapLine {
-    fn from(value: ([f32; 2], [f32; 2])) -> Self {
-        MapLine::new(value.0[0], value.0[1], value.1[0], value.1[1])
+impl TryInto<[egui::Pos2;2]> for MapLine {
+    type Error = std::io::Error;
+
+    fn try_into(self) -> Result<[egui::Pos2; 2], <Self as TryInto<[egui::Pos2; 2]>>::Error> { 
+        let position1 = self.points[0].try_into()?;
+        let position2 = self.points[1].try_into()?;
+        Ok([position1,position2])
     }
 }
 
@@ -179,9 +436,9 @@ impl From<([f32; 2], [f32; 2])> for MapLine {
 #[derive(Clone)]
 pub struct MapPoint {
     /// coordinates of the Solar System
-    pub coords: [f64; 3],
+    pub raw_point: RawPoint,
     /// coordinates for lines connecting this point
-    pub lines: Vec<[f64; 3]>,
+    pub connections: Vec<String>,
     /// Object Identifier for search propurses
     id: usize,
     /// SolarSystem Name
@@ -190,11 +447,11 @@ pub struct MapPoint {
 
 impl MapPoint {
     /// Creates a new Spatial point with an Id (solarSystemId) and the system's 3D coordinates
-    pub fn new(id: usize, coords: [f64; 3]) -> MapPoint {
+    pub fn new(id: usize, coords: RawPoint) -> MapPoint {
         MapPoint {
-            coords,
+            raw_point: coords,
             id,
-            lines: Vec::new(),
+            connections: Vec::new(),
             name: String::new(),
         }
     }
@@ -212,70 +469,6 @@ impl MapPoint {
     }
 }
 
-impl Mul<f64> for MapPoint {
-    type Output = Self;
-
-    fn mul(mut self, rhs: f64) -> Self::Output {
-        self.coords[0] *= rhs;
-        self.coords[1] *= rhs;
-        self.coords[2] *= rhs;
-        for indx in 0..self.lines.len() {
-            self.lines[indx][0] *= rhs;
-            self.lines[indx][1] *= rhs;
-            self.lines[indx][2] *= rhs;
-        }
-        self
-    }
-}
-
-impl Mul<f32> for MapPoint {
-    type Output = Self;
-
-    fn mul(mut self, rhs: f32) -> Self::Output {
-        self.coords[0] *= rhs as f64;
-        self.coords[1] *= rhs as f64;
-        self.coords[2] *= rhs as f64;
-        for indx in 0..self.lines.len() {
-            self.lines[indx][0] *= rhs as f64;
-            self.lines[indx][1] *= rhs as f64;
-            self.lines[indx][2] *= rhs as f64;
-        }
-        self
-    }
-}
-
-impl Div<f64> for MapPoint {
-    type Output = Self;
-
-    fn div(mut self, rhs: f64) -> Self::Output {
-        self.coords[0] /= rhs;
-        self.coords[1] /= rhs;
-        self.coords[2] /= rhs;
-        for indx in 0..self.lines.len() {
-            self.lines[indx][0] /= rhs;
-            self.lines[indx][1] /= rhs;
-            self.lines[indx][2] /= rhs;
-        }
-        self
-    }
-}
-
-impl Div<f32> for MapPoint {
-    type Output = Self;
-
-    fn div(mut self, rhs: f32) -> Self::Output {
-        self.coords[0] /= rhs as f64;
-        self.coords[1] /= rhs as f64;
-        self.coords[2] /= rhs as f64;
-        for indx in 0..self.lines.len() {
-            self.lines[indx][0] /= rhs as f64;
-            self.lines[indx][1] /= rhs as f64;
-            self.lines[indx][2] /= rhs as f64;
-        }
-        self
-    }
-}
-
 impl From<std::collections::hash_map::OccupiedEntry<'_, usize, MapPoint>> for MapPoint {
     fn from(value: std::collections::hash_map::OccupiedEntry<'_, usize, MapPoint>) -> Self {
         let k = value.get();
@@ -285,18 +478,18 @@ impl From<std::collections::hash_map::OccupiedEntry<'_, usize, MapPoint>> for Ma
 
 #[derive(Clone)]
 pub(crate) struct MapBounds {
-    pub min: Pos2,
-    pub max: Pos2,
-    pub pos: Pos2,
-    pub dist: f64,
+    pub min: RawPoint,
+    pub max: RawPoint,
+    pub pos: RawPoint,
+    pub dist: f32,
 }
 
 impl MapBounds {
     pub fn new() -> Self {
         MapBounds {
-            min: Pos2::new(0.0, 0.0),
-            max: Pos2::new(0.0, 0.0),
-            pos: Pos2::new(0.0, 0.0),
+            min: RawPoint::default(),
+            max: RawPoint::default(),
+            pos: RawPoint::default(),
             dist: 0.0,
         }
     }

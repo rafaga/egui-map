@@ -1,7 +1,7 @@
 use crate::map::animation::Animation;
 use crate::map::objects::{
     ContextMenuManager, MapBounds, MapLabel, MapLine, MapPoint, MapSettings, TextSettings,
-    VisibilitySetting,
+    VisibilitySetting,RawPoint,
 };
 use egui::{widgets::*, *};
 use kdtree::distance::squared_euclidean;
@@ -23,7 +23,7 @@ pub struct Map {
     points: Option<HashMap<usize, MapPoint>>,
     lines: Vec<MapLine>,
     labels: Vec<MapLabel>,
-    tree: Option<KdTree<f64, usize, [f64; 2]>>,
+    tree: Option<KdTree<f32, usize, [f32; 2]>>,
     visible_points: Vec<usize>,
     map_area: Rect,
     reference: MapBounds,
@@ -166,12 +166,10 @@ impl Map {
         puffin::profile_scope!("calculate_visible_points");
         if self.current.dist > 0.0 {
             if let Some(tree) = &self.tree {
-                let center = [
-                    (self.current.pos.x / self.zoom) as f64,
-                    (self.current.pos.y / self.zoom) as f64,
-                ];
+                let center = self.current.pos / self.zoom;
                 let radius = self.current.dist.powi(2);
-                let vis_pos = tree.within(&center, radius, &squared_euclidean).unwrap();
+                let point:[f32;2] = center.try_into().unwrap();
+                let vis_pos = tree.within(&point, radius, &squared_euclidean).unwrap();
                 self.visible_points.clear();
                 for point in vis_pos {
                     self.visible_points.push(*point.1);
@@ -183,36 +181,42 @@ impl Map {
     pub fn add_hashmap_points(&mut self, hash_map: HashMap<usize, MapPoint>) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("add_hashmap_points");
-        let mut min = (f64::INFINITY, f64::INFINITY);
-        let mut max = (f64::NEG_INFINITY, f64::NEG_INFINITY);
-        let mut tree = KdTree::<f64, usize, [f64; 2]>::new(2);
+        let mut min = RawPoint::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
+        let mut max = RawPoint::new(f32::NEG_INFINITY, f32::NEG_INFINITY,f32::NEG_INFINITY);
+        let mut tree = KdTree::<f32, usize, [f32; 2]>::new(2);
         let mut h_map = hash_map.clone();
 
         //this need to be migrated to sde
         for entry in h_map.iter_mut() {
-            if entry.1.coords[0] < min.0 {
-                min.0 = entry.1.coords[0];
+            if entry.1.raw_point.x < min.x {
+                min.x = entry.1.raw_point.x ;
             }
-            if entry.1.coords[1] < min.1 {
-                min.1 = entry.1.coords[1];
+            if entry.1.raw_point.y < min.y {
+                min.y = entry.1.raw_point.y;
             }
-            if entry.1.coords[0] > max.0 {
-                max.0 = entry.1.coords[0];
+            if entry.1.raw_point.z < min.z {
+                min.z = entry.1.raw_point.z;
             }
-            if entry.1.coords[1] > max.1 {
-                max.1 = entry.1.coords[1];
+            if entry.1.raw_point.x > max.x {
+                max.x = entry.1.raw_point.x;
             }
-            let _result = tree.add([entry.1.coords[0], entry.1.coords[1]], *entry.0);
+            if entry.1.raw_point.y > max.y {
+                max.y = entry.1.raw_point.y;
+            }
+            if entry.1.raw_point.z > max.z {
+                max.z = entry.1.raw_point.z;
+            }
+            let _result = tree.add(entry.1.raw_point.try_into().unwrap(), *entry.0);
         }
         // -----------------------------
 
         // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
-        self.reference.min = Pos2::new(min.0 as f32, min.1 as f32);
-        self.reference.max = Pos2::new(max.0 as f32, max.1 as f32);
+        self.reference.min = min;
+        self.reference.max = max;
         self.points = Some(h_map);
         self.tree = Some(tree);
         // we create a rect that include every node in the map
-        let rect = Rect::from_min_max(self.reference.min, self.reference.max);
+        let rect = Rect::from_min_max(self.reference.min.try_into().unwrap(), self.reference.max.try_into().unwrap());
         // we define the initial coordinate as the center of such rectangle
         self.reference.pos = rect.center();
         let dist_x =
@@ -486,8 +490,8 @@ impl Map {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("painting_points_m");
                 let viewport_point = Pos2::new(
-                    (system.coords[0] as f32 * self.zoom) - min_point.x,
-                    (system.coords[1] as f32 * self.zoom) - min_point.y,
+                    (system.raw_point[0] as f32 * self.zoom) - min_point.x,
+                    (system.raw_point[1] as f32 * self.zoom) - min_point.y,
                 );
                 if self.zoom > self.settings.label_visible_zoom
                     && (self.settings.node_text_visibility == VisibilitySetting::Allways
@@ -575,10 +579,10 @@ impl Map {
             for temp_point in vec_points {
                 if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
                     let a_point = Pos2::new(
-                        (system.coords[0] as f32 * self.zoom) - min_point.x,
-                        (system.coords[1] as f32 * self.zoom) - min_point.y,
+                        (system.raw_point[0] as f32 * self.zoom) - min_point.x,
+                        (system.raw_point[1] as f32 * self.zoom) - min_point.y,
                     );
-                    for line in &system.lines {
+                    for line in &system.connections {
                         let b_point = Pos2::new(
                             (line[0] as f32 * self.zoom) - min_point.x,
                             (line[1] as f32 * self.zoom) - min_point.y,
