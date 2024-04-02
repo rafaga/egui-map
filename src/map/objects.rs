@@ -1,9 +1,9 @@
 use egui::{Align2, Color32, FontFamily, FontId, Pos2, Stroke, Ui};
 use std::io::ErrorKind;
-use std::ops::{Div, DivAssign, Mul, MulAssign};
+use std::ops::{Div, DivAssign, Mul, MulAssign, Sub, Add};
 use std::convert::{From,Into,TryInto};
 
-#[derive(Clone)]
+#[derive(Copy,Clone)]
 pub struct RawPoint{
     pub x: f32,
     pub y: f32,
@@ -16,6 +16,33 @@ impl RawPoint{
             x,
             y,
             z
+        }
+    }
+
+    pub(crate) fn from_pos2(input:Pos2, projected_axis:usize) -> Result<Self,std::io::Error> {
+        match projected_axis {
+            0 => {
+                Ok(RawPoint {
+                    x:0.0,
+                    y:input.x,
+                    z:input.y,
+                })
+            },
+            1 => {
+                Ok(RawPoint {
+                    x:input.x,
+                    y:0.0,
+                    z:input.y,
+                })
+            },
+            2 => {
+                Ok(RawPoint {
+                    x:input.x,
+                    y:input.y,
+                    z:0.0,
+                })
+            },
+            _ => Err(std::io::Error::new(ErrorKind::Other, "Incorrect Projected Axis Parameter"))
         }
     }
 }
@@ -140,6 +167,50 @@ impl DivAssign<f32> for RawPoint{
     }
 }
 
+impl Add<RawPoint> for RawPoint{
+    type Output = RawPoint;
+    fn add(self, rhs: RawPoint) -> Self::Output {
+        RawPoint {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+            z: self.z + rhs.z,
+        }
+    }
+}
+
+impl Sub<RawPoint> for RawPoint{
+    type Output = RawPoint;
+    fn sub(self, rhs: RawPoint) -> Self::Output {
+        RawPoint {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+            z: self.z - rhs.z,
+        }
+    }
+}
+
+impl Add<&RawPoint> for RawPoint{
+    type Output = RawPoint;
+    fn add(self, rhs: &RawPoint) -> Self::Output {
+        RawPoint {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+            z: self.z + rhs.z,
+        }
+    }
+}
+
+impl Sub<&RawPoint> for RawPoint{
+    type Output = RawPoint;
+    fn sub(self, rhs: &RawPoint) -> Self::Output {
+        RawPoint {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+            z: self.z - rhs.z,
+        }
+    }
+}
+
 impl From<[f32;3]> for RawPoint{
     fn from(value: [f32;3]) -> Self {
         Self {
@@ -242,6 +313,51 @@ impl TryInto<[f32;2]> for RawPoint{
             } else {
                 Ok([self.x,self.y])
             }
+        }
+    }
+}
+
+#[derive(Copy,Clone)]
+pub struct RawLine {
+    pub points:[RawPoint;2],
+}
+
+impl RawLine{
+    pub fn new(a:RawPoint ,b:RawPoint) -> Self {
+        Self{
+            points:[a,b]
+        }
+    }
+
+    pub fn distance(self) -> f32 {
+        let x = self.points[0].x - self.points[1].x;
+        let y = self.points[0].y - self.points[1].y;
+        let z = self.points[0].z - self.points[1].z;
+        (x.powi(2)+y.powi(2)+z.powi(2)).sqrt()
+    }
+
+    pub fn midpoint(self) -> RawPoint {
+        let x = (self.points[0].x + self.points[1].x)/2.0;
+        let y = (self.points[0].y + self.points[1].y)/2.0;
+        let z = (self.points[0].z + self.points[1].z)/2.0;
+        RawPoint::new(x,y,z)
+    }
+}
+
+impl TryInto<[egui::Pos2;2]> for RawLine {
+    type Error = std::io::Error;
+
+    fn try_into(self) -> Result<[egui::Pos2; 2], <Self as TryInto<[egui::Pos2; 2]>>::Error> { 
+        let position1 = self.points[0].try_into()?;
+        let position2 = self.points[1].try_into()?;
+        Ok([position1,position2])
+    }
+}
+
+impl From<[[i64;3];2]> for RawLine {
+    fn from(value: [[i64;3];2]) -> Self {
+        Self{
+            points: [RawPoint::from(value[0]),RawPoint::from(value[1])]
         }
     }
 }
@@ -397,39 +513,19 @@ impl MapLabel {
 #[derive(Clone)]
 pub struct MapLine {
     pub id:Option<String>,
-    pub points: [RawPoint; 2],
+    pub raw_line: RawLine,
 }
 
 impl MapLine {
-    pub fn new(point1: RawPoint, point2:RawPoint) -> Self {
+    pub fn new( point1: RawPoint, point2:RawPoint) -> Self {
         MapLine {
             id:None,
-            points: [point1, point2],
+            raw_line: RawLine::new(point1, point2),
         }
     }
-
-    pub fn distance(self) -> f32 {
-        let [mut x,mut y,mut z]:[f32;3]= [0.00,0.00,0.00];
-        x = self.points[0].x - self.points[1].x;
-        y = self.points[0].y - self.points[1].y;
-        z = self.points[0].z - self.points[1].z;
-        (x.powi(2)+y.powi(2)+z.powi(2)).sqrt()
-    }
-
-    pub fn center(self) -> f32 {
-        0.0
-    }
 }
 
-impl TryInto<[egui::Pos2;2]> for MapLine {
-    type Error = std::io::Error;
 
-    fn try_into(self) -> Result<[egui::Pos2; 2], <Self as TryInto<[egui::Pos2; 2]>>::Error> { 
-        let position1 = self.points[0].try_into()?;
-        let position2 = self.points[1].try_into()?;
-        Ok([position1,position2])
-    }
-}
 
 // This can by any object or point with its associated metadata
 /// Struct that contains coordinates to help calculate nearest point in space
@@ -502,7 +598,7 @@ impl Default for MapBounds {
 }
 
 pub(crate) struct TextSettings {
-    pub position: Pos2,
+    pub position: RawPoint,
     pub anchor: Align2,
     pub text: String,
     pub size: f32,
@@ -517,6 +613,7 @@ pub struct MapSettings {
     pub label_visible_zoom: f32,
     pub node_text_visibility: VisibilitySetting,
     pub styles: Vec<MapStyle>,
+    pub(crate) projected_index: Option<usize>
 }
 
 impl MapSettings {
@@ -528,6 +625,7 @@ impl MapSettings {
             label_visible_zoom: 0.0,
             node_text_visibility: VisibilitySetting::Allways,
             styles: vec![MapStyle::new()],
+            projected_index: None,
         }
     }
 }
@@ -541,6 +639,7 @@ impl Default for MapSettings {
             label_visible_zoom: 0.58,
             node_text_visibility: VisibilitySetting::Allways,
             styles: Vec::new(),
+            projected_index: None,
         };
 
         // light Theme

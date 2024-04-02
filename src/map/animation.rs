@@ -1,5 +1,5 @@
-use crate::map::Error;
-use egui::{epaint::CircleShape, Color32, Painter, Pos2, Shape};
+use crate::map::{Error,objects::RawPoint};
+use egui::{epaint::CircleShape, Color32, Painter, Shape};
 use std::time::Instant;
 
 pub(crate) struct Animation {}
@@ -7,7 +7,7 @@ pub(crate) struct Animation {}
 impl Animation {
     pub(crate) fn pulse(
         painter: &Painter,
-        center: Pos2,
+        center: RawPoint,
         zoom: f32,
         initial_time: Instant,
         color: Color32,
@@ -27,7 +27,7 @@ impl Animation {
             color.b(),
             (255.00 * transparency).round() as u8,
         );
-        let circle = Shape::Circle(CircleShape::filled(center, radius, corrected_color));
+        let circle = Shape::Circle(CircleShape::filled(center.try_into().unwrap(), radius, corrected_color));
         painter.extend(vec![circle]);
         if secs_played < 3.50 {
             result = true;

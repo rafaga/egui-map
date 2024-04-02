@@ -1,7 +1,6 @@
 use crate::map::animation::Animation;
 use crate::map::objects::{
-    ContextMenuManager, MapBounds, MapLabel, MapLine, MapPoint, MapSettings, TextSettings,
-    VisibilitySetting,RawPoint,
+    ContextMenuManager, MapBounds, MapLabel, MapLine, MapPoint, MapSettings, RawLine, RawPoint, TextSettings, VisibilitySetting
 };
 use egui::{widgets::*, *};
 use kdtree::distance::squared_euclidean;
@@ -21,7 +20,7 @@ pub struct Map {
     zoom: f32,
     previous_zoom: f32,
     points: Option<HashMap<usize, MapPoint>>,
-    lines: Vec<MapLine>,
+    lines: Option<HashMap<String,MapLine>>,
     labels: Vec<MapLabel>,
     tree: Option<KdTree<f32, usize, [f32; 2]>>,
     visible_points: Vec<usize>,
@@ -63,11 +62,8 @@ impl Widget for &mut Map {
                 puffin::profile_scope!("calculating_points_in_visible_area");
 
                 let coords = vec.to_pos2();
-                let new_pos = (
-                    self.reference.pos.x - (coords.x / self.zoom),
-                    self.reference.pos.y - (coords.y / self.zoom),
-                );
-                self.set_pos(new_pos.0, new_pos.1);
+                let new_pos = [self.reference.pos.x - (coords.x / self.zoom),self.reference.pos.y - (coords.y / self.zoom)];
+                self.set_pos(new_pos);
                 //self.calculate_visible_points();
             }
             let map_style = self.settings.styles[self.current_index].clone() * self.zoom;
@@ -78,7 +74,7 @@ impl Widget for &mut Map {
                     anchor: Align2::CENTER_CENTER,
                     family: FontFamily::Proportional,
                     text: String::new(),
-                    position: Pos2::new(0.00, 0.00),
+                    position: RawPoint::default(),
                     text_color: ui.visuals().text_color(),
                 };
                 for label in &self.labels {
@@ -95,21 +91,28 @@ impl Widget for &mut Map {
             }
 
             // Here we determine the widget center to print all nodes
-            let min_point = Pos2::new(
-                self.current.pos.x - self.map_area.center().x,
-                self.current.pos.y - self.map_area.center().y,
-            );
-
-            let vec_points = &self.visible_points;
-            let hashm = &self.points;
-            let _a = self.paint_map_lines(vec_points, hashm, &paint, &min_point);
-            if let Ok(nodes_to_remove) =
-                self.paint_map_points(vec_points, hashm, &paint, ui, &min_point, &resp)
-            {
-                for node in nodes_to_remove {
-                    self.entities.remove(&node);
+            //let min_point = self.current.pos - RawPoint::try_from([self.map_area.center().x,self.map_area.center().y]).unwrap();
+            
+            if self.points.is_some() {
+                let rect_midpoint = RawPoint::from_pos2(self.map_area.center(),1).unwrap();
+                let min_point = self.current.pos - rect_midpoint;
+                let vec_points = &self.visible_points;
+                let hashm = &self.points;
+                let _a = self.paint_map_lines(vec_points, hashm, &paint, &min_point);
+                if let Ok(nodes_to_remove) =
+                    self.paint_map_points(vec_points, hashm, &paint, ui, &min_point, &resp)
+                {
+                    for node in nodes_to_remove {
+                        self.entities.remove(&node);
+                    }
                 }
             }
+            /*let min_point = Pos2::new(
+                self.current.pos.x - self.map_area.center().x,
+                self.current.pos.y - self.map_area.center().y,
+            );*/
+
+            
 
             self.paint_sub_components(ui, self.map_area);
 
@@ -147,7 +150,7 @@ impl Map {
             map_area: Rect::NOTHING,
             tree: None,
             points: None,
-            lines: Vec::new(),
+            lines: None,
             labels: Vec::new(),
             visible_points: Vec::new(),
             current: MapBounds::default(),
@@ -185,11 +188,11 @@ impl Map {
         let mut max = RawPoint::new(f32::NEG_INFINITY, f32::NEG_INFINITY,f32::NEG_INFINITY);
         let mut tree = KdTree::<f32, usize, [f32; 2]>::new(2);
         let mut h_map = hash_map.clone();
+        let mut confirmations = 0;
 
-        //this need to be migrated to sde
         for entry in h_map.iter_mut() {
             if entry.1.raw_point.x < min.x {
-                min.x = entry.1.raw_point.x ;
+                min.x = entry.1.raw_point.x;
             }
             if entry.1.raw_point.y < min.y {
                 min.y = entry.1.raw_point.y;
@@ -206,9 +209,29 @@ impl Map {
             if entry.1.raw_point.z > max.z {
                 max.z = entry.1.raw_point.z;
             }
+            match self.settings.projected_index{
+                None => {
+                    if entry.1.raw_point.x == 0.0 {
+                        self.settings.projected_index = Some(0);
+                    }
+                    if entry.1.raw_point.y == 0.0  {
+                        self.settings.projected_index = Some(1);
+                    }
+                    if entry.1.raw_point.z == 0.0  {
+                        self.settings.projected_index = Some(2);
+                    }
+                },
+                Some(axis) => {
+                    if confirmations < 3 && (( axis== 0 && entry.1.raw_point.x == 0.0) || ( axis== 1 && entry.1.raw_point.y == 0.0) || ( axis== 2 && entry.1.raw_point.z == 0.0)){
+                        confirmations += 1;
+                    } else {
+                        confirmations = 0;
+                        self.settings.projected_index = None;
+                    }
+                }
+            }
             let _result = tree.add(entry.1.raw_point.try_into().unwrap(), *entry.0);
         }
-        // -----------------------------
 
         // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
         self.reference.min = min;
@@ -216,34 +239,50 @@ impl Map {
         self.points = Some(h_map);
         self.tree = Some(tree);
         // we create a rect that include every node in the map
-        let rect = Rect::from_min_max(self.reference.min.try_into().unwrap(), self.reference.max.try_into().unwrap());
+        let rect = RawLine::new(self.reference.min, self.reference.max);
         // we define the initial coordinate as the center of such rectangle
-        self.reference.pos = rect.center();
+        self.reference.pos = rect.midpoint();
         let dist_x =
-            (self.map_area.right_bottom().x as f64 - self.map_area.left_top().x as f64) / 2.0;
+            (self.map_area.right_bottom().x - self.map_area.left_top().x) / 2.0;
         let dist_y =
-            (self.map_area.right_bottom().y as f64 - self.map_area.left_top().y as f64) / 2.0;
+            (self.map_area.right_bottom().y - self.map_area.left_top().y) / 2.0;
         self.reference.dist = (dist_x.powi(2) + dist_y.powi(2) / 2.0).sqrt();
         self.current = self.reference.clone();
         self.calculate_visible_points();
     }
 
-    pub fn set_pos(&mut self, x: f32, y: f32) {
+    pub fn set_pos(&mut self, position:[f32;2]) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("set_pos");
-        if x <= self.reference.max.x
-            && x >= self.reference.min.x
-            && y <= self.reference.max.y
-            && y >= self.reference.min.y
-        {
-            self.reference.pos = Pos2::new(x, y);
-            self.adjust_bounds();
-            self.calculate_visible_points();
+        let mut new_coord = [0.00;3];
+        match self.settings.projected_index {
+            None => {
+                panic!("you cannot set position in the map if the coordinates are not projected");
+            },
+            Some(0) => {
+                new_coord[1] = position[0];
+                new_coord[2] = position[1];
+            },
+            Some(1) => {
+                new_coord[0] = position[0];
+                new_coord[2] = position[1];
+            },
+            Some(2) => {
+                new_coord[0] = position[0];
+                new_coord[1] = position[1];
+            },
+            Some(3_usize..) => todo!(),
         }
+        let point = RawPoint::from(new_coord);
+        self.reference.pos = point;
+        self.adjust_bounds();
+        self.calculate_visible_points();
     }
 
-    pub fn get_pos(self) -> Pos2 {
-        self.reference.pos
+    pub fn get_pos(self) -> [f32;2] {
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("get_pos");
+        self.reference.pos.try_into().unwrap()
     }
 
     pub fn add_labels(&mut self, labels: Vec<MapLabel>) {
@@ -252,10 +291,10 @@ impl Map {
         self.labels = labels;
     }
 
-    pub fn add_lines(&mut self, lines: Vec<MapLine>) {
+    pub fn add_lines(&mut self, lines: HashMap<String,MapLine>) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("add_lines");
-        self.lines = lines;
+        self.lines = Some(lines);
     }
 
     fn adjust_bounds(&mut self) {
@@ -265,7 +304,7 @@ impl Map {
         self.current.max.y = self.reference.max.y * self.zoom;
         self.current.min.x = self.reference.min.x * self.zoom;
         self.current.min.y = self.reference.min.y * self.zoom;
-        self.current.dist = self.reference.dist / self.zoom as f64;
+        self.current.dist = self.reference.dist / self.zoom;
         self.current.pos.x = self.reference.pos.x * self.zoom;
         self.current.pos.y = self.reference.pos.y * self.zoom;
     }
@@ -446,7 +485,7 @@ impl Map {
         hashm: &Option<HashMap<usize, MapPoint>>,
         paint: &Painter,
         ui_obj: &mut Ui,
-        min_point: &Pos2,
+        min_point: &RawPoint,
         resp: &Response,
     ) -> Result<Vec<usize>, ()> {
         let mut nearest_id = None;
@@ -466,7 +505,7 @@ impl Map {
                     (min_point.y + point.y) / self.zoom,
                 );
                 if let Ok(nearest_node) = self.tree.as_ref().unwrap().nearest(
-                    &[hovered_map_point.x as f64, hovered_map_point.y as f64],
+                    &[hovered_map_point.x, hovered_map_point.y],
                     1,
                     &squared_euclidean,
                 ) {
@@ -480,7 +519,7 @@ impl Map {
             anchor: Align2::LEFT_BOTTOM,
             family: FontFamily::Proportional,
             text: String::new(),
-            position: Pos2::new(0.00, 0.00),
+            position: RawPoint::default(),
             text_color: ui_obj.visuals().text_color(),
         };
 
@@ -489,10 +528,11 @@ impl Map {
             if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("painting_points_m");
-                let viewport_point = Pos2::new(
+                let viewport_point = system.raw_point * self.zoom - min_point;
+                /*let viewport_point = Pos2::new(
                     (system.raw_point[0] as f32 * self.zoom) - min_point.x,
                     (system.raw_point[1] as f32 * self.zoom) - min_point.y,
-                );
+                );*/
                 if self.zoom > self.settings.label_visible_zoom
                     && (self.settings.node_text_visibility == VisibilitySetting::Allways
                         || (self.settings.node_text_visibility == VisibilitySetting::Hover
@@ -522,10 +562,10 @@ impl Map {
                     }
                 }
                 if let Some(node_template) = &self.node_template {
-                    node_template.node_ui(ui_obj, viewport_point);
+                    node_template.node_ui(ui_obj, viewport_point.try_into().unwrap());
                 } else {
                     paint.circle(
-                        viewport_point,
+                        viewport_point.try_into().unwrap(),
                         4.00 * self.zoom,
                         self.settings.styles[self.current_index].fill_color,
                         self.settings.styles[self.current_index].border.unwrap(),
@@ -541,7 +581,7 @@ impl Map {
         vec_points: &Vec<usize>,
         hashm: &Option<HashMap<usize, MapPoint>>,
         paint: &Painter,
-        min_point: &Pos2,
+        min_point: &RawPoint,
     ) -> Result<(), ()> {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("paint_map_lines");
@@ -578,32 +618,16 @@ impl Map {
             }
             for temp_point in vec_points {
                 if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
-                    let a_point = Pos2::new(
-                        (system.raw_point[0] as f32 * self.zoom) - min_point.x,
-                        (system.raw_point[1] as f32 * self.zoom) - min_point.y,
-                    );
-                    for line in &system.connections {
-                        let b_point = Pos2::new(
-                            (line[0] as f32 * self.zoom) - min_point.x,
-                            (line[1] as f32 * self.zoom) - min_point.y,
-                        );
-                        {
-                            paint.line_segment([a_point, b_point], stroke);
+                    for id in system.connections.as_slice() {
+                        if let Some(hmap) = &self.lines {
+                            if let Some(connection) = hmap.get(id){
+                                let pos_a = connection.raw_line.points[0] * self.zoom - min_point;
+                                let pos_b = connection.raw_line.points[1] * self.zoom - min_point;
+                                paint.line_segment([pos_a.try_into().unwrap(),pos_b.try_into().unwrap()], stroke);
+                            }
                         }
                     }
                 }
-            }
-            // Drawing permanent lines
-            for line in &self.lines {
-                let a = Pos2::new(
-                    (line.points[0].x * self.zoom) - min_point.x,
-                    (line.points[0].y * self.zoom) - min_point.y,
-                );
-                let b = Pos2::new(
-                    (line.points[1].x * self.zoom) - min_point.x,
-                    (line.points[1].y * self.zoom) - min_point.y,
-                );
-                paint.line_segment([a, b], stroke);
             }
         }
         Ok(())
@@ -613,7 +637,7 @@ impl Map {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("paint_label");
         paint.text(
-            text_settings.position,
+             Pos2::new(text_settings.position.x,text_settings.position.z),
             text_settings.anchor,
             text_settings.text.clone(),
             FontId::new(text_settings.size, text_settings.family.clone()),
