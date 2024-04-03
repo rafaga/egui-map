@@ -5,7 +5,7 @@ use crate::map::objects::{
 use egui::{widgets::*, *};
 use kdtree::distance::squared_euclidean;
 use kdtree::KdTree;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Error;
 use std::time::Instant;
 
@@ -33,6 +33,7 @@ pub struct Map {
     pub settings: MapSettings,
     menu_manager: Option<Box<dyn ContextMenuManager>>,
     node_template: Option<Box<dyn NodeTemplate>>,
+    visible_lines: HashSet<String>,
 }
 
 impl Default for Map {
@@ -53,89 +54,81 @@ impl Widget for &mut Map {
             #[cfg(feature = "puffin")]
             puffin::profile_scope!("paint_map");
 
-            //if ui_obj.is_rect_visible(self.map_area) {
-            let (resp, paint) =
-                ui.allocate_painter(self.map_area.size(), egui::Sense::click_and_drag());
-            let vec = resp.drag_delta();
-            if vec.length() != 0.0 {
-                #[cfg(feature = "puffin")]
-                puffin::profile_scope!("calculating_points_in_visible_area");
+            if ui.is_rect_visible(self.map_area) {
+                let (resp, paint) =
+                    ui.allocate_painter(self.map_area.size(), egui::Sense::click_and_drag());
+                let vec = resp.drag_delta();
+                if vec.length() != 0.0 {
+                    #[cfg(feature = "puffin")]
+                    puffin::profile_scope!("calculating_points_in_visible_area");
 
-                let coords = vec.to_pos2();
-                let new_pos = [self.reference.pos.x - (coords.x / self.zoom),self.reference.pos.y - (coords.y / self.zoom)];
-                self.set_pos(new_pos);
-                //self.calculate_visible_points();
-            }
-            let map_style = self.settings.styles[self.current_index].clone() * self.zoom;
-            if self.zoom < self.settings.line_visible_zoom {
-                // filling text settings
-                let mut text_settings = TextSettings {
-                    size: 12.00 * self.zoom * 2.00,
-                    anchor: Align2::CENTER_CENTER,
-                    family: FontFamily::Proportional,
-                    text: String::new(),
-                    position: RawPoint::default(),
-                    text_color: ui.visuals().text_color(),
-                };
-                for label in &self.labels {
-                    text_settings.text = label.text.clone();
-                    paint.text(
-                        label.center,
-                        Align2::CENTER_CENTER,
-                        label.text.as_str(),
-                        map_style.font.clone().unwrap(),
-                        ui.visuals().text_color(),
-                    );
-                    self.paint_label(&paint, &text_settings);
+                    let coords = RawPoint::from(vec.to_pos2());
+                    let new_pos = self.reference.pos - (coords / self.zoom);
+                    self.set_pos(new_pos.into());
                 }
-            }
+                let map_style = self.settings.styles[self.current_index].clone() * self.zoom;
+                if self.zoom < self.settings.line_visible_zoom {
+                    // filling text settings
+                    let mut text_settings = TextSettings {
+                        size: 12.00 * self.zoom * 2.00,
+                        anchor: Align2::CENTER_CENTER,
+                        family: FontFamily::Proportional,
+                        text: String::new(),
+                        position: RawPoint::default(),
+                        text_color: ui.visuals().text_color(),
+                    };
+                    for label in &self.labels {
+                        text_settings.text = label.text.clone();
+                        paint.text(
+                            label.center,
+                            Align2::CENTER_CENTER,
+                            label.text.as_str(),
+                            map_style.font.clone().unwrap(),
+                            ui.visuals().text_color(),
+                        );
+                        self.paint_label(&paint, &text_settings);
+                    }
+                }
 
-            // Here we determine the widget center to print all nodes
-            //let min_point = self.current.pos - RawPoint::try_from([self.map_area.center().x,self.map_area.center().y]).unwrap();
-            
-            if self.points.is_some() {
-                let rect_midpoint = RawPoint::from_pos2(self.map_area.center(),1).unwrap();
+                // Here we determine the widget center to print all nodes
+                //let min_point = self.current.pos - RawPoint::try_from([self.map_area.center().x,self.map_area.center().y]).unwrap();
+                
+                let rect_midpoint = RawPoint::from(self.map_area.center());
                 let min_point = self.current.pos - rect_midpoint;
                 let vec_points = &self.visible_points;
                 let hashm = &self.points;
-                let _a = self.paint_map_lines(vec_points, hashm, &paint, &min_point);
+                self.paint_map_lines(ui, &min_point);
+
                 if let Ok(nodes_to_remove) =
                     self.paint_map_points(vec_points, hashm, &paint, ui, &min_point, &resp)
                 {
                     for node in nodes_to_remove {
                         self.entities.remove(&node);
                     }
+                }     
+
+                self.paint_sub_components(ui, self.map_area);
+
+                self.capture_mouse_events(ui, &resp);
+
+                if self.zoom != self.previous_zoom {
+                    #[cfg(feature = "puffin")]
+                    puffin::profile_scope!("calculating viewport with zoom");
+                    self.adjust_bounds();
+                    self.calculate_visible_points();
+                    self.previous_zoom = self.zoom;
+                }
+
+                if let Some(ref mut menu_mon) = &mut self.menu_manager {
+                    resp.context_menu(|ui| {
+                        menu_mon.ui(ui);
+                    });
+                }
+
+                if cfg!(debug_assertions) {
+                    self.print_debug_info(paint, resp);
                 }
             }
-            /*let min_point = Pos2::new(
-                self.current.pos.x - self.map_area.center().x,
-                self.current.pos.y - self.map_area.center().y,
-            );*/
-
-            
-
-            self.paint_sub_components(ui, self.map_area);
-
-            self.capture_mouse_events(ui, &resp);
-
-            if self.zoom != self.previous_zoom {
-                #[cfg(feature = "puffin")]
-                puffin::profile_scope!("calculating viewport with zoom");
-                self.adjust_bounds();
-                self.calculate_visible_points();
-                self.previous_zoom = self.zoom;
-            }
-
-            if let Some(ref mut menu_mon) = &mut self.menu_manager {
-                resp.context_menu(|ui| {
-                    menu_mon.ui(ui);
-                });
-            }
-
-            if cfg!(debug_assertions) {
-                self.print_debug_info(paint, resp);
-            }
-            //}
         });
         inner_response.response
     }
@@ -161,6 +154,7 @@ impl Map {
             style: egui::Style::default(),
             menu_manager: None,
             node_template: None,
+            visible_lines: HashSet::new(),
         }
     }
 
@@ -176,6 +170,12 @@ impl Map {
                 self.visible_points.clear();
                 for point in vis_pos {
                     self.visible_points.push(*point.1);
+                    let system = self.points.as_ref().unwrap().get(point.1);
+                    for connection in &system.unwrap().connections {
+                        if let None = self.visible_lines.get(&connection.clone()) {
+                            self.visible_lines.insert(connection.clone());
+                        }
+                    }
                 }
             }
         }
@@ -184,53 +184,21 @@ impl Map {
     pub fn add_hashmap_points(&mut self, hash_map: HashMap<usize, MapPoint>) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("add_hashmap_points");
-        let mut min = RawPoint::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
-        let mut max = RawPoint::new(f32::NEG_INFINITY, f32::NEG_INFINITY,f32::NEG_INFINITY);
+        let mut min = RawPoint::new(f32::INFINITY, f32::INFINITY);
+        let mut max = RawPoint::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
         let mut tree = KdTree::<f32, usize, [f32; 2]>::new(2);
         let mut h_map = hash_map.clone();
-        let mut confirmations = 0;
 
         for entry in h_map.iter_mut() {
-            if entry.1.raw_point.x < min.x {
-                min.x = entry.1.raw_point.x;
-            }
-            if entry.1.raw_point.y < min.y {
-                min.y = entry.1.raw_point.y;
-            }
-            if entry.1.raw_point.z < min.z {
-                min.z = entry.1.raw_point.z;
-            }
-            if entry.1.raw_point.x > max.x {
-                max.x = entry.1.raw_point.x;
-            }
-            if entry.1.raw_point.y > max.y {
-                max.y = entry.1.raw_point.y;
-            }
-            if entry.1.raw_point.z > max.z {
-                max.z = entry.1.raw_point.z;
-            }
-            match self.settings.projected_index{
-                None => {
-                    if entry.1.raw_point.x == 0.0 {
-                        self.settings.projected_index = Some(0);
-                    }
-                    if entry.1.raw_point.y == 0.0  {
-                        self.settings.projected_index = Some(1);
-                    }
-                    if entry.1.raw_point.z == 0.0  {
-                        self.settings.projected_index = Some(2);
-                    }
-                },
-                Some(axis) => {
-                    if confirmations < 3 && (( axis== 0 && entry.1.raw_point.x == 0.0) || ( axis== 1 && entry.1.raw_point.y == 0.0) || ( axis== 2 && entry.1.raw_point.z == 0.0)){
-                        confirmations += 1;
-                    } else {
-                        confirmations = 0;
-                        self.settings.projected_index = None;
-                    }
+            for i in 0..min.components.len(){
+                if entry.1.raw_point.components[i] < min.components[i] {
+                    min.components[i] = entry.1.raw_point.components[i];
+                }
+                if entry.1.raw_point.components[i] > max.components[i] {
+                    max.components[i] = entry.1.raw_point.components[i];
                 }
             }
-            let _result = tree.add(entry.1.raw_point.try_into().unwrap(), *entry.0);
+            let _result = tree.add(entry.1.raw_point.into(), *entry.0);
         }
 
         // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
@@ -254,26 +222,7 @@ impl Map {
     pub fn set_pos(&mut self, position:[f32;2]) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("set_pos");
-        let mut new_coord = [0.00;3];
-        match self.settings.projected_index {
-            None => {
-                panic!("you cannot set position in the map if the coordinates are not projected");
-            },
-            Some(0) => {
-                new_coord[1] = position[0];
-                new_coord[2] = position[1];
-            },
-            Some(1) => {
-                new_coord[0] = position[0];
-                new_coord[2] = position[1];
-            },
-            Some(2) => {
-                new_coord[0] = position[0];
-                new_coord[1] = position[1];
-            },
-            Some(3_usize..) => todo!(),
-        }
-        let point = RawPoint::from(new_coord);
+        let point = RawPoint::from(position);
         self.reference.pos = point;
         self.adjust_bounds();
         self.calculate_visible_points();
@@ -300,13 +249,10 @@ impl Map {
     fn adjust_bounds(&mut self) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("adjust_bounds");
-        self.current.max.x = self.reference.max.x * self.zoom;
-        self.current.max.y = self.reference.max.y * self.zoom;
-        self.current.min.x = self.reference.min.x * self.zoom;
-        self.current.min.y = self.reference.min.y * self.zoom;
+        self.current.max = self.reference.max * self.zoom;
+        self.current.min = self.reference.min * self.zoom;
         self.current.dist = self.reference.dist / self.zoom;
-        self.current.pos.x = self.reference.pos.x * self.zoom;
-        self.current.pos.y = self.reference.pos.y * self.zoom;
+        self.current.pos = self.reference.pos * self.zoom;
     }
 
     fn capture_mouse_events(&mut self, ui: &Ui, resp: &Response) {
@@ -394,21 +340,21 @@ impl Map {
             self.map_area.left_top().y + 10.00,
         );
         let mut msg = "MIN:".to_string()
-            + self.current.min.x.to_string().as_str()
+            + self.current.min.components[0].to_string().as_str()
             + ","
-            + self.current.min.y.to_string().as_str();
+            + self.current.min.components[1].to_string().as_str();
         paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
         init_pos.y += 15.0;
         msg = "MAX:".to_string()
-            + self.current.max.x.to_string().as_str()
+            + self.current.max.components[0].to_string().as_str()
             + ","
-            + self.current.max.y.to_string().as_str();
+            + self.current.max.components[1].to_string().as_str();
         paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
         init_pos.y += 15.0;
         msg = "CUR:(".to_string()
-            + self.current.pos.x.to_string().as_str()
+            + self.current.pos.components[0].to_string().as_str()
             + ","
-            + self.current.pos.y.to_string().as_str()
+            + self.current.pos.components[1].to_string().as_str()
             + ")";
         paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
         init_pos.y += 15.0;
@@ -500,12 +446,10 @@ impl Map {
         // detecting the nearest hover node
         if self.settings.node_text_visibility == VisibilitySetting::Hover && resp.hovered() {
             if let Some(point) = resp.hover_pos() {
-                let hovered_map_point = Pos2::new(
-                    (min_point.x + point.x) / self.zoom,
-                    (min_point.y + point.y) / self.zoom,
-                );
+                let raw_point = RawPoint::from(point);
+                let hovered_map_point = (*min_point + raw_point) / self.zoom;
                 if let Ok(nearest_node) = self.tree.as_ref().unwrap().nearest(
-                    &[hovered_map_point.x, hovered_map_point.y],
+                    &hovered_map_point.components,
                     1,
                     &squared_euclidean,
                 ) {
@@ -529,18 +473,14 @@ impl Map {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("painting_points_m");
                 let viewport_point = system.raw_point * self.zoom - min_point;
-                /*let viewport_point = Pos2::new(
-                    (system.raw_point[0] as f32 * self.zoom) - min_point.x,
-                    (system.raw_point[1] as f32 * self.zoom) - min_point.y,
-                );*/
                 if self.zoom > self.settings.label_visible_zoom
                     && (self.settings.node_text_visibility == VisibilitySetting::Allways
                         || (self.settings.node_text_visibility == VisibilitySetting::Hover
                             && nearest_id.unwrap_or(&0usize) == &system.get_id()))
                 {
                     let mut viewport_text = viewport_point;
-                    viewport_text.x += 3.0 * self.zoom;
-                    viewport_text.y -= 3.0 * self.zoom;
+                    viewport_text.components[0] += 3.0 * self.zoom;
+                    viewport_text.components[1] -= 3.0 * self.zoom;
                     text_settings.position = viewport_text;
                     text_settings.text = system.get_name();
                     self.paint_label(paint, &text_settings);
@@ -578,20 +518,11 @@ impl Map {
 
     fn paint_map_lines(
         &self,
-        vec_points: &Vec<usize>,
-        hashm: &Option<HashMap<usize, MapPoint>>,
-        paint: &Painter,
+        ui: &Ui,
         min_point: &RawPoint,
-    ) -> Result<(), ()> {
+    ) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("paint_map_lines");
-
-        if hashm.is_none() {
-            return Err(());
-        }
-        if vec_points.is_empty() {
-            return Err(());
-        }
 
         // Drawing Lines
         if self.zoom > self.settings.line_visible_zoom {
@@ -616,28 +547,34 @@ impl Map {
                     color,
                 );
             }
-            for temp_point in vec_points {
+            for line in &self.visible_lines {
+                if let Some(connection) = self.lines.as_ref().unwrap().get(line){
+                    let pos_a = connection.raw_line.points[0] * self.zoom - min_point;
+                    let pos_b = connection.raw_line.points[1] * self.zoom - min_point;
+                    ui.painter().line_segment([pos_a.into(),pos_b.into()], stroke);
+                }
+            }
+            /*for temp_point in vec_points {
                 if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
                     for id in system.connections.as_slice() {
                         if let Some(hmap) = &self.lines {
                             if let Some(connection) = hmap.get(id){
                                 let pos_a = connection.raw_line.points[0] * self.zoom - min_point;
                                 let pos_b = connection.raw_line.points[1] * self.zoom - min_point;
-                                paint.line_segment([pos_a.try_into().unwrap(),pos_b.try_into().unwrap()], stroke);
+                                paint.line_segment([pos_a.into(),pos_b.into()], stroke);
                             }
                         }
                     }
                 }
-            }
+            }*/
         }
-        Ok(())
     }
 
     fn paint_label(&self, paint: &Painter, text_settings: &TextSettings) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("paint_label");
         paint.text(
-             Pos2::new(text_settings.position.x,text_settings.position.z),
+             text_settings.position.into(),
             text_settings.anchor,
             text_settings.text.clone(),
             FontId::new(text_settings.size, text_settings.family.clone()),
