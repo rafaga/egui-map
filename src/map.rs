@@ -45,6 +45,10 @@ impl Default for Map {
 impl Widget for &mut Map {
     fn ui(self, ui: &mut egui::Ui) -> Response {
         self.map_area = ui.available_rect_before_wrap();
+        let rect = RawLine::new(RawPoint::from(self.map_area.left_top()), RawPoint::from(self.map_area.right_bottom()));
+        // we define the initial coordinate as the center of such rectangle
+        self.reference.dist = rect.distance();
+
 
         self.assign_visual_style(ui);
 
@@ -97,7 +101,7 @@ impl Widget for &mut Map {
                 let min_point = self.current.pos - rect_midpoint;
                 let vec_points = &self.visible_points;
                 let hashm = &self.points;
-                self.paint_map_lines(ui, &min_point);
+                self.paint_map_lines(&paint, &min_point);
 
                 if let Ok(nodes_to_remove) =
                     self.paint_map_points(vec_points, hashm, &paint, ui, &min_point, &resp)
@@ -161,7 +165,7 @@ impl Map {
     fn calculate_visible_points(&mut self) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("calculate_visible_points");
-        if self.current.dist > 0.0 {
+        if self.current.dist > 0.0 && self.current.dist < f32::INFINITY {
             if let Some(tree) = &self.tree {
                 let center = self.current.pos / self.zoom;
                 let radius = self.current.dist.powi(2);
@@ -206,15 +210,16 @@ impl Map {
         self.reference.max = max;
         self.points = Some(h_map);
         self.tree = Some(tree);
+        self.reference.pos = RawLine::new(min, max).midpoint();
         // we create a rect that include every node in the map
-        let rect = RawLine::new(self.reference.min, self.reference.max);
-        // we define the initial coordinate as the center of such rectangle
-        self.reference.pos = rect.midpoint();
-        let dist_x =
-            (self.map_area.right_bottom().x - self.map_area.left_top().x) / 2.0;
-        let dist_y =
-            (self.map_area.right_bottom().y - self.map_area.left_top().y) / 2.0;
-        self.reference.dist = (dist_x.powi(2) + dist_y.powi(2) / 2.0).sqrt();
+        // Stupid fix because rect area could be infinite
+        // I need to implement a more elegant fix
+        if self.map_area.area().is_infinite() {
+            self.reference.dist = 3000.00;
+        } else {
+            let rect = RawLine::new(RawPoint::from(self.map_area.left_top()), RawPoint::from(self.map_area.right_bottom()));
+            self.reference.dist = rect.distance();
+        }        
         self.current = self.reference.clone();
         self.calculate_visible_points();
     }
@@ -436,6 +441,7 @@ impl Map {
     ) -> Result<Vec<usize>, ()> {
         let mut nearest_id = None;
         let mut nodes_to_remove = Vec::new();
+        let mut shape_vec = vec![];
 
         if hashm.is_none() {
             return Err(());
@@ -504,21 +510,21 @@ impl Map {
                 if let Some(node_template) = &self.node_template {
                     node_template.node_ui(ui_obj, viewport_point.try_into().unwrap());
                 } else {
-                    paint.circle(
+                    shape_vec.push(Shape::circle_filled(
                         viewport_point.try_into().unwrap(),
                         4.00 * self.zoom,
-                        self.settings.styles[self.current_index].fill_color,
-                        self.settings.styles[self.current_index].border.unwrap(),
-                    );
+                        self.settings.styles[self.current_index].fill_color
+                    ));
                 }
             }
         }
+        paint.extend(shape_vec);
         Ok(nodes_to_remove)
     }
 
     fn paint_map_lines(
         &self,
-        ui: &Ui,
+        painter: &Painter,
         min_point: &RawPoint,
     ) {
         #[cfg(feature = "puffin")]
@@ -526,6 +532,7 @@ impl Map {
 
         // Drawing Lines
         if self.zoom > self.settings.line_visible_zoom {
+            let mut shape_vec = vec![];
             let mut stroke = self.settings.styles[self.current_index].line.unwrap();
             let transparency_range = self.zoom - self.settings.line_visible_zoom;
             if (0.00..0.80).contains(&transparency_range) {
@@ -547,26 +554,18 @@ impl Map {
                     color,
                 );
             }
+            //let stroke = Stroke::new(10.0,Color32::GREEN);
             for line in &self.visible_lines {
                 if let Some(connection) = self.lines.as_ref().unwrap().get(line){
                     let pos_a = connection.raw_line.points[0] * self.zoom - min_point;
                     let pos_b = connection.raw_line.points[1] * self.zoom - min_point;
-                    ui.painter().line_segment([pos_a.into(),pos_b.into()], stroke);
+                    //let pos_a = connection.raw_line.points[0] / self.zoom - min_point;
+                    //let pos_b = connection.raw_line.points[1] / self.zoom - min_point;
+                    shape_vec.push(Shape::line_segment([pos_a.into(),pos_b.into()], stroke));
+                    //shape_vec.push(painter.line_segment([pos_a.into(),pos_b.into()], stroke));
                 }
             }
-            /*for temp_point in vec_points {
-                if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
-                    for id in system.connections.as_slice() {
-                        if let Some(hmap) = &self.lines {
-                            if let Some(connection) = hmap.get(id){
-                                let pos_a = connection.raw_line.points[0] * self.zoom - min_point;
-                                let pos_b = connection.raw_line.points[1] * self.zoom - min_point;
-                                paint.line_segment([pos_a.into(),pos_b.into()], stroke);
-                            }
-                        }
-                    }
-                }
-            }*/
+            painter.extend(shape_vec);
         }
     }
 

@@ -41,6 +41,26 @@ impl Mul<i32> for RawPoint {
     }
 }
 
+impl Mul<u64> for RawPoint {
+    type Output = Self;
+
+    fn mul(self, rhs: u64) -> Self::Output {
+        Self {
+            components: [self.components[0] * rhs as f32, self.components[1] * rhs as f32],
+        }
+    }
+}
+
+impl Mul<u32> for RawPoint {
+    type Output = Self;
+
+    fn mul(self, rhs: u32) -> Self::Output {
+        Self {
+            components: [self.components[0] * rhs as f32, self.components[1] * rhs as f32],
+        }
+    }
+}
+
 impl Mul<f32> for RawPoint {
     type Output = Self;
 
@@ -60,6 +80,20 @@ impl MulAssign<i64> for RawPoint{
 
 impl MulAssign<i32> for RawPoint{
     fn mul_assign(&mut self, rhs: i32) {
+        self.components[0] = self.components[0] * rhs as f32;
+        self.components[1] = self.components[1] * rhs as f32;
+    }
+}
+
+impl MulAssign<u64> for RawPoint{
+    fn mul_assign(&mut self, rhs: u64) {
+        self.components[0] = self.components[0] * rhs as f32;
+        self.components[1] = self.components[1] * rhs as f32;
+    }
+}
+
+impl MulAssign<u32> for RawPoint{
+    fn mul_assign(&mut self, rhs: u32) {
         self.components[0] = self.components[0] * rhs as f32;
         self.components[1] = self.components[1] * rhs as f32;
     }
@@ -92,6 +126,26 @@ impl Div<i32> for RawPoint {
     }
 }
 
+impl Div<u64> for RawPoint {
+    type Output = Self;
+
+    fn div(self, rhs: u64) -> Self::Output {
+        Self {
+            components: [self.components[0] / rhs as f32, self.components[1] / rhs as f32],
+        }
+    }
+}
+
+impl Div<u32> for RawPoint {
+    type Output = Self;
+
+    fn div(self, rhs: u32) -> Self::Output {
+        Self {
+            components: [self.components[0] / rhs as f32, self.components[1] / rhs as f32],
+        }
+    }
+}
+
 impl Div<f32> for RawPoint {
     type Output = Self;
 
@@ -115,6 +169,21 @@ impl DivAssign<i32> for RawPoint{
         self.components[1] = self.components[1] / rhs as f32;
     }
 }
+
+impl DivAssign<u64> for RawPoint{
+    fn div_assign(&mut self, rhs: u64) {
+        self.components[0] = self.components[0] / rhs as f32;
+        self.components[1] = self.components[1] / rhs as f32;
+    }
+}
+
+impl DivAssign<u32> for RawPoint{
+    fn div_assign(&mut self, rhs: u32) {
+        self.components[0] = self.components[0] / rhs as f32;
+        self.components[1] = self.components[1] / rhs as f32;
+    }
+}
+
 
 impl DivAssign<f32> for RawPoint{
     fn div_assign(&mut self, rhs: f32) {
@@ -542,11 +611,11 @@ impl Default for MapSettings {
         // light Theme
         obj.styles.push(MapStyle {
             border: Some(egui::Stroke {
-                width: 2f32,
+                width: 2.0,
                 color: Color32::from_rgb(216, 142, 58),
             }),
             line: Some(egui::Stroke {
-                width: 2f32,
+                width: 2.0,
                 color: Color32::DARK_RED,
             }),
             fill_color: Color32::from_rgb(216, 142, 58),
@@ -559,11 +628,11 @@ impl Default for MapSettings {
         // Dark Theme
         obj.styles.push(MapStyle {
             border: Some(egui::Stroke {
-                width: 2f32,
+                width: 2.0,
                 color: Color32::GOLD,
             }),
             line: Some(egui::Stroke {
-                width: 2f32,
+                width: 2.0,
                 color: Color32::LIGHT_RED,
             }),
             fill_color: Color32::GOLD,
