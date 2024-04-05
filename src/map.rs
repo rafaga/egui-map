@@ -1,6 +1,7 @@
 use crate::map::animation::Animation;
 use crate::map::objects::{
-    ContextMenuManager, MapBounds, MapLabel, MapLine, MapPoint, MapSettings, RawLine, RawPoint, TextSettings, VisibilitySetting
+    ContextMenuManager, MapBounds, MapLabel, MapLine, MapPoint, MapSettings, RawLine, RawPoint,
+    TextSettings, VisibilitySetting,
 };
 use egui::{widgets::*, *};
 use kdtree::distance::squared_euclidean;
@@ -20,7 +21,7 @@ pub struct Map {
     zoom: f32,
     previous_zoom: f32,
     points: Option<HashMap<usize, MapPoint>>,
-    lines: Option<HashMap<String,MapLine>>,
+    lines: Option<HashMap<String, MapLine>>,
     labels: Vec<MapLabel>,
     tree: Option<KdTree<f32, usize, [f32; 2]>>,
     visible_points: Vec<usize>,
@@ -45,10 +46,12 @@ impl Default for Map {
 impl Widget for &mut Map {
     fn ui(self, ui: &mut egui::Ui) -> Response {
         self.map_area = ui.available_rect_before_wrap();
-        let rect = RawLine::new(RawPoint::from(self.map_area.left_top()), RawPoint::from(self.map_area.right_bottom()));
+        let rect = RawLine::new(
+            RawPoint::from(self.map_area.left_top()),
+            RawPoint::from(self.map_area.right_bottom()),
+        );
         // we define the initial coordinate as the center of such rectangle
         self.reference.dist = rect.distance();
-
 
         self.assign_visual_style(ui);
 
@@ -96,7 +99,7 @@ impl Widget for &mut Map {
 
                 // Here we determine the widget center to print all nodes
                 //let min_point = self.current.pos - RawPoint::try_from([self.map_area.center().x,self.map_area.center().y]).unwrap();
-                
+
                 let rect_midpoint = RawPoint::from(self.map_area.center());
                 let min_point = self.current.pos - rect_midpoint;
                 let vec_points = &self.visible_points;
@@ -109,7 +112,7 @@ impl Widget for &mut Map {
                     for node in nodes_to_remove {
                         self.entities.remove(&node);
                     }
-                }     
+                }
 
                 self.paint_sub_components(ui, self.map_area);
 
@@ -169,14 +172,14 @@ impl Map {
             if let Some(tree) = &self.tree {
                 let center = self.current.pos / self.zoom;
                 let radius = self.current.dist.powi(2);
-                let point:[f32;2] = center.try_into().unwrap();
+                let point: [f32; 2] = center.into();
                 let vis_pos = tree.within(&point, radius, &squared_euclidean).unwrap();
                 self.visible_points.clear();
                 for point in vis_pos {
                     self.visible_points.push(*point.1);
                     let system = self.points.as_ref().unwrap().get(point.1);
                     for connection in &system.unwrap().connections {
-                        if let None = self.visible_lines.get(&connection.clone()) {
+                        if self.visible_lines.get(&connection.clone()).is_none() {
                             self.visible_lines.insert(connection.clone());
                         }
                     }
@@ -194,7 +197,7 @@ impl Map {
         let mut h_map = hash_map.clone();
 
         for entry in h_map.iter_mut() {
-            for i in 0..min.components.len(){
+            for i in 0..min.components.len() {
                 if entry.1.raw_point.components[i] < min.components[i] {
                     min.components[i] = entry.1.raw_point.components[i];
                 }
@@ -217,14 +220,17 @@ impl Map {
         if self.map_area.area().is_infinite() {
             self.reference.dist = 3000.00;
         } else {
-            let rect = RawLine::new(RawPoint::from(self.map_area.left_top()), RawPoint::from(self.map_area.right_bottom()));
+            let rect = RawLine::new(
+                RawPoint::from(self.map_area.left_top()),
+                RawPoint::from(self.map_area.right_bottom()),
+            );
             self.reference.dist = rect.distance();
-        }        
+        }
         self.current = self.reference.clone();
         self.calculate_visible_points();
     }
 
-    pub fn set_pos(&mut self, position:[f32;2]) {
+    pub fn set_pos(&mut self, position: [f32; 2]) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("set_pos");
         let point = RawPoint::from(position);
@@ -233,10 +239,10 @@ impl Map {
         self.calculate_visible_points();
     }
 
-    pub fn get_pos(self) -> [f32;2] {
+    pub fn get_pos(self) -> [f32; 2] {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("get_pos");
-        self.reference.pos.try_into().unwrap()
+        self.reference.pos.into()
     }
 
     pub fn add_labels(&mut self, labels: Vec<MapLabel>) {
@@ -245,7 +251,7 @@ impl Map {
         self.labels = labels;
     }
 
-    pub fn add_lines(&mut self, lines: HashMap<String,MapLine>) {
+    pub fn add_lines(&mut self, lines: HashMap<String, MapLine>) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("add_lines");
         self.lines = Some(lines);
@@ -508,12 +514,12 @@ impl Map {
                     }
                 }
                 if let Some(node_template) = &self.node_template {
-                    node_template.node_ui(ui_obj, viewport_point.try_into().unwrap());
+                    node_template.node_ui(ui_obj, viewport_point.into());
                 } else {
                     shape_vec.push(Shape::circle_filled(
-                        viewport_point.try_into().unwrap(),
+                        viewport_point.into(),
                         4.00 * self.zoom,
-                        self.settings.styles[self.current_index].fill_color
+                        self.settings.styles[self.current_index].fill_color,
                     ));
                 }
             }
@@ -522,11 +528,7 @@ impl Map {
         Ok(nodes_to_remove)
     }
 
-    fn paint_map_lines(
-        &self,
-        painter: &Painter,
-        min_point: &RawPoint,
-    ) {
+    fn paint_map_lines(&self, painter: &Painter, min_point: &RawPoint) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("paint_map_lines");
 
@@ -556,12 +558,12 @@ impl Map {
             }
             //let stroke = Stroke::new(10.0,Color32::GREEN);
             for line in &self.visible_lines {
-                if let Some(connection) = self.lines.as_ref().unwrap().get(line){
+                if let Some(connection) = self.lines.as_ref().unwrap().get(line) {
                     let pos_a = connection.raw_line.points[0] * self.zoom - min_point;
                     let pos_b = connection.raw_line.points[1] * self.zoom - min_point;
                     //let pos_a = connection.raw_line.points[0] / self.zoom - min_point;
                     //let pos_b = connection.raw_line.points[1] / self.zoom - min_point;
-                    shape_vec.push(Shape::line_segment([pos_a.into(),pos_b.into()], stroke));
+                    shape_vec.push(Shape::line_segment([pos_a.into(), pos_b.into()], stroke));
                     //shape_vec.push(painter.line_segment([pos_a.into(),pos_b.into()], stroke));
                 }
             }
@@ -573,7 +575,7 @@ impl Map {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("paint_label");
         paint.text(
-             text_settings.position.into(),
+            text_settings.position.into(),
             text_settings.anchor,
             text_settings.text.clone(),
             FontId::new(text_settings.size, text_settings.family.clone()),

@@ -1,4 +1,4 @@
-use crate::map::{Error,objects::RawPoint};
+use crate::map::{objects::RawPoint, Error};
 use egui::{epaint::CircleShape, Color32, Painter, Shape};
 use std::time::Instant;
 
@@ -27,7 +27,7 @@ impl Animation {
             color.b(),
             (255.00 * transparency).round() as u8,
         );
-        let circle = Shape::Circle(CircleShape::filled(center.try_into().unwrap(), radius, corrected_color));
+        let circle = Shape::Circle(CircleShape::filled(center.into(), radius, corrected_color));
         painter.extend(vec![circle]);
         if secs_played < 3.50 {
             result = true;

@@ -1,23 +1,21 @@
 use egui::{Align2, Color32, FontFamily, FontId, Pos2, Stroke, Ui};
-use std::ops::{Div, DivAssign, Mul, MulAssign, Sub, Add};
-use std::convert::{From,Into};
+use std::convert::{From, Into};
+use std::ops::{Add, Div, DivAssign, Mul, MulAssign, Sub};
 
-#[derive(Copy,Clone)]
-pub struct RawPoint{
-    pub components:[f32;2]
+#[derive(Copy, Clone)]
+pub struct RawPoint {
+    pub components: [f32; 2],
 }
 
-impl RawPoint{
-    pub fn new(x:f32, y:f32) -> Self {
-        Self {
-            components:[x,y]
-        }
+impl RawPoint {
+    pub fn new(x: f32, y: f32) -> Self {
+        Self { components: [x, y] }
     }
 }
 
-impl Default for RawPoint{
+impl Default for RawPoint {
     fn default() -> Self {
-        Self::new(0.00,0.00)
+        Self::new(0.00, 0.00)
     }
 }
 
@@ -26,7 +24,10 @@ impl Mul<i64> for RawPoint {
 
     fn mul(self, rhs: i64) -> Self::Output {
         Self {
-            components: [self.components[0] * rhs as f32, self.components[1] * rhs as f32],
+            components: [
+                self.components[0] * rhs as f32,
+                self.components[1] * rhs as f32,
+            ],
         }
     }
 }
@@ -36,7 +37,10 @@ impl Mul<i32> for RawPoint {
 
     fn mul(self, rhs: i32) -> Self::Output {
         Self {
-            components: [self.components[0] * rhs as f32, self.components[1] * rhs as f32],
+            components: [
+                self.components[0] * rhs as f32,
+                self.components[1] * rhs as f32,
+            ],
         }
     }
 }
@@ -46,7 +50,10 @@ impl Mul<u64> for RawPoint {
 
     fn mul(self, rhs: u64) -> Self::Output {
         Self {
-            components: [self.components[0] * rhs as f32, self.components[1] * rhs as f32],
+            components: [
+                self.components[0] * rhs as f32,
+                self.components[1] * rhs as f32,
+            ],
         }
     }
 }
@@ -56,7 +63,10 @@ impl Mul<u32> for RawPoint {
 
     fn mul(self, rhs: u32) -> Self::Output {
         Self {
-            components: [self.components[0] * rhs as f32, self.components[1] * rhs as f32],
+            components: [
+                self.components[0] * rhs as f32,
+                self.components[1] * rhs as f32,
+            ],
         }
     }
 }
@@ -71,35 +81,35 @@ impl Mul<f32> for RawPoint {
     }
 }
 
-impl MulAssign<i64> for RawPoint{
+impl MulAssign<i64> for RawPoint {
     fn mul_assign(&mut self, rhs: i64) {
         self.components[0] = self.components[0] * rhs as f32;
         self.components[1] = self.components[1] * rhs as f32;
     }
 }
 
-impl MulAssign<i32> for RawPoint{
+impl MulAssign<i32> for RawPoint {
     fn mul_assign(&mut self, rhs: i32) {
         self.components[0] = self.components[0] * rhs as f32;
         self.components[1] = self.components[1] * rhs as f32;
     }
 }
 
-impl MulAssign<u64> for RawPoint{
+impl MulAssign<u64> for RawPoint {
     fn mul_assign(&mut self, rhs: u64) {
         self.components[0] = self.components[0] * rhs as f32;
         self.components[1] = self.components[1] * rhs as f32;
     }
 }
 
-impl MulAssign<u32> for RawPoint{
+impl MulAssign<u32> for RawPoint {
     fn mul_assign(&mut self, rhs: u32) {
         self.components[0] = self.components[0] * rhs as f32;
         self.components[1] = self.components[1] * rhs as f32;
     }
 }
 
-impl MulAssign<f32> for RawPoint{
+impl MulAssign<f32> for RawPoint {
     fn mul_assign(&mut self, rhs: f32) {
         self.components[0] = self.components[0] * rhs;
         self.components[1] = self.components[1] * rhs;
@@ -111,7 +121,10 @@ impl Div<i64> for RawPoint {
 
     fn div(self, rhs: i64) -> Self::Output {
         Self {
-            components: [self.components[0] / rhs as f32, self.components[1] / rhs as f32],
+            components: [
+                self.components[0] / rhs as f32,
+                self.components[1] / rhs as f32,
+            ],
         }
     }
 }
@@ -121,7 +134,10 @@ impl Div<i32> for RawPoint {
 
     fn div(self, rhs: i32) -> Self::Output {
         Self {
-            components: [self.components[0] / rhs as f32, self.components[1] / rhs as f32],
+            components: [
+                self.components[0] / rhs as f32,
+                self.components[1] / rhs as f32,
+            ],
         }
     }
 }
@@ -131,7 +147,10 @@ impl Div<u64> for RawPoint {
 
     fn div(self, rhs: u64) -> Self::Output {
         Self {
-            components: [self.components[0] / rhs as f32, self.components[1] / rhs as f32],
+            components: [
+                self.components[0] / rhs as f32,
+                self.components[1] / rhs as f32,
+            ],
         }
     }
 }
@@ -141,7 +160,10 @@ impl Div<u32> for RawPoint {
 
     fn div(self, rhs: u32) -> Self::Output {
         Self {
-            components: [self.components[0] / rhs as f32, self.components[1] / rhs as f32],
+            components: [
+                self.components[0] / rhs as f32,
+                self.components[1] / rhs as f32,
+            ],
         }
     }
 }
@@ -156,177 +178,182 @@ impl Div<f32> for RawPoint {
     }
 }
 
-impl DivAssign<i64> for RawPoint{
+impl DivAssign<i64> for RawPoint {
     fn div_assign(&mut self, rhs: i64) {
         self.components[0] = self.components[0] / rhs as f32;
         self.components[1] = self.components[1] / rhs as f32;
     }
 }
 
-impl DivAssign<i32> for RawPoint{
+impl DivAssign<i32> for RawPoint {
     fn div_assign(&mut self, rhs: i32) {
         self.components[0] = self.components[0] / rhs as f32;
         self.components[1] = self.components[1] / rhs as f32;
     }
 }
 
-impl DivAssign<u64> for RawPoint{
+impl DivAssign<u64> for RawPoint {
     fn div_assign(&mut self, rhs: u64) {
         self.components[0] = self.components[0] / rhs as f32;
         self.components[1] = self.components[1] / rhs as f32;
     }
 }
 
-impl DivAssign<u32> for RawPoint{
+impl DivAssign<u32> for RawPoint {
     fn div_assign(&mut self, rhs: u32) {
         self.components[0] = self.components[0] / rhs as f32;
         self.components[1] = self.components[1] / rhs as f32;
     }
 }
 
-
-impl DivAssign<f32> for RawPoint{
+impl DivAssign<f32> for RawPoint {
     fn div_assign(&mut self, rhs: f32) {
         self.components[0] = self.components[0] / rhs;
         self.components[1] = self.components[1] / rhs;
     }
 }
 
-impl Add<RawPoint> for RawPoint{
+impl Add<RawPoint> for RawPoint {
     type Output = RawPoint;
     fn add(self, rhs: RawPoint) -> Self::Output {
         Self {
-            components: [self.components[0] + rhs.components[0], self.components[1] + rhs.components[1]],
+            components: [
+                self.components[0] + rhs.components[0],
+                self.components[1] + rhs.components[1],
+            ],
         }
     }
 }
 
-impl Sub<RawPoint> for RawPoint{
+impl Sub<RawPoint> for RawPoint {
     type Output = RawPoint;
     fn sub(self, rhs: RawPoint) -> Self::Output {
         Self {
-            components: [self.components[0] - rhs.components[0], self.components[1] - rhs.components[1]],
+            components: [
+                self.components[0] - rhs.components[0],
+                self.components[1] - rhs.components[1],
+            ],
         }
     }
 }
 
-impl Add<&RawPoint> for RawPoint{
+impl Add<&RawPoint> for RawPoint {
     type Output = RawPoint;
     fn add(self, rhs: &RawPoint) -> Self::Output {
         Self {
-            components: [self.components[0] + rhs.components[0], self.components[1] + rhs.components[1]],
+            components: [
+                self.components[0] + rhs.components[0],
+                self.components[1] + rhs.components[1],
+            ],
         }
     }
 }
 
-impl Sub<&RawPoint> for RawPoint{
+impl Sub<&RawPoint> for RawPoint {
     type Output = RawPoint;
     fn sub(self, rhs: &RawPoint) -> Self::Output {
         Self {
-            components: [self.components[0] - rhs.components[0], self.components[1] - rhs.components[1]],
+            components: [
+                self.components[0] - rhs.components[0],
+                self.components[1] - rhs.components[1],
+            ],
         }
     }
 }
 
-impl From<[f32;2]> for RawPoint{ 
-    fn from(value: [f32;2]) -> Self {
-        Self {
-            components:value  
-        }
+impl From<[f32; 2]> for RawPoint {
+    fn from(value: [f32; 2]) -> Self {
+        Self { components: value }
     }
 }
 
-impl From<Pos2> for RawPoint{
+impl From<Pos2> for RawPoint {
     fn from(value: Pos2) -> Self {
         Self {
-            components:[value.x,value.y]
+            components: [value.x, value.y],
         }
     }
 }
 
-impl From<[i64;2]> for RawPoint{
-    fn from(value: [i64;2]) -> Self {
+impl From<[i64; 2]> for RawPoint {
+    fn from(value: [i64; 2]) -> Self {
         Self {
-            components:[value[0] as f32,value[1] as f32]
+            components: [value[0] as f32, value[1] as f32],
         }
     }
 }
 
-impl From<[i32;2]> for RawPoint{
-    fn from(value: [i32;2]) -> Self {
+impl From<[i32; 2]> for RawPoint {
+    fn from(value: [i32; 2]) -> Self {
         Self {
-            components:[value[0] as f32,value[1] as f32]
+            components: [value[0] as f32, value[1] as f32],
         }
     }
 }
 
-impl From<[i16;2]> for RawPoint{
-    fn from(value: [i16;2]) -> Self {
+impl From<[i16; 2]> for RawPoint {
+    fn from(value: [i16; 2]) -> Self {
         Self {
-            components:[value[0] as f32,value[1] as f32]
+            components: [value[0] as f32, value[1] as f32],
         }
     }
 }
 
-impl From<[i8;2]> for RawPoint{
-    fn from(value: [i8;2]) -> Self {
+impl From<[i8; 2]> for RawPoint {
+    fn from(value: [i8; 2]) -> Self {
         Self {
-            components:[value[0] as f32,value[1] as f32]
+            components: [value[0] as f32, value[1] as f32],
         }
     }
 }
 
-impl Into<[f32;2]> for RawPoint{
-    fn into(self) -> [f32;2] {
-        [self.components[0],self.components[1]]
+impl From<RawPoint> for [f32; 2] {
+    fn from(val: RawPoint) -> Self {
+        [val.components[0], val.components[1]]
     }
 }
 
-impl Into<Pos2> for RawPoint{
-    fn into(self) -> Pos2 {
-        Pos2::from(self.components)
+impl From<RawPoint> for Pos2 {
+    fn from(val: RawPoint) -> Self {
+        Pos2::from(val.components)
     }
 }
 
-
-#[derive(Copy,Clone)]
+#[derive(Copy, Clone)]
 pub struct RawLine {
-    pub points:[RawPoint;2],
+    pub points: [RawPoint; 2],
 }
 
-impl RawLine{
-    pub fn new(a:RawPoint ,b:RawPoint) -> Self {
-        Self{
-            points:[a,b]
-        }
+impl RawLine {
+    pub fn new(a: RawPoint, b: RawPoint) -> Self {
+        Self { points: [a, b] }
     }
 
     pub fn distance(self) -> f32 {
         let x = self.points[0].components[0] - self.points[1].components[0];
         let y = self.points[0].components[1] - self.points[1].components[1];
-        (x.powi(2)+y.powi(2)).sqrt()
+        (x.powi(2) + y.powi(2)).sqrt()
     }
 
     pub fn midpoint(self) -> RawPoint {
-        let x = (self.points[0].components[0] + self.points[1].components[0])/2.0;
-        let y = (self.points[0].components[1] + self.points[1].components[1])/2.0;
-        RawPoint::new(x,y)
+        let x = (self.points[0].components[0] + self.points[1].components[0]) / 2.0;
+        let y = (self.points[0].components[1] + self.points[1].components[1]) / 2.0;
+        RawPoint::new(x, y)
     }
 }
 
-impl Into<[Pos2;2]> for RawLine {
-
-    fn into(self) -> [Pos2; 2] { 
-        let position1 = self.points[0].into();
-        let position2 = self.points[1].into();
-        [position1,position2]
+impl From<RawLine> for [Pos2; 2] {
+    fn from(val: RawLine) -> Self {
+        let position1 = val.points[0].into();
+        let position2 = val.points[1].into();
+        [position1, position2]
     }
 }
 
-impl From<[[i64;2];2]> for RawLine {
-    fn from(value: [[i64;2];2]) -> Self {
-        Self{
-            points: [RawPoint::from(value[0]),RawPoint::from(value[1])]
+impl From<[[i64; 2]; 2]> for RawLine {
+    fn from(value: [[i64; 2]; 2]) -> Self {
+        Self {
+            points: [RawPoint::from(value[0]), RawPoint::from(value[1])],
         }
     }
 }
@@ -481,20 +508,18 @@ impl MapLabel {
 
 #[derive(Clone)]
 pub struct MapLine {
-    pub id:Option<String>,
+    pub id: Option<String>,
     pub raw_line: RawLine,
 }
 
 impl MapLine {
-    pub fn new( point1: RawPoint, point2:RawPoint) -> Self {
+    pub fn new(point1: RawPoint, point2: RawPoint) -> Self {
         MapLine {
-            id:None,
+            id: None,
             raw_line: RawLine::new(point1, point2),
         }
     }
 }
-
-
 
 // This can by any object or point with its associated metadata
 /// Struct that contains coordinates to help calculate nearest point in space
