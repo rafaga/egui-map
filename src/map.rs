@@ -230,6 +230,18 @@ impl Map {
         self.calculate_visible_points();
     }
 
+    pub fn set_pos_from_nodeid(&mut self, node_id: usize) {
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("set_pos_from_nodeid");
+        if let Some(hash_map) = &self.points {
+            if let Some(map_point) = hash_map.get(&node_id) {
+                self.reference.pos = map_point.raw_point.clone();
+                self.adjust_bounds();
+                self.calculate_visible_points();
+            }
+        }
+    }
+
     pub fn set_pos(&mut self, position: [f32; 2]) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("set_pos");
