@@ -600,6 +600,7 @@ pub(crate) struct TextSettings {
     pub text_color: Color32,
 }
 
+#[derive(Clone)]
 pub struct MapSettings {
     pub max_zoom: f32,
     pub min_zoom: f32,
@@ -670,7 +671,7 @@ impl Default for MapSettings {
     }
 }
 
-#[derive(PartialEq)]
+#[derive(Clone,PartialEq)]
 pub enum VisibilitySetting {
     Hidden,
     Hover,

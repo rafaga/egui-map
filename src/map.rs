@@ -9,6 +9,7 @@ use kdtree::KdTree;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Error;
 use std::time::Instant;
+use std::rc::Rc;
 
 use self::objects::NodeTemplate;
 
@@ -17,6 +18,7 @@ pub mod objects;
 // This can by any object or point with its associated metadata
 /// Struct that contains coordinates to help calculate nearest point in space
 
+#[derive(Clone)]
 pub struct Map {
     zoom: f32,
     previous_zoom: f32,
@@ -32,8 +34,8 @@ pub struct Map {
     current_index: usize,
     entities: HashMap<usize, Instant>,
     pub settings: MapSettings,
-    menu_manager: Option<Box<dyn ContextMenuManager>>,
-    node_template: Option<Box<dyn NodeTemplate>>,
+    menu_manager: Option<Rc<dyn ContextMenuManager>>,
+    node_template: Option<Rc<dyn NodeTemplate>>,
     visible_lines: HashSet<String>,
 }
 
@@ -605,7 +607,7 @@ impl Map {
         Ok(true)
     }
 
-    pub fn set_context_manager(&mut self, manager: Box<dyn ContextMenuManager>) {
+    pub fn set_context_manager(&mut self, manager: Rc<dyn ContextMenuManager>) {
         self.menu_manager = Some(manager);
     }
 }
