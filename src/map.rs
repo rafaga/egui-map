@@ -37,6 +37,7 @@ pub struct Map {
     menu_manager: Option<Rc<dyn ContextMenuManager>>,
     node_template: Option<Rc<dyn NodeTemplate>>,
     visible_lines: HashSet<String>,
+    markers: HashMap<usize,usize>
 }
 
 impl Default for Map {
@@ -100,7 +101,7 @@ impl Widget for &mut Map {
                 }
 
                 // Here we determine the widget center to print all nodes
-                //let min_point = self.current.pos - RawPoint::try_from([self.map_area.center().x,self.map_area.center().y]).unwrap();
+                // let min_point = self.current.pos - RawPoint::try_from([self.map_area.center().x,self.map_area.center().y]).unwrap();
 
                 let rect_midpoint = RawPoint::from(self.map_area.center());
                 let min_point = self.current.pos - rect_midpoint;
@@ -164,6 +165,7 @@ impl Map {
             menu_manager: None,
             node_template: None,
             visible_lines: HashSet::new(),
+            markers: HashMap::new(),
         }
     }
 
@@ -609,5 +611,23 @@ impl Map {
 
     pub fn set_context_manager(&mut self, manager: Rc<dyn ContextMenuManager>) {
         self.menu_manager = Some(manager);
+    }
+
+    pub fn update_marker(&mut self, id: usize, node_id:usize) {
+        if let Some(points) = &self.points {
+            if self.markers.contains_key(&id) {
+                if points.contains_key(&id) {
+                    self.markers.entry(id).and_modify(|value| *value = node_id);
+                } else {
+                    self.markers.remove_entry(&id);
+                }
+            } else {
+                self.markers.insert(id, node_id);
+            }
+        } else {
+            if self.markers.contains_key(&id) {
+                self.markers.remove_entry(&id);
+            }
+        }
     }
 }
