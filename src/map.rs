@@ -117,6 +117,19 @@ impl Widget for &mut Map {
                     }
                 }
 
+
+                for marker in &self.markers {
+                    if let Some(point) = self.points.as_ref().unwrap().get(&marker.1) {
+                        let adjusted_point = point.raw_point * self.zoom;
+                        let mut new_points = Vec::new();
+                        new_points.push(Pos2::new(adjusted_point.components[0] - (6.0 * self.zoom), adjusted_point.components[1] - (14.0 * self.zoom)));
+                        new_points.push(Pos2::new(adjusted_point.components[0] + (6.0 * self.zoom), adjusted_point.components[1] - (14.0 * self.zoom)));
+                        new_points.push(Pos2::new(adjusted_point.components[0], adjusted_point.components[1] - (2.0 * self.zoom)));
+                        ui.painter().add(Shape::convex_polygon(new_points,Color32::BLUE, Stroke::new(1.0, Color32::DARK_BLUE)));
+                    }
+                }
+
+
                 self.paint_sub_components(ui, self.map_area);
 
                 self.capture_mouse_events(ui, &resp);
