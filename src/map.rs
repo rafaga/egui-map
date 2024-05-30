@@ -120,11 +120,11 @@ impl Widget for &mut Map {
 
                 for marker in &self.markers {
                     if let Some(point) = self.points.as_ref().unwrap().get(&marker.1) {
-                        let adjusted_point = point.raw_point * self.zoom;
+                        let adjusted_point = point.raw_point * self.zoom - min_point;
                         let mut new_points = Vec::new();
-                        new_points.push(Pos2::new(adjusted_point.components[0] - (6.0 * self.zoom), adjusted_point.components[1] - (14.0 * self.zoom)));
-                        new_points.push(Pos2::new(adjusted_point.components[0] + (6.0 * self.zoom), adjusted_point.components[1] - (14.0 * self.zoom)));
-                        new_points.push(Pos2::new(adjusted_point.components[0], adjusted_point.components[1] - (2.0 * self.zoom)));
+                        new_points.push(Pos2::new( adjusted_point.components[0] - (6.0 * self.zoom), adjusted_point.components[1] - (16.0 * self.zoom)));
+                        new_points.push(Pos2::new(adjusted_point.components[0] + (6.0 * self.zoom), adjusted_point.components[1] - (16.0 * self.zoom)));
+                        new_points.push(Pos2::new(adjusted_point.components[0], adjusted_point.components[1] - (4.0 * self.zoom)));
                         ui.painter().add(Shape::convex_polygon(new_points,Color32::BLUE, Stroke::new(1.0, Color32::DARK_BLUE)));
                     }
                 }
@@ -543,7 +543,7 @@ impl Map {
                     }
                 }
                 if let Some(node_template) = &self.node_template {
-                    node_template.node_ui(ui_obj, viewport_point.into());
+                    node_template.node_ui(ui_obj, viewport_point.into(), self.zoom, &system);
                 } else {
                     shape_vec.push(Shape::circle_filled(
                         viewport_point.into(),
@@ -624,6 +624,10 @@ impl Map {
 
     pub fn set_context_manager(&mut self, manager: Rc<dyn ContextMenuManager>) {
         self.menu_manager = Some(manager);
+    }
+
+    pub fn set_node_template(&mut self, template: Rc<dyn NodeTemplate>){
+        self.node_template = Some(template);
     }
 
     pub fn update_marker(&mut self, id: usize, node_id:usize) {
