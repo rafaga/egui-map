@@ -514,18 +514,24 @@ impl Map {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("painting_points_m");
                 let viewport_point = system.raw_point * self.zoom - min_point;
-                if self.zoom > self.settings.label_visible_zoom
-                    && (self.settings.node_text_visibility == VisibilitySetting::Allways
-                        || (self.settings.node_text_visibility == VisibilitySetting::Hover
-                            && nearest_id.unwrap_or(&0usize) == &system.get_id()))
-                {
-                    let mut viewport_text = viewport_point;
-                    viewport_text.components[0] += 3.0 * self.zoom;
-                    viewport_text.components[1] -= 3.0 * self.zoom;
-                    text_settings.position = viewport_text;
-                    text_settings.text = system.get_name();
-                    self.paint_label(paint, &text_settings);
+                if self.zoom > self.settings.label_visible_zoom {
+                    if let Some(node_template) = &self.node_template {
+                        if nearest_id.unwrap_or(&0usize) == &system.get_id() {
+                            node_template.selection_ui(ui_obj, viewport_point.into(), self.zoom, &system);
+                        }
+                    } else if self.settings.node_text_visibility == VisibilitySetting::Allways
+                            || (self.settings.node_text_visibility == VisibilitySetting::Hover
+                                && nearest_id.unwrap_or(&0usize) == &system.get_id())
+                    {
+                        let mut viewport_text = viewport_point;
+                        viewport_text.components[0] += 3.0 * self.zoom;
+                        viewport_text.components[1] -= 3.0 * self.zoom;
+                        text_settings.position = viewport_text;
+                        text_settings.text = system.get_name();
+                        self.paint_label(paint, &text_settings);
+                    }
                 }
+
                 let system_id = system.get_id();
                 if let Some(init_time) = self.entities.get(&system_id) {
                     match Animation::pulse(
