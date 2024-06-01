@@ -684,5 +684,5 @@ pub trait ContextMenuManager {
 
 pub trait NodeTemplate {
     fn node_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom:f32 , _system: &MapPoint);
-    fn selection_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom:f32 , _system: &MapPoint);
+    fn selection_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom:f32);
 }

@@ -516,7 +516,7 @@ impl Map {
                 let viewport_point = system.raw_point * self.zoom - min_point;
                 if let Some(node_template) = &self.node_template {
                     if nearest_id.unwrap_or(&0usize) == &system.get_id() {
-                        node_template.selection_ui(ui_obj, viewport_point.into(), self.zoom, &system);
+                        node_template.selection_ui(ui_obj, viewport_point.into(), self.zoom);
                     }
                 } else if self.zoom > self.settings.label_visible_zoom && 
                     self.settings.node_text_visibility == VisibilitySetting::Allways
