@@ -1,6 +1,7 @@
 use egui::{Align2, Color32, FontFamily, FontId, Pos2, Stroke, Ui};
 use std::convert::{From, Into};
 use std::ops::{Add, Div, DivAssign, Mul, MulAssign, Sub};
+use std::time::Instant;
 
 #[derive(Copy, Clone)]
 pub struct RawPoint {
@@ -685,4 +686,6 @@ pub trait ContextMenuManager {
 pub trait NodeTemplate {
     fn node_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom:f32 , _system: &MapPoint);
     fn selection_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom:f32);
+    fn notification_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom:f32, initial_time: Instant, color: Color32) -> bool;
+    fn marker_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom:f32);
 }

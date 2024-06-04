@@ -533,18 +533,22 @@ impl Map {
 
                 let system_id = system.get_id();
                 if let Some(init_time) = self.entities.get(&system_id) {
-                    match Animation::pulse(
-                        paint,
-                        viewport_point,
-                        self.zoom,
-                        *init_time,
-                        self.settings.styles[self.current_index].alert_color,
-                    ) {
-                        Ok(true) => {
-                            ui_obj.ctx().request_repaint();
+                    if let Some(template) = &self.node_template {
+                        template.notification_ui(ui_obj, viewport_point.into(), self.zoom, *init_time, self.settings.styles[self.current_index].alert_color);
+                    } else {
+                        match Animation::pulse(
+                            paint,
+                            viewport_point,
+                            self.zoom,
+                            *init_time,
+                            self.settings.styles[self.current_index].alert_color,
+                        ) {
+                            Ok(true) => {
+                                ui_obj.ctx().request_repaint();
+                            }
+                            Ok(false) => nodes_to_remove.push(system_id),
+                            Err(_) => (),
                         }
-                        Ok(false) => nodes_to_remove.push(system_id),
-                        Err(_) => (),
                     }
                 }
                 if let Some(node_template) = &self.node_template {
