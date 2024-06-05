@@ -120,12 +120,16 @@ impl Widget for &mut Map {
 
                 for marker in &self.markers {
                     if let Some(point) = self.points.as_ref().unwrap().get(&marker.1) {
-                        let adjusted_point = point.raw_point * self.zoom - min_point;
-                        let mut new_points = Vec::new();
-                        new_points.push(Pos2::new( adjusted_point.components[0] - (6.0 * self.zoom), adjusted_point.components[1] - (16.0 * self.zoom)));
-                        new_points.push(Pos2::new(adjusted_point.components[0] + (6.0 * self.zoom), adjusted_point.components[1] - (16.0 * self.zoom)));
-                        new_points.push(Pos2::new(adjusted_point.components[0], adjusted_point.components[1] - (4.0 * self.zoom)));
-                        ui.painter().add(Shape::convex_polygon(new_points,Color32::BLUE, Stroke::new(1.0, Color32::DARK_BLUE)));
+                        if let Some(template) = &self.node_template {
+                            template.marker_ui(ui, point.raw_point.into(), self.zoom);
+                        } else {
+                            let adjusted_point = point.raw_point * self.zoom - min_point;
+                            let mut new_points = Vec::new();
+                            new_points.push(Pos2::new( adjusted_point.components[0] - (6.0 * self.zoom), adjusted_point.components[1] - (16.0 * self.zoom)));
+                            new_points.push(Pos2::new(adjusted_point.components[0] + (6.0 * self.zoom), adjusted_point.components[1] - (16.0 * self.zoom)));
+                            new_points.push(Pos2::new(adjusted_point.components[0], adjusted_point.components[1] - (4.0 * self.zoom)));
+                            ui.painter().add(Shape::convex_polygon(new_points,Color32::BLUE, Stroke::new(1.0, Color32::DARK_BLUE)));
+                        } 
                     }
                 }
 
