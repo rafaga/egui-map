@@ -3,13 +3,14 @@ use crate::map::objects::{
     ContextMenuManager, MapBounds, MapLabel, MapLine, MapPoint, MapSettings, RawLine, RawPoint,
     TextSettings, VisibilitySetting,
 };
-use egui::{widgets::*, *};
+use egui::{widgets::*, *, epaint::CircleShape};
 use kdtree::distance::squared_euclidean;
 use kdtree::KdTree;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Error;
 use std::time::Instant;
 use std::rc::Rc;
+use chrono;
 
 use self::objects::NodeTemplate;
 
@@ -117,22 +118,34 @@ impl Widget for &mut Map {
                     }
                 }
 
-
                 for marker in &self.markers {
                     if let Some(point) = self.points.as_ref().unwrap().get(&marker.1) {
+                        let adjusted_point = point.raw_point * self.zoom - min_point;
                         if let Some(template) = &self.node_template {
-                            template.marker_ui(ui, point.raw_point.into(), self.zoom);
+                            template.marker_ui(ui, adjusted_point.into(), self.zoom);
                         } else {
-                            let adjusted_point = point.raw_point * self.zoom - min_point;
-                            let mut new_points = Vec::new();
-                            new_points.push(Pos2::new( adjusted_point.components[0] - (6.0 * self.zoom), adjusted_point.components[1] - (16.0 * self.zoom)));
-                            new_points.push(Pos2::new(adjusted_point.components[0] + (6.0 * self.zoom), adjusted_point.components[1] - (16.0 * self.zoom)));
-                            new_points.push(Pos2::new(adjusted_point.components[0], adjusted_point.components[1] - (4.0 * self.zoom)));
-                            ui.painter().add(Shape::convex_polygon(new_points,Color32::BLUE, Stroke::new(1.0, Color32::DARK_BLUE)));
+                            let mut shapes = Vec::new();
+                            let color = if ui.visuals().dark_mode {
+                                Color32::LIGHT_GREEN
+                            } else {
+                                Color32::GREEN
+                            };
+                            let mut transparency = (chrono::Local::now().timestamp_millis() % 2550) / 5;
+                            if transparency > 255 {
+                                transparency = 255 - (transparency - 255)
+                            }
+                            let corrected_color = Color32::from_rgba_unmultiplied(
+                                color.r(),
+                                color.g(),
+                                color.b(),
+                                transparency as u8,
+                            );
+                            shapes.push(Shape::Circle(CircleShape::stroke(adjusted_point.into(), 4.0 * self.zoom, Stroke::new(9.0 * self.zoom, corrected_color))));
+                            ui.ctx().request_repaint();
+                            ui.painter().extend(shapes);
                         } 
                     }
                 }
-
 
                 self.paint_sub_components(ui, self.map_area);
 
@@ -625,13 +638,13 @@ impl Map {
         );
     }
 
-    pub fn notify(&mut self, id_node: usize) -> Result<bool, Error> {
+    pub fn notify(&mut self, id_node: usize, time: Instant) -> Result<bool, Error> {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("notify");
         self.entities
             .entry(id_node)
-            .and_modify(|value| *value = Instant::now())
-            .or_insert(Instant::now());
+            .and_modify(|value| *value = time)
+            .or_insert(time);
         Ok(true)
     }
 
