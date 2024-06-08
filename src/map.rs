@@ -34,6 +34,8 @@ pub struct Map {
     style: egui::Style,
     current_index: usize,
     entities: HashMap<usize, Instant>,
+    min_size: (Option<f32>,Option<f32>),
+    max_size: (Option<f32>,Option<f32>),
     pub settings: MapSettings,
     menu_manager: Option<Rc<dyn ContextMenuManager>>,
     node_template: Option<Rc<dyn NodeTemplate>>,
@@ -56,7 +58,7 @@ impl Widget for &mut Map {
         );
         // we define the initial coordinate as the center of such rectangle
         self.reference.dist = rect.distance();
-
+        
         self.assign_visual_style(ui);
 
         let canvas = egui::Frame::canvas(ui.style());
@@ -170,6 +172,7 @@ impl Widget for &mut Map {
                 }
             }
         });
+        ui.allocate_space(self.map_area.size());
         inner_response.response
     }
 }
@@ -189,6 +192,8 @@ impl Map {
             current: MapBounds::default(),
             reference: MapBounds::default(),
             settings,
+            min_size: (None,None),
+            max_size: (None,None),
             current_index: 0,
             entities: HashMap::new(),
             style: egui::Style::default(),
@@ -477,6 +482,9 @@ impl Map {
         pos2.x -= 60.0;
         pos2.y += 240.0;
         let sub_rect = egui::Rect::from_two_pos(pos1, pos2);
+        //ui_obj.allocate_ui_with_layout(sub_rect.size(), egui::Layout::right_to_left(Align::TOP), |ui_obj| {
+            
+        //});
         ui_obj.allocate_ui_at_rect(sub_rect, |ui_obj| {
             ui_obj.add(zoom_slider);
         });
@@ -672,5 +680,15 @@ impl Map {
                 self.markers.remove_entry(&id);
             }
         }
+    }
+
+    pub fn allocate_at_least(mut self, width: Option<f32>, height: Option<f32> ) -> Self {
+        self.min_size = (width,height);
+        self
+    }
+
+    pub fn allocate_at_most(mut self, width: Option<f32>, height: Option<f32> ) -> Self {
+        self.max_size = (width,height);
+        self
     }
 }
