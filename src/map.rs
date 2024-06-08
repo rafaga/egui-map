@@ -51,11 +51,8 @@ impl Default for Map {
 
 impl Widget for &mut Map {
     fn ui(self, ui: &mut egui::Ui) -> Response {
-        self.map_area = ui.available_rect_before_wrap();
-        let rect = RawLine::new(
-            RawPoint::from(self.map_area.left_top()),
-            RawPoint::from(self.map_area.right_bottom()),
-        );
+        let rect = self.calculate_widget_dimentions(ui);
+        
         // we define the initial coordinate as the center of such rectangle
         self.reference.dist = rect.distance();
         
@@ -202,6 +199,28 @@ impl Map {
             visible_lines: HashSet::new(),
             markers: HashMap::new(),
         }
+    }
+
+    fn calculate_widget_dimentions(&mut self, ui: &mut Ui) -> RawLine {
+        self.map_area = ui.available_rect_before_wrap();
+        let mut left_top = RawPoint::from(self.map_area.left_top());
+        let mut right_bottom = RawPoint::from(self.map_area.right_bottom());
+        if self.max_size.0.is_some() && right_bottom.components[0] > self.max_size.0.unwrap_or_else(||0.0f32) {
+            right_bottom.components[0] = self.max_size.0.unwrap();
+        }
+        if self.max_size.1.is_some() && right_bottom.components[1] > self.max_size.1.unwrap_or_else(||0.0f32) {
+            right_bottom.components[1] = self.max_size.1.unwrap();
+        }
+        if self.min_size.0.is_some() && left_top.components[0] < self.min_size.0.unwrap_or_else(||0.0f32) {
+            left_top.components[0] = self.min_size.0.unwrap();
+        }
+        if self.min_size.1.is_some() && left_top.components[1] < self.min_size.1.unwrap_or_else(||0.0f32) {
+            left_top.components[1] = self.min_size.1.unwrap();
+        }
+        RawLine::new(
+            left_top,
+            right_bottom
+        )
     }
 
     fn calculate_visible_points(&mut self) {
@@ -682,13 +701,11 @@ impl Map {
         }
     }
 
-    pub fn allocate_at_least(mut self, width: Option<f32>, height: Option<f32> ) -> Self {
+    pub fn allocate_at_least(&mut self, width: Option<f32>, height: Option<f32> ) {
         self.min_size = (width,height);
-        self
     }
 
-    pub fn allocate_at_most(mut self, width: Option<f32>, height: Option<f32> ) -> Self {
+    pub fn allocate_at_most(&mut self, width: Option<f32>, height: Option<f32> ) {
         self.max_size = (width,height);
-        self
     }
 }
