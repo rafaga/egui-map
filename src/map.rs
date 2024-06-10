@@ -3,14 +3,14 @@ use crate::map::objects::{
     ContextMenuManager, MapBounds, MapLabel, MapLine, MapPoint, MapSettings, RawLine, RawPoint,
     TextSettings, VisibilitySetting,
 };
-use egui::{widgets::*, *, epaint::CircleShape};
+use chrono;
+use egui::{epaint::CircleShape, widgets::*, *};
 use kdtree::distance::squared_euclidean;
 use kdtree::KdTree;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Error;
-use std::time::Instant;
 use std::rc::Rc;
-use chrono;
+use std::time::Instant;
 
 use self::objects::NodeTemplate;
 
@@ -34,13 +34,13 @@ pub struct Map {
     style: egui::Style,
     current_index: usize,
     entities: HashMap<usize, Instant>,
-    min_size: (Option<f32>,Option<f32>),
-    max_size: (Option<f32>,Option<f32>),
+    min_size: (Option<f32>, Option<f32>),
+    max_size: (Option<f32>, Option<f32>),
     pub settings: MapSettings,
     menu_manager: Option<Rc<dyn ContextMenuManager>>,
     node_template: Option<Rc<dyn NodeTemplate>>,
     visible_lines: HashSet<String>,
-    markers: HashMap<usize,usize>
+    markers: HashMap<usize, usize>,
 }
 
 impl Default for Map {
@@ -52,13 +52,13 @@ impl Default for Map {
 impl Widget for &mut Map {
     fn ui(self, ui: &mut egui::Ui) -> Response {
         let rect = self.calculate_widget_dimentions(ui);
-        
+
         // we define the initial coordinate as the center of such rectangle
         self.reference.dist = rect.distance();
-        
+
         self.assign_visual_style(ui);
 
-        let canvas = egui::Frame::canvas(ui.style());
+        let canvas = egui::Frame::canvas(ui.style()).inner_margin(Margin::symmetric(3.0, 5.0));
 
         let inner_response = canvas.show(ui, |ui| {
             #[cfg(feature = "puffin")]
@@ -88,7 +88,7 @@ impl Widget for &mut Map {
                         text_color: ui.visuals().text_color(),
                     };
                     for label in &self.labels {
-                        text_settings.text = label.text.clone();
+                        text_settings.text.clone_from(&label.text);
                         paint.text(
                             label.center,
                             Align2::CENTER_CENTER,
@@ -118,7 +118,7 @@ impl Widget for &mut Map {
                 }
 
                 for marker in &self.markers {
-                    if let Some(point) = self.points.as_ref().unwrap().get(&marker.1) {
+                    if let Some(point) = self.points.as_ref().unwrap().get(marker.1) {
                         let adjusted_point = point.raw_point * self.zoom - min_point;
                         if let Some(template) = &self.node_template {
                             template.marker_ui(ui, adjusted_point.into(), self.zoom);
@@ -129,7 +129,8 @@ impl Widget for &mut Map {
                             } else {
                                 Color32::GREEN
                             };
-                            let mut transparency = (chrono::Local::now().timestamp_millis() % 2550) / 5;
+                            let mut transparency =
+                                (chrono::Local::now().timestamp_millis() % 2550) / 5;
                             if transparency > 255 {
                                 transparency = 255 - (transparency - 255)
                             }
@@ -139,10 +140,14 @@ impl Widget for &mut Map {
                                 color.b(),
                                 transparency as u8,
                             );
-                            shapes.push(Shape::Circle(CircleShape::stroke(adjusted_point.into(), 4.0 * self.zoom, Stroke::new(9.0 * self.zoom, corrected_color))));
+                            shapes.push(Shape::Circle(CircleShape::stroke(
+                                adjusted_point.into(),
+                                4.0 * self.zoom,
+                                Stroke::new(9.0 * self.zoom, corrected_color),
+                            )));
                             ui.ctx().request_repaint();
                             ui.painter().extend(shapes);
-                        } 
+                        }
                     }
                 }
 
@@ -189,8 +194,8 @@ impl Map {
             current: MapBounds::default(),
             reference: MapBounds::default(),
             settings,
-            min_size: (None,None),
-            max_size: (None,None),
+            min_size: (None, None),
+            max_size: (None, None),
             current_index: 0,
             entities: HashMap::new(),
             style: egui::Style::default(),
@@ -205,22 +210,23 @@ impl Map {
         self.map_area = ui.available_rect_before_wrap();
         let mut left_top = RawPoint::from(self.map_area.left_top());
         let mut right_bottom = RawPoint::from(self.map_area.right_bottom());
-        if self.max_size.0.is_some() && right_bottom.components[0] > self.max_size.0.unwrap_or_else(||0.0f32) {
+        if self.max_size.0.is_some()
+            && right_bottom.components[0] > self.max_size.0.unwrap_or(0.0f32)
+        {
             right_bottom.components[0] = self.max_size.0.unwrap();
         }
-        if self.max_size.1.is_some() && right_bottom.components[1] > self.max_size.1.unwrap_or_else(||0.0f32) {
+        if self.max_size.1.is_some()
+            && right_bottom.components[1] > self.max_size.1.unwrap_or(0.0f32)
+        {
             right_bottom.components[1] = self.max_size.1.unwrap();
         }
-        if self.min_size.0.is_some() && left_top.components[0] < self.min_size.0.unwrap_or_else(||0.0f32) {
+        if self.min_size.0.is_some() && left_top.components[0] < self.min_size.0.unwrap_or(0.0f32) {
             left_top.components[0] = self.min_size.0.unwrap();
         }
-        if self.min_size.1.is_some() && left_top.components[1] < self.min_size.1.unwrap_or_else(||0.0f32) {
+        if self.min_size.1.is_some() && left_top.components[1] < self.min_size.1.unwrap_or(0.0f32) {
             left_top.components[1] = self.min_size.1.unwrap();
         }
-        RawLine::new(
-            left_top,
-            right_bottom
-        )
+        RawLine::new(left_top, right_bottom)
     }
 
     fn calculate_visible_points(&mut self) {
@@ -237,7 +243,7 @@ impl Map {
                     self.visible_points.push(*point.1);
                     let system = self.points.as_ref().unwrap().get(point.1);
                     for connection in &system.unwrap().connections {
-                        if self.visible_lines.get(&connection.clone()).is_none() {
+                        if !self.visible_lines.contains(&connection.clone()) {
                             self.visible_lines.insert(connection.clone());
                         }
                     }
@@ -293,7 +299,7 @@ impl Map {
         puffin::profile_scope!("set_pos_from_nodeid");
         if let Some(hash_map) = &self.points {
             if let Some(map_point) = hash_map.get(&node_id) {
-                self.reference.pos = map_point.raw_point.clone();
+                self.reference.pos = map_point.raw_point;
                 self.adjust_bounds();
                 self.calculate_visible_points();
             }
@@ -502,7 +508,7 @@ impl Map {
         pos2.y += 240.0;
         let sub_rect = egui::Rect::from_two_pos(pos1, pos2);
         //ui_obj.allocate_ui_with_layout(sub_rect.size(), egui::Layout::right_to_left(Align::TOP), |ui_obj| {
-            
+
         //});
         ui_obj.allocate_ui_at_rect(sub_rect, |ui_obj| {
             ui_obj.add(zoom_slider);
@@ -562,10 +568,10 @@ impl Map {
                     if nearest_id.unwrap_or(&0usize) == &system.get_id() {
                         node_template.selection_ui(ui_obj, viewport_point.into(), self.zoom);
                     }
-                } else if self.zoom > self.settings.label_visible_zoom && 
-                    self.settings.node_text_visibility == VisibilitySetting::Allways
+                } else if self.zoom > self.settings.label_visible_zoom
+                    && self.settings.node_text_visibility == VisibilitySetting::Allways
                     || (self.settings.node_text_visibility == VisibilitySetting::Hover
-                    && nearest_id.unwrap_or(&0usize) == &system.get_id())
+                        && nearest_id.unwrap_or(&0usize) == &system.get_id())
                 {
                     let mut viewport_text = viewport_point;
                     viewport_text.components[0] += 3.0 * self.zoom;
@@ -578,7 +584,13 @@ impl Map {
                 let system_id = system.get_id();
                 if let Some(init_time) = self.entities.get(&system_id) {
                     if let Some(template) = &self.node_template {
-                        template.notification_ui(ui_obj, viewport_point.into(), self.zoom, *init_time, self.settings.styles[self.current_index].alert_color);
+                        template.notification_ui(
+                            ui_obj,
+                            viewport_point.into(),
+                            self.zoom,
+                            *init_time,
+                            self.settings.styles[self.current_index].alert_color,
+                        );
                     } else {
                         match Animation::pulse(
                             paint,
@@ -596,7 +608,7 @@ impl Map {
                     }
                 }
                 if let Some(node_template) = &self.node_template {
-                    node_template.node_ui(ui_obj, viewport_point.into(), self.zoom, &system);
+                    node_template.node_ui(ui_obj, viewport_point.into(), self.zoom, system);
                 } else {
                     shape_vec.push(Shape::circle_filled(
                         viewport_point.into(),
@@ -679,33 +691,29 @@ impl Map {
         self.menu_manager = Some(manager);
     }
 
-    pub fn set_node_template(&mut self, template: Rc<dyn NodeTemplate>){
+    pub fn set_node_template(&mut self, template: Rc<dyn NodeTemplate>) {
         self.node_template = Some(template);
     }
 
-    pub fn update_marker(&mut self, id: usize, node_id:usize) {
+    pub fn update_marker(&mut self, id: usize, node_id: usize) {
         if let Some(points) = &self.points {
-            if self.markers.contains_key(&id) {
-                if points.contains_key(&id) {
-                    self.markers.entry(id).and_modify(|value| *value = node_id);
-                } else {
-                    self.markers.remove_entry(&id);
-                }
+            if let std::collections::hash_map::Entry::Vacant(e) = self.markers.entry(id) {
+                e.insert(node_id);
+            } else if points.contains_key(&id) {
+                self.markers.entry(id).and_modify(|value| *value = node_id);
             } else {
-                self.markers.insert(id, node_id);
-            }
-        } else {
-            if self.markers.contains_key(&id) {
                 self.markers.remove_entry(&id);
             }
+        } else if self.markers.contains_key(&id) {
+            self.markers.remove_entry(&id);
         }
     }
 
-    pub fn allocate_at_least(&mut self, width: Option<f32>, height: Option<f32> ) {
-        self.min_size = (width,height);
+    pub fn allocate_at_least(&mut self, width: Option<f32>, height: Option<f32>) {
+        self.min_size = (width, height);
     }
 
-    pub fn allocate_at_most(&mut self, width: Option<f32>, height: Option<f32> ) {
-        self.max_size = (width,height);
+    pub fn allocate_at_most(&mut self, width: Option<f32>, height: Option<f32>) {
+        self.max_size = (width, height);
     }
 }

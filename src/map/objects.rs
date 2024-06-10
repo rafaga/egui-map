@@ -672,7 +672,7 @@ impl Default for MapSettings {
     }
 }
 
-#[derive(Clone,PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum VisibilitySetting {
     Hidden,
     Hover,
@@ -684,8 +684,15 @@ pub trait ContextMenuManager {
 }
 
 pub trait NodeTemplate {
-    fn node_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom:f32 , _system: &MapPoint);
-    fn selection_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom:f32);
-    fn notification_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom:f32, initial_time: Instant, color: Color32) -> bool;
-    fn marker_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom:f32);
+    fn node_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom: f32, _system: &MapPoint);
+    fn selection_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom: f32);
+    fn notification_ui(
+        &self,
+        ui: &mut Ui,
+        _viewport_point: Pos2,
+        _zoom: f32,
+        initial_time: Instant,
+        color: Color32,
+    ) -> bool;
+    fn marker_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom: f32);
 }
