@@ -7,6 +7,7 @@ use chrono;
 use egui::{epaint::CircleShape, widgets::*, *};
 use kdtree::distance::squared_euclidean;
 use kdtree::KdTree;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Error;
 use std::rc::Rc;
@@ -696,17 +697,7 @@ impl Map {
     }
 
     pub fn update_marker(&mut self, id: usize, node_id: usize) {
-        if let Some(points) = &self.points {
-            if let std::collections::hash_map::Entry::Vacant(e) = self.markers.entry(id) {
-                e.insert(node_id);
-            } else if points.contains_key(&id) {
-                self.markers.entry(id).and_modify(|value| *value = node_id);
-            } else {
-                self.markers.remove_entry(&id);
-            }
-        } else if self.markers.contains_key(&id) {
-            self.markers.remove_entry(&id);
-        }
+        self.markers.entry(id).and_modify(|value| *value = node_id).or_insert(node_id);
     }
 
     pub fn allocate_at_least(&mut self, width: Option<f32>, height: Option<f32>) {
