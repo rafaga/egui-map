@@ -58,7 +58,7 @@ impl Widget for &mut Map {
 
         self.assign_visual_style(ui);
 
-        let canvas = egui::Frame::canvas(ui.style()).inner_margin(Margin::symmetric(3.0, 5.0));
+        let canvas = egui::Frame::canvas(ui.style()).inner_margin(Margin::symmetric(3, 5));
 
         let inner_response = canvas.show(ui, |ui| {
             #[cfg(feature = "puffin")]
@@ -506,11 +506,13 @@ impl Map {
         pos1.y += 120.0;
         pos2.x -= 60.0;
         pos2.y += 240.0;
+
+        // TODO: Verify if this implementation its correct migrated from allocate_ui_at_rect()
         let sub_rect = egui::Rect::from_two_pos(pos1, pos2);
         //ui_obj.allocate_ui_with_layout(sub_rect.size(), egui::Layout::right_to_left(Align::TOP), |ui_obj| {
-
+        let ui_builder = egui::UiBuilder::new().clone().max_rect(sub_rect);
         //});
-        ui_obj.allocate_ui_at_rect(sub_rect, |ui_obj| {
+        ui_obj.scope_builder(ui_builder, |ui_obj| {
             ui_obj.add(zoom_slider);
         });
     }
