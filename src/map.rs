@@ -58,7 +58,7 @@ impl Widget for &mut Map {
 
         self.assign_visual_style(ui);
 
-        let canvas = egui::Frame::canvas(ui.style()).inner_margin(Margin::symmetric(3.0, 5.0));
+        let canvas = egui::Frame::canvas(ui.style()).inner_margin(Margin::symmetric(3, 5));
 
         let inner_response = canvas.show(ui, |ui| {
             #[cfg(feature = "puffin")]
@@ -510,7 +510,7 @@ impl Map {
         //ui_obj.allocate_ui_with_layout(sub_rect.size(), egui::Layout::right_to_left(Align::TOP), |ui_obj| {
 
         //});
-        ui_obj.allocate_ui_at_rect(sub_rect, |ui_obj| {
+        ui_obj.allocate_new_ui(sub_rect, |ui_obj| {
             ui_obj.add(zoom_slider);
         });
     }
