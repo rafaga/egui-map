@@ -281,7 +281,7 @@ impl Map {
         // we create a rect that include every node in the map
         // Stupid fix because rect area could be infinite
         // I need to implement a more elegant fix
-        if self.map_area.area().is_infinite() {
+        if self.map_area.area() == 0.0 {
             self.reference.dist = 3000.00;
         } else {
             let rect = RawLine::new(
