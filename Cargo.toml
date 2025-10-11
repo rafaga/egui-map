@@ -41,6 +41,6 @@ puffin = ["dep:puffin"]
 
 [dependencies]
 chrono = "0.4.42"
-egui = { version = "0.32.3", features = ["bytemuck", "log"]}
+egui = { version = "0.33.0", features = ["bytemuck"]}
 kdtree = { version = "0.7.0" }
 puffin = { version = "0.19.1", optional=true, default-features = false}
