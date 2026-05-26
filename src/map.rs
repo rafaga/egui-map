@@ -27,7 +27,7 @@ pub struct Map {
     lines: Option<HashMap<String, MapLine>>,
     labels: Vec<MapLabel>,
     tree: Option<KdTree<f32, usize, [f32; 2]>>,
-    visible_points: Vec<usize>,
+    visible_points: Vec<isize>,
     map_area: Rect,
     reference: MapBounds,
     current: MapBounds,
@@ -240,7 +240,7 @@ impl Map {
                 let vis_pos = tree.within(&point, radius, &squared_euclidean).unwrap();
                 self.visible_points.clear();
                 for point in vis_pos {
-                    self.visible_points.push(*point.1);
+                    self.visible_points.push(point.1.cast_signed());
                     let system = self.points.as_ref().unwrap().get(point.1);
                     for connection in &system.unwrap().connections {
                         if !self.visible_lines.contains(&connection.clone()) {
@@ -358,6 +358,7 @@ impl Map {
                                 unit: _,
                                 delta,
                                 modifiers,
+                                phase: _
                             } => {
                                 #[cfg(target_os = "macos")]
                                 let zoom_modifier = if modifiers.mac_cmd {
@@ -519,7 +520,7 @@ impl Map {
 
     fn paint_map_points(
         &self,
-        vec_points: &Vec<usize>,
+        vec_points: &Vec<isize>,
         hashm: &Option<HashMap<usize, MapPoint>>,
         paint: &Painter,
         ui_obj: &mut Ui,
@@ -562,7 +563,8 @@ impl Map {
 
         // Drawing Points
         for temp_point in vec_points {
-            if let Some(system) = hashm.as_ref().unwrap().get(temp_point) {
+            let parsed_point = temp_point.cast_unsigned();
+            if let Some(system) = hashm.as_ref().unwrap().get(&parsed_point) {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("painting_points_m");
                 let viewport_point = system.raw_point * self.zoom - min_point;
