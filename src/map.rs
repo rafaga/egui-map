@@ -5,8 +5,8 @@ use crate::map::objects::{
 };
 use chrono;
 use egui::{epaint::CircleShape, widgets::*, *};
-use kdtree::distance::squared_euclidean;
 use kdtree::KdTree;
+use kdtree::distance::squared_euclidean;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Error;
 use std::rc::Rc;
@@ -163,7 +163,7 @@ impl Widget for &mut Map {
                     self.previous_zoom = self.zoom;
                 }
 
-                if let Some(ref mut menu_mon) = &mut self.menu_manager {
+                if let Some(menu_mon) = &mut self.menu_manager {
                     resp.context_menu(|ui| {
                         menu_mon.ui(ui);
                     });
@@ -210,21 +210,25 @@ impl Map {
         self.map_area = ui.available_rect_before_wrap();
         let mut left_top = RawPoint::from(self.map_area.left_top());
         let mut right_bottom = RawPoint::from(self.map_area.right_bottom());
-        if self.max_size.0.is_some()
+        if let Some(val) = self.max_size.0
             && right_bottom.components[0] > self.max_size.0.unwrap_or(0.0f32)
         {
-            right_bottom.components[0] = self.max_size.0.unwrap();
+            right_bottom.components[0] = val;
         }
-        if self.max_size.1.is_some()
+        if let Some(val) = self.max_size.1
             && right_bottom.components[1] > self.max_size.1.unwrap_or(0.0f32)
         {
-            right_bottom.components[1] = self.max_size.1.unwrap();
+            right_bottom.components[1] = val;
         }
-        if self.min_size.0.is_some() && left_top.components[0] < self.min_size.0.unwrap_or(0.0f32) {
-            left_top.components[0] = self.min_size.0.unwrap();
+        if let Some(val) = self.min_size.0
+            && left_top.components[0] < self.min_size.0.unwrap_or(0.0f32)
+        {
+            left_top.components[0] = val;
         }
-        if self.min_size.1.is_some() && left_top.components[1] < self.min_size.1.unwrap_or(0.0f32) {
-            left_top.components[1] = self.min_size.1.unwrap();
+        if let Some(val) = self.min_size.1
+            && left_top.components[1] < self.min_size.1.unwrap_or(0.0f32)
+        {
+            left_top.components[1] = val;
         }
         RawLine::new(left_top, right_bottom)
     }
@@ -232,20 +236,21 @@ impl Map {
     fn calculate_visible_points(&mut self) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("calculate_visible_points");
-        if self.current.dist > 0.0 && self.current.dist < f32::INFINITY {
-            if let Some(tree) = &self.tree {
-                let center = self.current.pos / self.zoom;
-                let radius = self.current.dist.powi(2);
-                let point: [f32; 2] = center.into();
-                let vis_pos = tree.within(&point, radius, &squared_euclidean).unwrap();
-                self.visible_points.clear();
-                for point in vis_pos {
-                    self.visible_points.push(point.1.cast_signed());
-                    let system = self.points.as_ref().unwrap().get(point.1);
-                    for connection in &system.unwrap().connections {
-                        if !self.visible_lines.contains(&connection.clone()) {
-                            self.visible_lines.insert(connection.clone());
-                        }
+        if self.current.dist > 0.0
+            && self.current.dist < f32::INFINITY
+            && let Some(tree) = &self.tree
+        {
+            let center = self.current.pos / self.zoom;
+            let radius = self.current.dist.powi(2);
+            let point: [f32; 2] = center.into();
+            let vis_pos = tree.within(&point, radius, &squared_euclidean).unwrap();
+            self.visible_points.clear();
+            for point in vis_pos {
+                self.visible_points.push(point.1.cast_signed());
+                let system = self.points.as_ref().unwrap().get(point.1);
+                for connection in &system.unwrap().connections {
+                    if !self.visible_lines.contains(&connection.clone()) {
+                        self.visible_lines.insert(connection.clone());
                     }
                 }
             }
@@ -297,12 +302,12 @@ impl Map {
     pub fn set_pos_from_nodeid(&mut self, node_id: usize) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("set_pos_from_nodeid");
-        if let Some(hash_map) = &self.points {
-            if let Some(map_point) = hash_map.get(&node_id) {
-                self.reference.pos = map_point.raw_point;
-                self.adjust_bounds();
-                self.calculate_visible_points();
-            }
+        if let Some(hash_map) = &self.points
+            && let Some(map_point) = hash_map.get(&node_id)
+        {
+            self.reference.pos = map_point.raw_point;
+            self.adjust_bounds();
+            self.calculate_visible_points();
         }
     }
 
@@ -358,7 +363,7 @@ impl Map {
                                 unit: _,
                                 delta,
                                 modifiers,
-                                phase: _
+                                phase: _,
                             } => {
                                 #[cfg(target_os = "macos")]
                                 let zoom_modifier = if modifiers.mac_cmd {
@@ -538,17 +543,18 @@ impl Map {
             return Err(());
         }
         // detecting the nearest hover node
-        if self.settings.node_text_visibility == VisibilitySetting::Hover && resp.hovered() {
-            if let Some(point) = resp.hover_pos() {
-                let raw_point = RawPoint::from(point);
-                let hovered_map_point = (*min_point + raw_point) / self.zoom;
-                if let Ok(nearest_node) = self.tree.as_ref().unwrap().nearest(
-                    &hovered_map_point.components,
-                    1,
-                    &squared_euclidean,
-                ) {
-                    nearest_id = Some(nearest_node.first().unwrap().1);
-                }
+        if self.settings.node_text_visibility == VisibilitySetting::Hover
+            && resp.hovered()
+            && let Some(point) = resp.hover_pos()
+        {
+            let raw_point = RawPoint::from(point);
+            let hovered_map_point = (*min_point + raw_point) / self.zoom;
+            if let Ok(nearest_node) = self.tree.as_ref().unwrap().nearest(
+                &hovered_map_point.components,
+                1,
+                &squared_euclidean,
+            ) {
+                nearest_id = Some(nearest_node.first().unwrap().1);
             }
         }
         // filling text settings
