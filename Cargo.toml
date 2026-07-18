@@ -1,6 +1,6 @@
 [package]
 name = "egui-map"
-version = "0.0.17"
+version = "0.0.18"
 edition = "2024"
 authors = ["Rafael Amador <rafaga@duck.com"]
 description = "Visual component to draw a map on screen."
@@ -41,6 +41,6 @@ puffin = ["dep:puffin"]
 
 [dependencies]
 chrono = "0.4.45"
-egui = { version = "0.34.3", features = ["bytemuck"]}
+egui = { version = "0.35.0", features = ["bytemuck"]}
 kdtree = { version = "0.8.0" }
 puffin = { version = "0.20.0", optional=true, default-features = false}
