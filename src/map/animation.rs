@@ -35,3 +35,46 @@ impl Animation {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{Context, LayerId, Pos2, Rect, Vec2};
+    use std::time::Duration;
+
+    fn headless_painter() -> Painter {
+        Painter::new(
+            Context::default(),
+            LayerId::background(),
+            Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0)),
+        )
+    }
+
+    #[test]
+    fn pulse_returns_true_while_running() {
+        let painter = headless_painter();
+        let result = Animation::pulse(
+            &painter,
+            RawPoint::default(),
+            1.0,
+            Instant::now(),
+            Color32::RED,
+        );
+        assert!(matches!(result, Ok(true)));
+    }
+
+    #[test]
+    fn pulse_returns_false_when_finished() {
+        let painter = headless_painter();
+        // la animación dura 3.5 segundos; 4 segundos después ya terminó
+        let initial_time = Instant::now() - Duration::from_secs(4);
+        let result = Animation::pulse(
+            &painter,
+            RawPoint::default(),
+            1.0,
+            initial_time,
+            Color32::RED,
+        );
+        assert!(matches!(result, Ok(false)));
+    }
+}

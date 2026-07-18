@@ -399,7 +399,7 @@ impl Map {
         if resp.secondary_clicked() {}
     }
 
-    pub fn set_zoom(mut self, value: f32) {
+    pub fn set_zoom(&mut self, value: f32) {
         if value >= self.settings.min_zoom && value <= self.settings.max_zoom {
             self.zoom = value;
         }
@@ -718,5 +718,236 @@ impl Map {
 
     pub fn allocate_at_most(&mut self, width: Option<f32>, height: Option<f32>) {
         self.max_size = (width, height);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn sample_points() -> HashMap<usize, MapPoint> {
+        let mut map = HashMap::new();
+        map.insert(1, MapPoint::new(1, RawPoint::new(0.0, 0.0)));
+        map.insert(2, MapPoint::new(2, RawPoint::new(10.0, 10.0)));
+        map.insert(3, MapPoint::new(3, RawPoint::new(-10.0, -10.0)));
+        map
+    }
+
+    // ---------- construcción ----------
+
+    #[test]
+    fn map_new_initial_state() {
+        let map = Map::new();
+        assert_eq!(map.zoom, 1.0);
+        assert_eq!(map.previous_zoom, 1.0);
+        assert!(map.points.is_none());
+        assert!(map.lines.is_none());
+        assert!(map.tree.is_none());
+        assert!(map.labels.is_empty());
+        assert!(map.visible_points.is_empty());
+        assert!(map.visible_lines.is_empty());
+        assert!(map.markers.is_empty());
+        assert!(map.entities.is_empty());
+        assert_eq!(map.min_size, (None, None));
+        assert_eq!(map.max_size, (None, None));
+        assert_eq!(map.current_index, 0);
+    }
+
+    #[test]
+    fn map_default_equals_new() {
+        let map = Map::default();
+        assert_eq!(map.zoom, 1.0);
+        assert!(map.points.is_none());
+    }
+
+    // ---------- zoom ----------
+
+    #[test]
+    fn set_zoom_within_range() {
+        let mut map = Map::new();
+        map.set_zoom(1.5);
+        assert_eq!(map.get_zoom(), 1.5);
+    }
+
+    #[test]
+    fn set_zoom_at_exact_limits() {
+        let mut map = Map::new();
+        map.set_zoom(map.settings.min_zoom);
+        assert_eq!(map.get_zoom(), 0.1);
+        map.set_zoom(map.settings.max_zoom);
+        assert_eq!(map.get_zoom(), 2.0);
+    }
+
+    #[test]
+    fn set_zoom_out_of_range_is_ignored() {
+        let mut map = Map::new();
+        let initial = map.get_zoom();
+        map.set_zoom(0.05); // por debajo de min_zoom
+        assert_eq!(map.get_zoom(), initial);
+        map.set_zoom(2.5); // por encima de max_zoom
+        assert_eq!(map.get_zoom(), initial);
+    }
+
+    // ---------- puntos ----------
+
+    #[test]
+    fn add_hashmap_points_computes_bounds() {
+        let mut map = Map::new();
+        map.add_hashmap_points(sample_points());
+
+        assert_eq!(map.reference.min.components, [-10.0, -10.0]);
+        assert_eq!(map.reference.max.components, [10.0, 10.0]);
+        // pos es el punto medio del rectángulo que contiene todos los puntos
+        assert_eq!(map.reference.pos.components, [0.0, 0.0]);
+        // map_area tiene área 0 antes de renderizar, así que dist es el valor fijo
+        assert_eq!(map.reference.dist, 3000.0);
+        // current se inicializa como copia de reference
+        assert_eq!(map.current.min.components, map.reference.min.components);
+        assert_eq!(map.current.max.components, map.reference.max.components);
+        assert_eq!(map.current.pos.components, map.reference.pos.components);
+        assert_eq!(map.current.dist, map.reference.dist);
+        assert!(map.points.is_some());
+        assert!(map.tree.is_some());
+        assert_eq!(map.points.as_ref().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn add_hashmap_points_populates_visible_points() {
+        let mut map = Map::new();
+        map.add_hashmap_points(sample_points());
+        // todos los puntos de muestra caen dentro del radio por defecto
+        assert_eq!(map.visible_points.len(), 3);
+    }
+
+    #[test]
+    fn add_hashmap_points_populates_visible_lines() {
+        let mut points = sample_points();
+        points
+            .get_mut(&1)
+            .unwrap()
+            .connections
+            .push("1-2".to_string());
+        let mut map = Map::new();
+        map.add_hashmap_points(points);
+        assert!(map.visible_lines.contains("1-2"));
+    }
+
+    // ---------- posición ----------
+
+    #[test]
+    fn set_pos_and_get_pos_roundtrip() {
+        let mut map = Map::new();
+        map.set_pos([25.0, -35.0]);
+        assert_eq!(map.get_pos(), [25.0, -35.0]);
+    }
+
+    #[test]
+    fn set_pos_from_nodeid_with_valid_id() {
+        let mut map = Map::new();
+        map.add_hashmap_points(sample_points());
+        map.set_pos_from_nodeid(2);
+        assert_eq!(map.get_pos(), [10.0, 10.0]);
+    }
+
+    #[test]
+    fn set_pos_from_nodeid_with_invalid_id_keeps_position() {
+        let mut map = Map::new();
+        map.add_hashmap_points(sample_points());
+        let before = map.reference.pos.components;
+        map.set_pos_from_nodeid(999);
+        assert_eq!(map.reference.pos.components, before);
+    }
+
+    #[test]
+    fn set_pos_from_nodeid_without_points_does_nothing() {
+        let mut map = Map::new();
+        map.set_pos_from_nodeid(1);
+        assert_eq!(map.reference.pos.components, [0.0, 0.0]);
+    }
+
+    // ---------- etiquetas y líneas ----------
+
+    #[test]
+    fn add_labels_stores_labels() {
+        let mut map = Map::new();
+        let label = MapLabel {
+            text: "Region".to_string(),
+            center: Pos2::new(1.0, 2.0),
+        };
+        map.add_labels(vec![label]);
+        assert_eq!(map.labels.len(), 1);
+        assert_eq!(map.labels[0].text, "Region");
+    }
+
+    #[test]
+    fn add_lines_stores_lines() {
+        let mut map = Map::new();
+        let mut lines = HashMap::new();
+        lines.insert(
+            "a-b".to_string(),
+            MapLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(1.0, 1.0)),
+        );
+        map.add_lines(lines);
+        assert!(map.lines.as_ref().unwrap().contains_key("a-b"));
+    }
+
+    // ---------- notificaciones y marcadores ----------
+
+    #[test]
+    fn notify_inserts_and_updates_entities() {
+        let mut map = Map::new();
+        let t1 = Instant::now();
+        assert!(map.notify(5, t1).is_ok());
+        assert_eq!(map.entities.get(&5), Some(&t1));
+
+        let t2 = t1 + Duration::from_secs(1);
+        assert!(map.notify(5, t2).is_ok());
+        assert_eq!(map.entities.get(&5), Some(&t2));
+        assert_eq!(map.entities.len(), 1);
+    }
+
+    #[test]
+    fn update_marker_inserts_and_updates() {
+        let mut map = Map::new();
+        map.update_marker(1, 100);
+        assert_eq!(map.markers.get(&1), Some(&100));
+        map.update_marker(1, 200);
+        assert_eq!(map.markers.get(&1), Some(&200));
+        assert_eq!(map.markers.len(), 1);
+    }
+
+    // ---------- tamaño ----------
+
+    #[test]
+    fn allocate_at_least_sets_min_size() {
+        let mut map = Map::new();
+        map.allocate_at_least(Some(100.0), None);
+        assert_eq!(map.min_size, (Some(100.0), None));
+    }
+
+    #[test]
+    fn allocate_at_most_sets_max_size() {
+        let mut map = Map::new();
+        map.allocate_at_most(None, Some(200.0));
+        assert_eq!(map.max_size, (None, Some(200.0)));
+    }
+
+    // ---------- bounds ----------
+
+    #[test]
+    fn adjust_bounds_scales_with_zoom() {
+        let mut map = Map::new();
+        map.reference.min = RawPoint::new(-10.0, -20.0);
+        map.reference.max = RawPoint::new(10.0, 20.0);
+        map.reference.pos = RawPoint::new(5.0, 5.0);
+        map.reference.dist = 100.0;
+        map.set_zoom(2.0);
+        map.adjust_bounds();
+
+        assert_eq!(map.current.max.components, [20.0, 40.0]);
+        assert_eq!(map.current.min.components, [-20.0, -40.0]);
+        assert_eq!(map.current.pos.components, [10.0, 10.0]);
+        assert_eq!(map.current.dist, 50.0);
     }
 }

@@ -3,7 +3,7 @@ use std::convert::{From, Into};
 use std::ops::{Add, Div, DivAssign, Mul, MulAssign, Sub};
 use std::time::Instant;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct RawPoint {
     pub components: [f32; 2],
 }
@@ -320,7 +320,7 @@ impl From<RawPoint> for Pos2 {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct RawLine {
     pub points: [RawPoint; 2],
 }
@@ -359,7 +359,7 @@ impl From<[[i64; 2]; 2]> for RawLine {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MapStyle {
     pub border: Option<Stroke>,
     pub line: Option<Stroke>,
@@ -395,8 +395,8 @@ impl Mul<i64> for MapStyle {
     type Output = Self;
 
     fn mul(mut self, rhs: i64) -> Self::Output {
-        self.border.unwrap().width *= rhs as f32;
-        self.line.unwrap().width *= rhs as f32;
+        self.border.as_mut().unwrap().width *= rhs as f32;
+        self.line.as_mut().unwrap().width *= rhs as f32;
         self.font.as_mut().unwrap().size *= rhs as f32;
         self
     }
@@ -407,8 +407,8 @@ impl Mul<i32> for MapStyle {
     type Output = Self;
 
     fn mul(mut self, rhs: i32) -> Self::Output {
-        self.border.unwrap().width *= rhs as f32;
-        self.line.unwrap().width *= rhs as f32;
+        self.border.as_mut().unwrap().width *= rhs as f32;
+        self.line.as_mut().unwrap().width *= rhs as f32;
         self.font.as_mut().unwrap().size *= rhs as f32;
         self
     }
@@ -419,8 +419,8 @@ impl Mul<f32> for MapStyle {
     type Output = Self;
 
     fn mul(mut self, rhs: f32) -> Self::Output {
-        self.border.unwrap().width *= rhs;
-        self.line.unwrap().width *= rhs;
+        self.border.as_mut().unwrap().width *= rhs;
+        self.line.as_mut().unwrap().width *= rhs;
         self.font.as_mut().unwrap().size *= rhs;
         self
     }
@@ -431,8 +431,8 @@ impl Mul<f64> for MapStyle {
     type Output = Self;
 
     fn mul(mut self, rhs: f64) -> Self::Output {
-        self.border.unwrap().width *= rhs as f32;
-        self.line.unwrap().width *= rhs as f32;
+        self.border.as_mut().unwrap().width *= rhs as f32;
+        self.line.as_mut().unwrap().width *= rhs as f32;
         self.font.as_mut().unwrap().size *= rhs as f32;
         self
     }
@@ -443,8 +443,8 @@ impl Div<i64> for MapStyle {
     type Output = Self;
 
     fn div(mut self, rhs: i64) -> Self::Output {
-        self.border.unwrap().width /= rhs as f32;
-        self.line.unwrap().width /= rhs as f32;
+        self.border.as_mut().unwrap().width /= rhs as f32;
+        self.line.as_mut().unwrap().width /= rhs as f32;
         self.font.as_mut().unwrap().size /= rhs as f32;
         self
     }
@@ -455,8 +455,8 @@ impl Div<i32> for MapStyle {
     type Output = Self;
 
     fn div(mut self, rhs: i32) -> Self::Output {
-        self.border.unwrap().width /= rhs as f32;
-        self.line.unwrap().width /= rhs as f32;
+        self.border.as_mut().unwrap().width /= rhs as f32;
+        self.line.as_mut().unwrap().width /= rhs as f32;
         self.font.as_mut().unwrap().size /= rhs as f32;
         self
     }
@@ -467,8 +467,8 @@ impl Div<f32> for MapStyle {
     type Output = Self;
 
     fn div(mut self, rhs: f32) -> Self::Output {
-        self.border.unwrap().width /= rhs;
-        self.line.unwrap().width /= rhs;
+        self.border.as_mut().unwrap().width /= rhs;
+        self.line.as_mut().unwrap().width /= rhs;
         self.font.as_mut().unwrap().size /= rhs;
         self
     }
@@ -479,14 +479,14 @@ impl Div<f64> for MapStyle {
     type Output = Self;
 
     fn div(mut self, rhs: f64) -> Self::Output {
-        self.border.unwrap().width /= rhs as f32;
-        self.line.unwrap().width /= rhs as f32;
+        self.border.as_mut().unwrap().width /= rhs as f32;
+        self.line.as_mut().unwrap().width /= rhs as f32;
         self.font.as_mut().unwrap().size /= rhs as f32;
         self
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MapLabel {
     pub text: String,
     pub center: Pos2,
@@ -507,7 +507,7 @@ impl MapLabel {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MapLine {
     pub id: Option<String>,
     pub raw_line: RawLine,
@@ -524,7 +524,7 @@ impl MapLine {
 
 // This can by any object or point with its associated metadata
 /// Struct that contains coordinates to help calculate nearest point in space
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MapPoint {
     /// coordinates of the Solar System
     pub raw_point: RawPoint,
@@ -601,7 +601,7 @@ pub(crate) struct TextSettings {
     pub text_color: Color32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct MapSettings {
     pub max_zoom: f32,
     pub min_zoom: f32,
@@ -672,7 +672,7 @@ impl Default for MapSettings {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum VisibilitySetting {
     Hidden,
     Hover,
@@ -695,4 +695,509 @@ pub trait NodeTemplate {
         color: Color32,
     ) -> bool;
     fn marker_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom: f32);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    // ---------- RawPoint ----------
+
+    #[test]
+    fn raw_point_new() {
+        let p = RawPoint::new(3.5, -2.0);
+        assert_eq!(p.components, [3.5, -2.0]);
+    }
+
+    #[test]
+    fn raw_point_default() {
+        let p = RawPoint::default();
+        assert_eq!(p.components, [0.0, 0.0]);
+    }
+
+    #[test]
+    fn raw_point_mul_i64() {
+        let p = RawPoint::new(2.0, -3.0) * 3i64;
+        assert_eq!(p.components, [6.0, -9.0]);
+    }
+
+    #[test]
+    fn raw_point_mul_i32() {
+        let p = RawPoint::new(2.0, -3.0) * 3i32;
+        assert_eq!(p.components, [6.0, -9.0]);
+    }
+
+    #[test]
+    fn raw_point_mul_u64() {
+        let p = RawPoint::new(2.0, -3.0) * 3u64;
+        assert_eq!(p.components, [6.0, -9.0]);
+    }
+
+    #[test]
+    fn raw_point_mul_u32() {
+        let p = RawPoint::new(2.0, -3.0) * 3u32;
+        assert_eq!(p.components, [6.0, -9.0]);
+    }
+
+    #[test]
+    fn raw_point_mul_f32() {
+        let p = RawPoint::new(2.0, -3.0) * 0.5f32;
+        assert_eq!(p.components, [1.0, -1.5]);
+    }
+
+    #[test]
+    fn raw_point_mul_assign_i64() {
+        let mut p = RawPoint::new(2.0, -3.0);
+        p *= 3i64;
+        assert_eq!(p.components, [6.0, -9.0]);
+    }
+
+    #[test]
+    fn raw_point_mul_assign_i32() {
+        let mut p = RawPoint::new(2.0, -3.0);
+        p *= 3i32;
+        assert_eq!(p.components, [6.0, -9.0]);
+    }
+
+    #[test]
+    fn raw_point_mul_assign_u64() {
+        let mut p = RawPoint::new(2.0, -3.0);
+        p *= 3u64;
+        assert_eq!(p.components, [6.0, -9.0]);
+    }
+
+    #[test]
+    fn raw_point_mul_assign_u32() {
+        let mut p = RawPoint::new(2.0, -3.0);
+        p *= 3u32;
+        assert_eq!(p.components, [6.0, -9.0]);
+    }
+
+    #[test]
+    fn raw_point_mul_assign_f32() {
+        let mut p = RawPoint::new(2.0, -3.0);
+        p *= 0.5f32;
+        assert_eq!(p.components, [1.0, -1.5]);
+    }
+
+    #[test]
+    fn raw_point_div_i64() {
+        let p = RawPoint::new(6.0, -9.0) / 3i64;
+        assert_eq!(p.components, [2.0, -3.0]);
+    }
+
+    #[test]
+    fn raw_point_div_i32() {
+        let p = RawPoint::new(6.0, -9.0) / 3i32;
+        assert_eq!(p.components, [2.0, -3.0]);
+    }
+
+    #[test]
+    fn raw_point_div_u64() {
+        let p = RawPoint::new(6.0, -9.0) / 3u64;
+        assert_eq!(p.components, [2.0, -3.0]);
+    }
+
+    #[test]
+    fn raw_point_div_u32() {
+        let p = RawPoint::new(6.0, -9.0) / 3u32;
+        assert_eq!(p.components, [2.0, -3.0]);
+    }
+
+    #[test]
+    fn raw_point_div_f32() {
+        let p = RawPoint::new(1.0, -1.5) / 0.5f32;
+        assert_eq!(p.components, [2.0, -3.0]);
+    }
+
+    #[test]
+    fn raw_point_div_assign_i64() {
+        let mut p = RawPoint::new(6.0, -9.0);
+        p /= 3i64;
+        assert_eq!(p.components, [2.0, -3.0]);
+    }
+
+    #[test]
+    fn raw_point_div_assign_i32() {
+        let mut p = RawPoint::new(6.0, -9.0);
+        p /= 3i32;
+        assert_eq!(p.components, [2.0, -3.0]);
+    }
+
+    #[test]
+    fn raw_point_div_assign_u64() {
+        let mut p = RawPoint::new(6.0, -9.0);
+        p /= 3u64;
+        assert_eq!(p.components, [2.0, -3.0]);
+    }
+
+    #[test]
+    fn raw_point_div_assign_u32() {
+        let mut p = RawPoint::new(6.0, -9.0);
+        p /= 3u32;
+        assert_eq!(p.components, [2.0, -3.0]);
+    }
+
+    #[test]
+    fn raw_point_div_assign_f32() {
+        let mut p = RawPoint::new(1.0, -1.5);
+        p /= 0.5f32;
+        assert_eq!(p.components, [2.0, -3.0]);
+    }
+
+    #[test]
+    fn raw_point_add() {
+        let a = RawPoint::new(1.0, 2.0);
+        let b = RawPoint::new(3.0, -4.0);
+        let c = a + b;
+        assert_eq!(c.components, [4.0, -2.0]);
+    }
+
+    #[test]
+    fn raw_point_sub() {
+        let a = RawPoint::new(1.0, 2.0);
+        let b = RawPoint::new(3.0, -4.0);
+        let c = a - b;
+        assert_eq!(c.components, [-2.0, 6.0]);
+    }
+
+    #[test]
+    fn raw_point_add_ref() {
+        let a = RawPoint::new(1.0, 2.0);
+        let b = RawPoint::new(3.0, -4.0);
+        let c = a + &b;
+        assert_eq!(c.components, [4.0, -2.0]);
+        // b sigue siendo usable tras la suma por referencia
+        assert_eq!(b.components, [3.0, -4.0]);
+    }
+
+    #[test]
+    fn raw_point_sub_ref() {
+        let a = RawPoint::new(1.0, 2.0);
+        let b = RawPoint::new(3.0, -4.0);
+        let c = a - &b;
+        assert_eq!(c.components, [-2.0, 6.0]);
+        assert_eq!(b.components, [3.0, -4.0]);
+    }
+
+    #[test]
+    fn raw_point_from_f32_array() {
+        let p = RawPoint::from([1.5f32, -2.5f32]);
+        assert_eq!(p.components, [1.5, -2.5]);
+    }
+
+    #[test]
+    fn raw_point_from_i64_array() {
+        let p = RawPoint::from([3i64, -4i64]);
+        assert_eq!(p.components, [3.0, -4.0]);
+    }
+
+    #[test]
+    fn raw_point_from_i32_array() {
+        let p = RawPoint::from([3i32, -4i32]);
+        assert_eq!(p.components, [3.0, -4.0]);
+    }
+
+    #[test]
+    fn raw_point_from_i16_array() {
+        let p = RawPoint::from([3i16, -4i16]);
+        assert_eq!(p.components, [3.0, -4.0]);
+    }
+
+    #[test]
+    fn raw_point_from_i8_array() {
+        let p = RawPoint::from([3i8, -4i8]);
+        assert_eq!(p.components, [3.0, -4.0]);
+    }
+
+    #[test]
+    fn raw_point_from_pos2() {
+        let p = RawPoint::from(Pos2::new(7.0, 8.0));
+        assert_eq!(p.components, [7.0, 8.0]);
+    }
+
+    #[test]
+    fn raw_point_into_f32_array() {
+        let arr: [f32; 2] = RawPoint::new(7.0, 8.0).into();
+        assert_eq!(arr, [7.0, 8.0]);
+    }
+
+    #[test]
+    fn raw_point_into_pos2() {
+        let pos: Pos2 = RawPoint::new(7.0, 8.0).into();
+        assert_eq!(pos, Pos2::new(7.0, 8.0));
+    }
+
+    // ---------- RawLine ----------
+
+    #[test]
+    fn raw_line_new() {
+        let a = RawPoint::new(1.0, 2.0);
+        let b = RawPoint::new(3.0, 4.0);
+        let line = RawLine::new(a, b);
+        assert_eq!(line.points[0].components, [1.0, 2.0]);
+        assert_eq!(line.points[1].components, [3.0, 4.0]);
+    }
+
+    #[test]
+    fn raw_line_distance() {
+        // triángulo 3-4-5
+        let line = RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(3.0, 4.0));
+        assert_eq!(line.distance(), 5.0);
+    }
+
+    #[test]
+    fn raw_line_distance_zero() {
+        let line = RawLine::new(RawPoint::new(2.0, 2.0), RawPoint::new(2.0, 2.0));
+        assert_eq!(line.distance(), 0.0);
+    }
+
+    #[test]
+    fn raw_line_midpoint() {
+        let line = RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(4.0, 6.0));
+        let mid = line.midpoint();
+        assert_eq!(mid.components, [2.0, 3.0]);
+    }
+
+    #[test]
+    fn raw_line_into_pos2_array() {
+        let line = RawLine::new(RawPoint::new(1.0, 2.0), RawPoint::new(3.0, 4.0));
+        let arr: [Pos2; 2] = line.into();
+        assert_eq!(arr, [Pos2::new(1.0, 2.0), Pos2::new(3.0, 4.0)]);
+    }
+
+    #[test]
+    fn raw_line_from_i64_arrays() {
+        let line = RawLine::from([[1i64, 2i64], [3i64, 4i64]]);
+        assert_eq!(line.points[0].components, [1.0, 2.0]);
+        assert_eq!(line.points[1].components, [3.0, 4.0]);
+    }
+
+    // ---------- MapStyle ----------
+
+    fn full_style() -> MapStyle {
+        MapStyle {
+            border: Some(Stroke::new(2.0, Color32::RED)),
+            line: Some(Stroke::new(4.0, Color32::BLUE)),
+            fill_color: Color32::GREEN,
+            text_color: Color32::WHITE,
+            font: Some(FontId::new(10.0, FontFamily::Proportional)),
+            background_color: Color32::BLACK,
+            alert_color: Color32::YELLOW,
+        }
+    }
+
+    #[test]
+    fn map_style_new() {
+        let s = MapStyle::new();
+        assert!(s.border.is_none());
+        assert!(s.line.is_none());
+        assert!(s.font.is_none());
+        assert_eq!(s.fill_color, Color32::TRANSPARENT);
+        assert_eq!(s.text_color, Color32::TRANSPARENT);
+        assert_eq!(s.background_color, Color32::TRANSPARENT);
+        assert_eq!(s.alert_color, Color32::TRANSPARENT);
+    }
+
+    #[test]
+    fn map_style_default_equals_new() {
+        let s = MapStyle::default();
+        assert!(s.border.is_none());
+        assert!(s.line.is_none());
+        assert!(s.font.is_none());
+    }
+
+    #[test]
+    fn map_style_mul_i64() {
+        let s = full_style() * 2i64;
+        assert_eq!(s.border.unwrap().width, 4.0);
+        assert_eq!(s.line.unwrap().width, 8.0);
+        assert_eq!(s.font.unwrap().size, 20.0);
+    }
+
+    #[test]
+    fn map_style_mul_i32() {
+        let s = full_style() * 2i32;
+        assert_eq!(s.border.unwrap().width, 4.0);
+        assert_eq!(s.line.unwrap().width, 8.0);
+        assert_eq!(s.font.unwrap().size, 20.0);
+    }
+
+    #[test]
+    fn map_style_mul_f32() {
+        let s = full_style() * 0.5f32;
+        assert_eq!(s.border.unwrap().width, 1.0);
+        assert_eq!(s.line.unwrap().width, 2.0);
+        assert_eq!(s.font.unwrap().size, 5.0);
+    }
+
+    #[test]
+    fn map_style_mul_f64() {
+        let s = full_style() * 0.5f64;
+        assert_eq!(s.border.unwrap().width, 1.0);
+        assert_eq!(s.line.unwrap().width, 2.0);
+        assert_eq!(s.font.unwrap().size, 5.0);
+    }
+
+    #[test]
+    fn map_style_div_i64() {
+        let s = full_style() / 2i64;
+        assert_eq!(s.border.unwrap().width, 1.0);
+        assert_eq!(s.line.unwrap().width, 2.0);
+        assert_eq!(s.font.unwrap().size, 5.0);
+    }
+
+    #[test]
+    fn map_style_div_i32() {
+        let s = full_style() / 2i32;
+        assert_eq!(s.border.unwrap().width, 1.0);
+        assert_eq!(s.line.unwrap().width, 2.0);
+        assert_eq!(s.font.unwrap().size, 5.0);
+    }
+
+    #[test]
+    fn map_style_div_f32() {
+        let s = full_style() / 0.5f32;
+        assert_eq!(s.border.unwrap().width, 4.0);
+        assert_eq!(s.line.unwrap().width, 8.0);
+        assert_eq!(s.font.unwrap().size, 20.0);
+    }
+
+    #[test]
+    fn map_style_div_f64() {
+        let s = full_style() / 0.5f64;
+        assert_eq!(s.border.unwrap().width, 4.0);
+        assert_eq!(s.line.unwrap().width, 8.0);
+        assert_eq!(s.font.unwrap().size, 20.0);
+    }
+
+    // ---------- MapLabel ----------
+
+    #[test]
+    fn map_label_new() {
+        let l = MapLabel::new();
+        assert_eq!(l.text, String::new());
+        assert_eq!(l.center, Pos2::new(0.0, 0.0));
+    }
+
+    #[test]
+    fn map_label_default_equals_new() {
+        let l = MapLabel::default();
+        assert_eq!(l.text, String::new());
+        assert_eq!(l.center, Pos2::new(0.0, 0.0));
+    }
+
+    // ---------- MapLine ----------
+
+    #[test]
+    fn map_line_new() {
+        let a = RawPoint::new(1.0, 2.0);
+        let b = RawPoint::new(3.0, 4.0);
+        let line = MapLine::new(a, b);
+        assert!(line.id.is_none());
+        assert_eq!(line.raw_line.points[0].components, [1.0, 2.0]);
+        assert_eq!(line.raw_line.points[1].components, [3.0, 4.0]);
+    }
+
+    // ---------- MapPoint ----------
+
+    #[test]
+    fn map_point_new() {
+        let p = MapPoint::new(42, RawPoint::new(1.0, 2.0));
+        assert_eq!(p.get_id(), 42);
+        assert_eq!(p.raw_point.components, [1.0, 2.0]);
+        assert!(p.connections.is_empty());
+        assert_eq!(p.get_name(), String::new());
+    }
+
+    #[test]
+    fn map_point_set_and_get_name() {
+        let mut p = MapPoint::new(1, RawPoint::default());
+        p.set_name("Jita".to_string());
+        assert_eq!(p.get_name(), "Jita");
+    }
+
+    #[test]
+    fn map_point_from_occupied_entry() {
+        let mut map: HashMap<usize, MapPoint> = HashMap::new();
+        let mut original = MapPoint::new(7, RawPoint::new(5.0, 6.0));
+        original.set_name("Amarr".to_string());
+        map.insert(7, original);
+
+        use std::collections::hash_map::Entry;
+        if let Entry::Occupied(entry) = map.entry(7) {
+            let cloned = MapPoint::from(entry);
+            assert_eq!(cloned.get_id(), 7);
+            assert_eq!(cloned.get_name(), "Amarr");
+            assert_eq!(cloned.raw_point.components, [5.0, 6.0]);
+        } else {
+            panic!("se esperaba una entrada ocupada");
+        }
+    }
+
+    // ---------- MapBounds ----------
+
+    #[test]
+    fn map_bounds_new() {
+        let b = MapBounds::new();
+        assert_eq!(b.min.components, [0.0, 0.0]);
+        assert_eq!(b.max.components, [0.0, 0.0]);
+        assert_eq!(b.pos.components, [0.0, 0.0]);
+        assert_eq!(b.dist, 0.0);
+    }
+
+    #[test]
+    fn map_bounds_default_equals_new() {
+        let b = MapBounds::default();
+        assert_eq!(b.dist, 0.0);
+        assert_eq!(b.pos.components, [0.0, 0.0]);
+    }
+
+    // ---------- MapSettings ----------
+
+    #[test]
+    fn map_settings_new() {
+        let s = MapSettings::new();
+        assert_eq!(s.max_zoom, 0.0);
+        assert_eq!(s.min_zoom, 0.0);
+        assert_eq!(s.line_visible_zoom, 0.0);
+        assert_eq!(s.label_visible_zoom, 0.0);
+        assert_eq!(s.node_text_visibility, VisibilitySetting::Allways);
+        assert_eq!(s.styles.len(), 1);
+    }
+
+    #[test]
+    fn map_settings_default() {
+        let s = MapSettings::default();
+        assert_eq!(s.max_zoom, 2.0);
+        assert_eq!(s.min_zoom, 0.1);
+        assert_eq!(s.line_visible_zoom, 0.2);
+        assert_eq!(s.label_visible_zoom, 0.58);
+        assert_eq!(s.node_text_visibility, VisibilitySetting::Allways);
+        // light + dark themes
+        assert_eq!(s.styles.len(), 2);
+        // light theme
+        assert_eq!(s.styles[0].background_color, Color32::WHITE);
+        assert!(s.styles[0].border.is_some());
+        assert!(s.styles[0].line.is_some());
+        assert!(s.styles[0].font.is_some());
+        // dark theme
+        assert_eq!(s.styles[1].background_color, Color32::DARK_GRAY);
+        assert!(s.styles[1].border.is_some());
+        assert!(s.styles[1].line.is_some());
+        assert!(s.styles[1].font.is_some());
+    }
+
+    // ---------- VisibilitySetting ----------
+
+    #[test]
+    fn visibility_setting_equality() {
+        assert_eq!(VisibilitySetting::Hidden, VisibilitySetting::Hidden);
+        assert_eq!(VisibilitySetting::Hover, VisibilitySetting::Hover);
+        assert_eq!(VisibilitySetting::Allways, VisibilitySetting::Allways);
+        assert_ne!(VisibilitySetting::Hidden, VisibilitySetting::Hover);
+        assert_ne!(VisibilitySetting::Hover, VisibilitySetting::Allways);
+        assert_ne!(VisibilitySetting::Hidden, VisibilitySetting::Allways);
+    }
 }
