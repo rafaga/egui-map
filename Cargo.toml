@@ -9,7 +9,7 @@ repository = "https://github.com/rafaga/egui-map/"
 license = "MIT"
 keywords = ["egui", "map", "component"]
 categories = ["graphics", "gui"]
-exclude = ["tests/",".github/",".gitignore"]
+exclude = [".github/",".gitignore","egui-map.code-workspace","test/"]
 
 [badges]
 # The `maintenance` table indicates the status of the maintenance of
