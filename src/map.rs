@@ -1,3 +1,76 @@
+//! Interactive map widget and the data types it renders.
+//!
+//! [`Map`] is an [`egui::Widget`] that draws a 2D set of nodes
+//! ([`objects::MapPoint`]), the connection lines between them
+//! ([`objects::MapLine`]) and free-floating text labels
+//! ([`objects::MapLabel`]). Nodes are indexed in a kd-tree so that only the
+//! ones inside the current viewport are painted each frame.
+//!
+//! ## Coordinate model
+//!
+//! The widget works with two coordinate spaces:
+//!
+//! - **Map coordinates**: the logical position of your nodes, as loaded through
+//!   [`Map::add_hashmap_points`].
+//! - **Screen coordinates**: positions inside the widget's rectangle on screen.
+//!
+//! Both are related by the current zoom factor and viewport origin:
+//! `screen = map * zoom - origin`. Use [`Map::set_zoom`], [`Map::set_pos`] and
+//! [`Map::set_pos_from_nodeid`] to control the visible region.
+//!
+//! ## Connecting nodes with lines
+//!
+//! Lines are wired up in three steps:
+//!
+//! 1. Create the nodes as a [`HashMap`] keyed by node id.
+//! 2. For every connection, choose a unique string id and push it into
+//!    [`MapPoint::connections`] of **both** endpoint nodes.
+//! 3. Load the nodes with [`Map::add_hashmap_points`], then load a
+//!    [`HashMap`] of [`MapLine`] keyed by those same connection ids with
+//!    [`Map::add_lines`].
+//!
+//! ```
+//! use egui_map::map::Map;
+//! use egui_map::map::objects::{MapLine, MapPoint, RawPoint};
+//! use std::collections::HashMap;
+//!
+//! // 1. Create the nodes.
+//! let mut points: HashMap<usize, MapPoint> = HashMap::new();
+//! points.insert(1, MapPoint::new(1, RawPoint::new(0.0, 0.0)));
+//! points.insert(2, MapPoint::new(2, RawPoint::new(10.0, 10.0)));
+//!
+//! // 2. Register the connection id on both endpoints.
+//! for id in [1, 2] {
+//!     points
+//!         .get_mut(&id)
+//!         .unwrap()
+//!         .connections
+//!         .push("1-2".to_string());
+//! }
+//!
+//! let mut map = Map::new();
+//! map.add_hashmap_points(points);
+//!
+//! // 3. Provide the line geometry keyed by the same connection id.
+//! let mut lines: HashMap<String, MapLine> = HashMap::new();
+//! let mut line = MapLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0));
+//! line.id = Some("1-2".to_string());
+//! lines.insert("1-2".to_string(), line);
+//! map.add_lines(lines);
+//! ```
+//!
+//! A line is only drawn while the zoom level is above
+//! [`MapSettings::line_visible_zoom`] and at least one of its endpoints is
+//! inside the viewport.
+//!
+//! ## Custom node rendering
+//!
+//! Install a [`NodeTemplate`] implementation with [`Map::set_node_template`]
+//! to take over the rendering of nodes, selection highlights, notification
+//! animations and markers. Note that this replaces
+//! *all* built-in node rendering, including the node name labels: draw them
+//! yourself in [`NodeTemplate::node_ui`] if you need them.
+
 use crate::map::animation::Animation;
 use crate::map::objects::{
     ContextMenuManager, MapBounds, MapLabel, MapLine, MapPoint, MapSettings, RawLine, RawPoint,
@@ -16,9 +89,44 @@ use self::objects::NodeTemplate;
 
 pub mod animation;
 pub mod objects;
-// This can by any object or point with its associated metadata
-/// Struct that contains coordinates to help calculate nearest point in space
 
+/// An interactive 2D map widget.
+///
+/// `Map` renders a set of nodes ([`objects::MapPoint`]), connection lines
+/// ([`objects::MapLine`]) and text labels ([`objects::MapLabel`]). The user can
+/// pan the view by dragging and zoom with the mouse wheel (hold `Ctrl` — or
+/// `Cmd` on macOS — to zoom faster), or use the built-in zoom slider drawn at
+/// the top-right corner of the widget.
+///
+/// The map is fed through [`Map::add_hashmap_points`], which also builds the
+/// internal kd-tree used for viewport culling and nearest-node hover queries.
+/// Behavior and appearance are configured through the public
+/// [`settings`](Map::settings) field (see [`objects::MapSettings`]).
+///
+/// Rendering of nodes and their visual effects (selection highlight,
+/// notifications and markers) can be fully customized by installing a
+/// [`objects::NodeTemplate`] implementation with [`Map::set_node_template`];
+/// likewise, a right-click context menu can be provided with
+/// [`Map::set_context_manager`].
+///
+/// # Examples
+///
+/// ```no_run
+/// # fn example(ui: &mut egui::Ui) {
+/// use egui_map::map::Map;
+/// use egui_map::map::objects::{MapPoint, RawPoint};
+/// use std::collections::HashMap;
+///
+/// let mut points = HashMap::new();
+/// points.insert(1, MapPoint::new(1, RawPoint::new(0.0, 0.0)));
+///
+/// let mut map = Map::new();
+/// map.add_hashmap_points(points);
+///
+/// // Every frame, inside your egui update logic:
+/// ui.add(&mut map);
+/// # }
+/// ```
 #[derive(Clone)]
 pub struct Map {
     zoom: f32,
@@ -36,6 +144,8 @@ pub struct Map {
     entities: HashMap<usize, Instant>,
     min_size: (Option<f32>, Option<f32>),
     max_size: (Option<f32>, Option<f32>),
+    /// Behavior and appearance configuration (zoom limits, visibility
+    /// thresholds and per-theme styles). See [`objects::MapSettings`].
     pub settings: MapSettings,
     menu_manager: Option<Rc<dyn ContextMenuManager>>,
     node_template: Option<Rc<dyn NodeTemplate>>,
@@ -44,12 +154,15 @@ pub struct Map {
 }
 
 impl Default for Map {
+    /// Creates an empty map; equivalent to [`Map::new`].
     fn default() -> Self {
         Map::new()
     }
 }
 
 impl Widget for &mut Map {
+    /// Renders the map, handling panning (drag), zooming (mouse wheel) and the
+    /// right-click context menu if one was installed.
     fn ui(self, ui: &mut egui::Ui) -> Response {
         let rect = self.calculate_widget_dimentions(ui);
 
@@ -180,6 +293,10 @@ impl Widget for &mut Map {
 }
 
 impl Map {
+    /// Creates an empty map widget with default [`MapSettings`].
+    ///
+    /// The widget displays nothing until nodes are loaded with
+    /// [`Map::add_hashmap_points`].
     pub fn new() -> Self {
         let settings = MapSettings::default();
         Self {
@@ -257,6 +374,34 @@ impl Map {
         }
     }
 
+    /// Loads the node set and (re)builds the spatial index.
+    ///
+    /// This replaces any previously loaded points, computes the bounding box of
+    /// the whole set, centers the view on its midpoint and refreshes the list
+    /// of visible nodes. It must be called at least once before the widget can
+    /// display anything.
+    ///
+    /// The kd-tree built here is what enables viewport culling and
+    /// nearest-neighbor hover lookups, so calling this method on every frame is
+    /// discouraged; call it only when the node set changes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use egui_map::map::Map;
+    /// use egui_map::map::objects::{MapPoint, RawPoint};
+    /// use std::collections::HashMap;
+    ///
+    /// let mut points = HashMap::new();
+    /// points.insert(1, MapPoint::new(1, RawPoint::new(0.0, 0.0)));
+    /// points.insert(2, MapPoint::new(2, RawPoint::new(10.0, 10.0)));
+    ///
+    /// let mut map = Map::new();
+    /// map.add_hashmap_points(points);
+    ///
+    /// // The view is centered on the midpoint of the loaded nodes.
+    /// assert_eq!(map.clone().get_pos(), [5.0, 5.0]);
+    /// ```
     pub fn add_hashmap_points(&mut self, hash_map: HashMap<usize, MapPoint>) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("add_hashmap_points");
@@ -299,6 +444,10 @@ impl Map {
         self.calculate_visible_points();
     }
 
+    /// Centers the view on the node with the given id.
+    ///
+    /// Does nothing if no points have been loaded yet or if `node_id` is
+    /// unknown.
     pub fn set_pos_from_nodeid(&mut self, node_id: usize) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("set_pos_from_nodeid");
@@ -311,6 +460,7 @@ impl Map {
         }
     }
 
+    /// Centers the view on the given map coordinates.
     pub fn set_pos(&mut self, position: [f32; 2]) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("set_pos");
@@ -320,18 +470,36 @@ impl Map {
         self.calculate_visible_points();
     }
 
+    /// Returns the map coordinates the view is currently centered on.
+    ///
+    /// Note that this method consumes `self`; clone the map first if you still
+    /// need it afterwards.
     pub fn get_pos(self) -> [f32; 2] {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("get_pos");
         self.reference.pos.into()
     }
 
+    /// Replaces the set of free-floating text labels drawn on the map.
+    ///
+    /// Labels are only rendered while the zoom level is below
+    /// [`MapSettings::line_visible_zoom`].
     pub fn add_labels(&mut self, labels: Vec<MapLabel>) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("add_labels");
         self.labels = labels;
     }
 
+    /// Replaces the set of connection lines between nodes.
+    ///
+    /// Lines are keyed by a connection id that the endpoint nodes must
+    /// reference through [`MapPoint::connections`] — push each line's key into
+    /// the `connections` of the nodes it joins. A line is only drawn while at
+    /// least one of its endpoints is visible and the zoom level is above
+    /// [`MapSettings::line_visible_zoom`].
+    ///
+    /// See the [module-level example](self#connecting-nodes-with-lines) for
+    /// the complete wiring.
     pub fn add_lines(&mut self, lines: HashMap<String, MapLine>) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("add_lines");
@@ -399,12 +567,17 @@ impl Map {
         if resp.secondary_clicked() {}
     }
 
+    /// Sets the zoom factor.
+    ///
+    /// Values outside the [`MapSettings::min_zoom`]..=[`MapSettings::max_zoom`]
+    /// range are ignored.
     pub fn set_zoom(&mut self, value: f32) {
         if value >= self.settings.min_zoom && value <= self.settings.max_zoom {
             self.zoom = value;
         }
     }
 
+    /// Returns the current zoom factor.
     pub fn get_zoom(&mut self) -> f32 {
         self.zoom
     }
@@ -687,6 +860,14 @@ impl Map {
         );
     }
 
+    /// Triggers a notification highlight on the node `id_node`.
+    ///
+    /// By default the notification is rendered as a pulsing circle that starts
+    /// at `time` and plays for about 3.5 seconds; calling `notify` again for
+    /// the same node restarts the animation. The effect can be customized with
+    /// [`objects::NodeTemplate::notification_ui`].
+    ///
+    /// Currently always returns `Ok(true)`.
     pub fn notify(&mut self, id_node: usize, time: Instant) -> Result<bool, Error> {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("notify");
@@ -697,14 +878,27 @@ impl Map {
         Ok(true)
     }
 
+    /// Installs a right-click context menu whose contents are built by the
+    /// given [`ContextMenuManager`] implementation.
     pub fn set_context_manager(&mut self, manager: Rc<dyn ContextMenuManager>) {
         self.menu_manager = Some(manager);
     }
 
+    /// Replaces the built-in node rendering with a custom [`NodeTemplate`]
+    /// implementation.
+    ///
+    /// The template takes over the drawing of nodes, selection highlights,
+    /// notification animations and markers — including the node name labels,
+    /// which the widget no longer draws once a template is installed. See the
+    /// [`NodeTemplate`] examples for custom shapes and animations.
     pub fn set_node_template(&mut self, template: Rc<dyn NodeTemplate>) {
         self.node_template = Some(template);
     }
 
+    /// Adds the marker `id`, or moves it, so it points to the node `node_id`.
+    ///
+    /// Markers are drawn as a blinking ring around the target node unless a
+    /// custom [`objects::NodeTemplate::marker_ui`] is installed.
     pub fn update_marker(&mut self, id: usize, node_id: usize) {
         self.markers
             .entry(id)
@@ -712,10 +906,14 @@ impl Map {
             .or_insert(node_id);
     }
 
+    /// Sets the minimum width and/or height the widget should occupy, in egui
+    /// points. `None` leaves the corresponding dimension unconstrained.
     pub fn allocate_at_least(&mut self, width: Option<f32>, height: Option<f32>) {
         self.min_size = (width, height);
     }
 
+    /// Sets the maximum width and/or height the widget should occupy, in egui
+    /// points. `None` leaves the corresponding dimension unconstrained.
     pub fn allocate_at_most(&mut self, width: Option<f32>, height: Option<f32>) {
         self.max_size = (width, height);
     }

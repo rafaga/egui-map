@@ -1,10 +1,21 @@
+//! Built-in animation effects, used when no custom
+//! [`NodeTemplate`](crate::map::objects::NodeTemplate) is installed.
+
 use crate::map::{Error, objects::RawPoint};
 use egui::{Color32, Painter, Shape, epaint::CircleShape};
 use std::time::Instant;
 
+/// Factory for the default node notification animation.
 pub(crate) struct Animation {}
 
 impl Animation {
+    /// Draws one frame of an expanding, fading circle centered on `center`.
+    ///
+    /// The pulse starts at `initial_time` and plays for about 3.5 seconds,
+    /// growing in radius while its transparency decreases. Returns `Ok(true)`
+    /// while the animation is still playing (the caller should request a
+    /// repaint) and `Ok(false)` once it has finished, so the caller can drop
+    /// the notification.
     pub(crate) fn pulse(
         painter: &Painter,
         center: RawPoint,
