@@ -834,9 +834,9 @@ pub trait ContextMenuManager {
 /// struct BoxedNodes;
 ///
 /// impl NodeTemplate for BoxedNodes {
-///     fn node_ui(&self, ui: &mut Ui, point: Pos2, zoom: f32, system: &MapPoint) {
+///     fn node_ui(&self, ui: &mut Ui, position: Pos2, zoom: f32, point: &MapPoint) {
 ///         // Multiply every size by `zoom` so the node scales with the map.
-///         let rect = Rect::from_center_size(point, Vec2::new(90.0 * zoom, 35.0 * zoom));
+///         let rect = Rect::from_center_size(position, Vec2::new(90.0 * zoom, 35.0 * zoom));
 ///         let rounding = CornerRadius::same((10.0 * zoom) as u8);
 ///         let painter = ui.painter();
 ///         painter.rect_filled(rect, rounding, ui.visuals().extreme_bg_color);
@@ -847,9 +847,9 @@ pub trait ContextMenuManager {
 ///             egui::StrokeKind::Middle,
 ///         );
 ///         painter.text(
-///             point,
+///             position,
 ///             Align2::CENTER_CENTER,
-///             system.get_name(),
+///             point.get_name(),
 ///             FontId::proportional(12.0 * zoom),
 ///             Color32::WHITE,
 ///         );
@@ -858,7 +858,7 @@ pub trait ContextMenuManager {
 ///     fn notification_ui(
 ///         &self,
 ///         ui: &mut Ui,
-///         point: Pos2,
+///         position: Pos2,
 ///         zoom: f32,
 ///         initial_time: Instant,
 ///         color: Color32,
@@ -868,7 +868,7 @@ pub trait ContextMenuManager {
 ///         let alpha = (1.0 - secs / 2.0).clamp(0.0, 1.0);
 ///         let fading =
 ///             Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (255.0 * alpha) as u8);
-///         let rect = Rect::from_center_size(point, Vec2::new(90.0 * zoom, 35.0 * zoom));
+///         let rect = Rect::from_center_size(position, Vec2::new(90.0 * zoom, 35.0 * zoom));
 ///         ui.painter().rect_stroke(
 ///             rect,
 ///             CornerRadius::same((10.0 * zoom) as u8),
@@ -901,13 +901,13 @@ pub trait NodeTemplate {
     /// Called every frame for each visible node. The widget no longer draws
     /// the node name once a template is installed, so render it here (e.g.
     /// with [`Painter::text`](egui::Painter::text)) if you need it.
-    fn node_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom: f32, _system: &MapPoint);
+    fn node_ui(&self, ui: &mut Ui, _viewport_position: Pos2, _zoom: f32, _point: &MapPoint);
 
     /// Draws the highlight over the node closest to the mouse pointer.
     ///
     /// The nearest node is only computed while the pointer is over the map and
     /// [`MapSettings::node_text_visibility`] is [`VisibilitySetting::Hover`].
-    fn selection_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom: f32);
+    fn selection_ui(&self, ui: &mut Ui, _viewport_position: Pos2, _zoom: f32);
 
     /// Draws the notification effect of a node notified at `initial_time`.
     ///
@@ -919,7 +919,7 @@ pub trait NodeTemplate {
     fn notification_ui(
         &self,
         ui: &mut Ui,
-        _viewport_point: Pos2,
+        _viewport_position: Pos2,
         _zoom: f32,
         initial_time: Instant,
         color: Color32,
@@ -931,7 +931,7 @@ pub trait NodeTemplate {
     /// [`Map::update_marker`](super::Map::update_marker). For animated markers
     /// (e.g. a blinking light), drive the effect from the system clock and
     /// call [`ui.ctx().request_repaint()`](egui::Context::request_repaint).
-    fn marker_ui(&self, ui: &mut Ui, _viewport_point: Pos2, _zoom: f32);
+    fn marker_ui(&self, ui: &mut Ui, _viewport_position: Pos2, _zoom: f32);
 }
 
 #[cfg(test)]

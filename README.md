@@ -78,19 +78,19 @@ use std::time::Instant;
 struct MyTemplate;
 
 impl NodeTemplate for MyTemplate {
-    fn node_ui(&self, ui: &mut Ui, point: Pos2, zoom: f32, system: &MapPoint) {
+    fn node_ui(&self, ui: &mut Ui, position: Pos2, zoom: f32, point: &MapPoint) {
         // `point` is the node's screen position; scale every size by `zoom`.
-        ui.painter().circle_filled(point, 6.0 * zoom, Color32::GOLD);
+        ui.painter().circle_filled(position, 6.0 * zoom, Color32::GOLD);
     }
 
-    fn notification_ui(&self, ui: &mut Ui, point: Pos2, zoom: f32, start: Instant, color: Color32) -> bool {
+    fn notification_ui(&self, ui: &mut Ui, position: Pos2, zoom: f32, start: Instant, color: Color32) -> bool {
         // ... draw a time-driven effect computed from `start.elapsed()` ...
         ui.ctx().request_repaint(); // keep the animation frames coming
         start.elapsed().as_secs_f32() < 2.0 // returning false removes the notification
     }
 
-    fn selection_ui(&self, _ui: &mut Ui, _point: Pos2, _zoom: f32) {}
-    fn marker_ui(&self, _ui: &mut Ui, _point: Pos2, _zoom: f32) {}
+    fn selection_ui(&self, _ui: &mut Ui, _position: Pos2, _zoom: f32) {}
+    fn marker_ui(&self, _ui: &mut Ui, _position: Pos2, _zoom: f32) {}
 }
 
 map.set_node_template(std::rc::Rc::new(MyTemplate));
