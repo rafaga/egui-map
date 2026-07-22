@@ -31,8 +31,7 @@ fn map_position_workflow() {
     map.add_hashmap_points(sample_points());
 
     map.set_pos_from_nodeid(2);
-    // get_pos consume self, así que clonamos para seguir usando el mapa
-    assert_eq!(map.clone().get_pos(), [10.0, 10.0]);
+    assert_eq!(map.get_pos(), [10.0, 10.0]);
 
     map.set_pos([5.0, -5.0]);
     assert_eq!(map.get_pos(), [5.0, -5.0]);
@@ -76,7 +75,7 @@ fn map_notify_and_markers() {
     let mut map = Map::new();
     map.add_hashmap_points(sample_points());
 
-    assert!(map.notify(1, Instant::now()).is_ok());
+    map.notify(1, Instant::now());
     map.update_marker(0, 2);
     map.update_marker(1, 3);
 }
@@ -119,6 +118,6 @@ fn map_settings_default_from_outside_crate() {
     let settings = MapSettings::default();
     assert_eq!(settings.max_zoom, 2.0);
     assert_eq!(settings.min_zoom, 0.1);
-    assert_eq!(settings.node_text_visibility, VisibilitySetting::Allways);
+    assert_eq!(settings.node_text_visibility, VisibilitySetting::Always);
     assert_eq!(settings.styles.len(), 2);
 }

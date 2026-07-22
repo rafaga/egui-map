@@ -73,15 +73,13 @@
 
 use crate::map::animation::Animation;
 use crate::map::objects::{
-    ContextMenuManager, MapBounds, MapLabel, MapLine, MapPoint, MapSettings, RawLine, RawPoint,
-    TextSettings, VisibilitySetting,
+    ContextMenuManager, MapBounds, MapLabel, MapLine, MapPoint, MapSettings, MapStyle, RawLine,
+    RawPoint, TextSettings, VisibilitySetting,
 };
-use chrono;
 use egui::{epaint::CircleShape, widgets::*, *};
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
 use std::collections::{HashMap, HashSet};
-use std::fmt::Error;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -132,14 +130,13 @@ pub struct Map {
     zoom: f32,
     previous_zoom: f32,
     points: Option<HashMap<usize, MapPoint>>,
-    lines: Option<HashMap<String, MapLine>>,
+    lines: Option<HashMap<Rc<str>, MapLine>>,
     labels: Vec<MapLabel>,
     tree: Option<KdTree<f32, usize, [f32; 2]>>,
     visible_points: Vec<isize>,
     map_area: Rect,
     reference: MapBounds,
     current: MapBounds,
-    style: egui::Style,
     current_index: usize,
     entities: HashMap<usize, Instant>,
     min_size: (Option<f32>, Option<f32>),
@@ -149,7 +146,7 @@ pub struct Map {
     pub settings: MapSettings,
     menu_manager: Option<Rc<dyn ContextMenuManager>>,
     node_template: Option<Rc<dyn NodeTemplate>>,
-    visible_lines: HashSet<String>,
+    visible_lines: HashSet<Rc<str>>,
     markers: HashMap<usize, usize>,
 }
 
@@ -164,7 +161,7 @@ impl Widget for &mut Map {
     /// Renders the map, handling panning (drag), zooming (mouse wheel) and the
     /// right-click context menu if one was installed.
     fn ui(self, ui: &mut egui::Ui) -> Response {
-        let rect = self.calculate_widget_dimentions(ui);
+        let rect = self.calculate_widget_dimensions(ui);
 
         // we define the initial coordinate as the center of such rectangle
         self.reference.dist = rect.distance();
@@ -189,7 +186,6 @@ impl Widget for &mut Map {
                     let new_pos = self.reference.pos - (coords / self.zoom);
                     self.set_pos(new_pos.into());
                 }
-                let map_style = self.settings.styles[self.current_index].clone() * self.zoom;
                 if self.zoom < self.settings.line_visible_zoom {
                     // filling text settings
                     let mut text_settings = TextSettings {
@@ -202,24 +198,22 @@ impl Widget for &mut Map {
                     };
                     for label in &self.labels {
                         text_settings.text.clone_from(&label.text);
-                        paint.text(
-                            label.center,
-                            Align2::CENTER_CENTER,
-                            label.text.as_str(),
-                            map_style.font.clone().unwrap(),
-                            ui.visuals().text_color(),
-                        );
+                        text_settings.position = RawPoint::from(label.center);
                         self.paint_label(&paint, &text_settings);
                     }
                 }
-
-                // Here we determine the widget center to print all nodes
-                // let min_point = self.current.pos - RawPoint::try_from([self.map_area.center().x,self.map_area.center().y]).unwrap();
 
                 let rect_midpoint = RawPoint::from(self.map_area.center());
                 let min_point = self.current.pos - rect_midpoint;
                 let vec_points = &self.visible_points;
                 let hashm = &self.points;
+
+                // Safety net: drop stale notifications even if their node is
+                // outside the viewport and never finishes its animation.
+                let now = Instant::now();
+                self.entities
+                    .retain(|_, init| now.duration_since(*init).as_secs_f32() < 10.0);
+
                 self.paint_map_lines(&paint, &min_point);
 
                 if let Ok(nodes_to_remove) =
@@ -242,8 +236,11 @@ impl Widget for &mut Map {
                             } else {
                                 Color32::GREEN
                             };
-                            let mut transparency =
-                                (chrono::Local::now().timestamp_millis() % 2550) / 5;
+                            let millis = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis();
+                            let mut transparency = (millis % 2550 / 5) as i64;
                             if transparency > 255 {
                                 transparency = 255 - (transparency - 255)
                             }
@@ -315,7 +312,6 @@ impl Map {
             max_size: (None, None),
             current_index: 0,
             entities: HashMap::new(),
-            style: egui::Style::default(),
             menu_manager: None,
             node_template: None,
             visible_lines: HashSet::new(),
@@ -323,31 +319,26 @@ impl Map {
         }
     }
 
-    fn calculate_widget_dimentions(&mut self, ui: &mut Ui) -> RawLine {
-        self.map_area = ui.available_rect_before_wrap();
-        let mut left_top = RawPoint::from(self.map_area.left_top());
-        let mut right_bottom = RawPoint::from(self.map_area.right_bottom());
-        if let Some(val) = self.max_size.0
-            && right_bottom.components[0] > self.max_size.0.unwrap_or(0.0f32)
-        {
-            right_bottom.components[0] = val;
+    fn calculate_widget_dimensions(&mut self, ui: &mut Ui) -> RawLine {
+        let available = ui.available_rect_before_wrap();
+        let mut size = available.size();
+        if let Some(max_width) = self.max_size.0 {
+            size.x = size.x.min(max_width);
         }
-        if let Some(val) = self.max_size.1
-            && right_bottom.components[1] > self.max_size.1.unwrap_or(0.0f32)
-        {
-            right_bottom.components[1] = val;
+        if let Some(max_height) = self.max_size.1 {
+            size.y = size.y.min(max_height);
         }
-        if let Some(val) = self.min_size.0
-            && left_top.components[0] < self.min_size.0.unwrap_or(0.0f32)
-        {
-            left_top.components[0] = val;
+        if let Some(min_width) = self.min_size.0 {
+            size.x = size.x.max(min_width);
         }
-        if let Some(val) = self.min_size.1
-            && left_top.components[1] < self.min_size.1.unwrap_or(0.0f32)
-        {
-            left_top.components[1] = val;
+        if let Some(min_height) = self.min_size.1 {
+            size.y = size.y.max(min_height);
         }
-        RawLine::new(left_top, right_bottom)
+        self.map_area = Rect::from_min_size(available.min, size);
+        RawLine::new(
+            RawPoint::from(self.map_area.left_top()),
+            RawPoint::from(self.map_area.right_bottom()),
+        )
     }
 
     fn calculate_visible_points(&mut self) {
@@ -362,12 +353,19 @@ impl Map {
             let point: [f32; 2] = center.into();
             let vis_pos = tree.within(&point, radius, &squared_euclidean).unwrap();
             self.visible_points.clear();
+            self.visible_lines.clear();
             for point in vis_pos {
                 self.visible_points.push(point.1.cast_signed());
                 let system = self.points.as_ref().unwrap().get(point.1);
                 for connection in &system.unwrap().connections {
-                    if !self.visible_lines.contains(&connection.clone()) {
-                        self.visible_lines.insert(connection.clone());
+                    // Reuse the Rc key stored in the lines map instead of
+                    // allocating a new String per connection.
+                    if let Some((key, _)) = self
+                        .lines
+                        .as_ref()
+                        .and_then(|lines| lines.get_key_value(connection.as_str()))
+                    {
+                        self.visible_lines.insert(Rc::clone(key));
                     }
                 }
             }
@@ -400,7 +398,7 @@ impl Map {
     /// map.add_hashmap_points(points);
     ///
     /// // The view is centered on the midpoint of the loaded nodes.
-    /// assert_eq!(map.clone().get_pos(), [5.0, 5.0]);
+    /// assert_eq!(map.get_pos(), [5.0, 5.0]);
     /// ```
     pub fn add_hashmap_points(&mut self, hash_map: HashMap<usize, MapPoint>) {
         #[cfg(feature = "puffin")]
@@ -408,9 +406,8 @@ impl Map {
         let mut min = RawPoint::new(f32::INFINITY, f32::INFINITY);
         let mut max = RawPoint::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
         let mut tree = KdTree::<f32, usize, [f32; 2]>::new(2);
-        let mut h_map = hash_map.clone();
 
-        for entry in h_map.iter_mut() {
+        for entry in hash_map.iter() {
             for i in 0..min.components.len() {
                 if entry.1.raw_point.components[i] < min.components[i] {
                     min.components[i] = entry.1.raw_point.components[i];
@@ -425,7 +422,7 @@ impl Map {
         // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
         self.reference.min = min;
         self.reference.max = max;
-        self.points = Some(h_map);
+        self.points = Some(hash_map);
         self.tree = Some(tree);
         self.reference.pos = RawLine::new(min, max).midpoint();
         // we create a rect that include every node in the map
@@ -471,10 +468,7 @@ impl Map {
     }
 
     /// Returns the map coordinates the view is currently centered on.
-    ///
-    /// Note that this method consumes `self`; clone the map first if you still
-    /// need it afterwards.
-    pub fn get_pos(self) -> [f32; 2] {
+    pub fn get_pos(&self) -> [f32; 2] {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("get_pos");
         self.reference.pos.into()
@@ -503,7 +497,20 @@ impl Map {
     pub fn add_lines(&mut self, lines: HashMap<String, MapLine>) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("add_lines");
-        self.lines = Some(lines);
+        // Intern the keys as Rc<str> so visible_lines can share them without
+        // allocating new Strings on every viewport recalculation.
+        self.lines = Some(
+            lines
+                .into_iter()
+                .map(|(key, line)| (Rc::from(key.as_str()), line))
+                .collect(),
+        );
+        // Refresh visible_lines so lines loaded *after* the points (the
+        // natural order in the examples) are drawn from the first frame,
+        // without needing a pan/zoom to trigger the recalculation. Safe to
+        // call before add_hashmap_points: it early-returns while the spatial
+        // index does not exist yet.
+        self.calculate_visible_points();
     }
 
     fn adjust_bounds(&mut self) {
@@ -515,7 +522,7 @@ impl Map {
         self.current.pos = self.reference.pos * self.zoom;
     }
 
-    fn capture_mouse_events(&mut self, ui: &Ui, resp: &Response) {
+    fn capture_mouse_events(&mut self, ui: &Ui, _resp: &Response) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("capture_mouse_events");
         // capture MouseWheel Event for Zoom control change
@@ -564,7 +571,6 @@ impl Map {
                 }
             });
         }
-        if resp.secondary_clicked() {}
     }
 
     /// Sets the zoom factor.
@@ -582,6 +588,16 @@ impl Map {
         self.zoom
     }
 
+    /// Returns the style for the current theme, falling back to the first
+    /// style if the current theme index has no entry.
+    fn current_style(&self) -> &MapStyle {
+        self.settings
+            .styles
+            .get(self.current_index)
+            .or(self.settings.styles.first())
+            .expect("MapSettings::styles must not be empty")
+    }
+
     fn assign_visual_style(&mut self, ui_obj: &mut Ui) {
         let style_index = ui_obj.visuals().dark_mode as usize;
 
@@ -590,10 +606,12 @@ impl Map {
             puffin::profile_scope!("asign_visual_style");
 
             self.current_index = style_index;
-            self.style = ui_obj.style_mut().clone();
-            self.style.visuals.extreme_bg_color =
-                self.settings.styles[style_index].background_color;
-            self.style.visuals.window_stroke = self.settings.styles[style_index].border.unwrap();
+            let map_style = self.current_style();
+            let visuals = &mut ui_obj.style_mut().visuals;
+            visuals.extreme_bg_color = map_style.background_color;
+            if let Some(border) = map_style.border {
+                visuals.window_stroke = border;
+            }
         }
     }
 
@@ -677,7 +695,6 @@ impl Map {
             self.settings.min_zoom..=self.settings.max_zoom,
         )
         .show_value(false)
-        //.step_by(0.1)
         .orientation(SliderOrientation::Vertical);
         let mut pos1 = rect.right_top();
         let mut pos2 = rect.right_top();
@@ -686,11 +703,8 @@ impl Map {
         pos2.x -= 60.0;
         pos2.y += 240.0;
 
-        // TODO: Verify if this implementation its correct migrated from allocate_ui_at_rect()
         let sub_rect = egui::Rect::from_two_pos(pos1, pos2);
-        //ui_obj.allocate_ui_with_layout(sub_rect.size(), egui::Layout::right_to_left(Align::TOP), |ui_obj| {
         let ui_builder = egui::UiBuilder::new().clone().max_rect(sub_rect);
-        //});
         ui_obj.scope_builder(ui_builder, |ui_obj| {
             ui_obj.add(zoom_slider);
         });
@@ -752,7 +766,7 @@ impl Map {
                         node_template.selection_ui(ui_obj, viewport_point.into(), self.zoom);
                     }
                 } else if self.zoom > self.settings.label_visible_zoom
-                    && self.settings.node_text_visibility == VisibilitySetting::Allways
+                    && self.settings.node_text_visibility == VisibilitySetting::Always
                     || (self.settings.node_text_visibility == VisibilitySetting::Hover
                         && nearest_id.unwrap_or(&0usize) == &system.get_id())
                 {
@@ -772,22 +786,18 @@ impl Map {
                             viewport_point.into(),
                             self.zoom,
                             *init_time,
-                            self.settings.styles[self.current_index].alert_color,
+                            self.current_style().alert_color,
                         );
+                    } else if Animation::pulse(
+                        paint,
+                        viewport_point,
+                        self.zoom,
+                        *init_time,
+                        self.current_style().alert_color,
+                    ) {
+                        ui_obj.ctx().request_repaint();
                     } else {
-                        match Animation::pulse(
-                            paint,
-                            viewport_point,
-                            self.zoom,
-                            *init_time,
-                            self.settings.styles[self.current_index].alert_color,
-                        ) {
-                            Ok(true) => {
-                                ui_obj.ctx().request_repaint();
-                            }
-                            Ok(false) => nodes_to_remove.push(system_id),
-                            Err(_) => (),
-                        }
+                        nodes_to_remove.push(system_id);
                     }
                 }
                 if let Some(node_template) = &self.node_template {
@@ -796,7 +806,7 @@ impl Map {
                     shape_vec.push(Shape::circle_filled(
                         viewport_point.into(),
                         4.00 * self.zoom,
-                        self.settings.styles[self.current_index].fill_color,
+                        self.current_style().fill_color,
                     ));
                 }
             }
@@ -810,16 +820,13 @@ impl Map {
         puffin::profile_scope!("paint_map_lines");
 
         // Drawing Lines
-        if self.zoom > self.settings.line_visible_zoom {
+        if self.zoom > self.settings.line_visible_zoom
+            && let Some(mut stroke) = self.current_style().line
+        {
             let mut shape_vec = vec![];
-            let mut stroke = self.settings.styles[self.current_index].line.unwrap();
             let transparency_range = self.zoom - self.settings.line_visible_zoom;
             if (0.00..0.80).contains(&transparency_range) {
-                let mut tup_stroke = self.settings.styles[self.current_index]
-                    .line
-                    .unwrap()
-                    .color
-                    .to_tuple();
+                let mut tup_stroke = stroke.color.to_tuple();
                 let transparency = (self.zoom - self.settings.line_visible_zoom) / 0.80;
                 tup_stroke.3 = (255.0 * transparency).round() as u8;
                 let color = Color32::from_rgba_unmultiplied(
@@ -828,20 +835,13 @@ impl Map {
                     tup_stroke.2,
                     tup_stroke.3,
                 );
-                stroke = Stroke::new(
-                    self.settings.styles[self.current_index].line.unwrap().width,
-                    color,
-                );
+                stroke = Stroke::new(stroke.width, color);
             }
-            //let stroke = Stroke::new(10.0,Color32::GREEN);
             for line in &self.visible_lines {
                 if let Some(connection) = self.lines.as_ref().unwrap().get(line) {
                     let pos_a = connection.raw_line.points[0] * self.zoom - min_point;
                     let pos_b = connection.raw_line.points[1] * self.zoom - min_point;
-                    //let pos_a = connection.raw_line.points[0] / self.zoom - min_point;
-                    //let pos_b = connection.raw_line.points[1] / self.zoom - min_point;
                     shape_vec.push(Shape::line_segment([pos_a.into(), pos_b.into()], stroke));
-                    //shape_vec.push(painter.line_segment([pos_a.into(),pos_b.into()], stroke));
                 }
             }
             painter.extend(shape_vec);
@@ -866,16 +866,13 @@ impl Map {
     /// at `time` and plays for about 3.5 seconds; calling `notify` again for
     /// the same node restarts the animation. The effect can be customized with
     /// [`objects::NodeTemplate::notification_ui`].
-    ///
-    /// Currently always returns `Ok(true)`.
-    pub fn notify(&mut self, id_node: usize, time: Instant) -> Result<bool, Error> {
+    pub fn notify(&mut self, id_node: usize, time: Instant) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("notify");
         self.entities
             .entry(id_node)
             .and_modify(|value| *value = time)
             .or_insert(time);
-        Ok(true)
     }
 
     /// Installs a right-click context menu whose contents are built by the
@@ -1026,9 +1023,139 @@ mod tests {
             .unwrap()
             .connections
             .push("1-2".to_string());
+        let mut lines = HashMap::new();
+        lines.insert(
+            "1-2".to_string(),
+            MapLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)),
+        );
         let mut map = Map::new();
+        map.add_lines(lines);
         map.add_hashmap_points(points);
         assert!(map.visible_lines.contains("1-2"));
+    }
+
+    #[test]
+    fn add_lines_after_points_populates_visible_lines() {
+        // Regression: loading points before lines must still paint lines on
+        // the first frame (previously visible_lines stayed empty until the
+        // user panned or zoomed, because add_lines never recalculated it).
+        let mut points = sample_points();
+        points
+            .get_mut(&1)
+            .unwrap()
+            .connections
+            .push("1-2".to_string());
+        let mut map = Map::new();
+        map.add_hashmap_points(points);
+
+        let mut lines = HashMap::new();
+        lines.insert(
+            "1-2".to_string(),
+            MapLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)),
+        );
+        map.add_lines(lines);
+
+        assert!(map.visible_lines.contains("1-2"));
+    }
+
+    #[test]
+    fn map_check_line_is_painted_on_first_frame() {
+        use egui::{Context, RawInput, Shape};
+
+        // --- arrange ---
+        let mut map = Map::new();
+        map.set_zoom(1.0);
+
+        let mut point_a = MapPoint::new(0, RawPoint::new(0.0, 0.0));
+        point_a.connections.push("a0".to_string());
+        let mut point_b = MapPoint::new(1, RawPoint::new(50.0, 50.0));
+        point_b.connections.push("a0".to_string());
+
+        let mut lines = HashMap::new();
+        lines.insert(
+            "a0".to_string(),
+            MapLine::new(point_a.raw_point, point_b.raw_point),
+        );
+
+        let mut points = HashMap::new();
+        points.insert(0usize, point_a);
+        points.insert(1usize, point_b);
+        // Load points before lines — the natural order shown in the examples.
+        map.add_hashmap_points(points);
+        map.add_lines(lines);
+
+        map.set_pos([25.0, 25.0]);
+
+        assert!(
+            map.visible_lines.contains("a0"),
+            "visible_lines must contain \"a0\" after add_hashmap_points"
+        );
+
+        // --- act: 1st frame (no CentralPanel — run_ui creates the root Ui) ---
+        let ctx = Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(500.0, 500.0));
+        let input = RawInput {
+            screen_rect: Some(screen),
+            ..RawInput::default()
+        };
+
+        let output1 = ctx.run_ui(input.clone(), |ui| {
+            ui.add(&mut map);
+        });
+
+        let segments1: Vec<[egui::Pos2; 2]> = output1
+            .shapes
+            .iter()
+            .filter_map(|cs| match cs.shape {
+                Shape::LineSegment { points, .. } => Some(points),
+                _ => None,
+            })
+            .collect();
+
+        assert!(
+            !segments1.is_empty(),
+            "Frame 1: no LineSegment shapes painted (map lines did not draw)"
+        );
+
+        // Expected projection of (0,0)->(50,50) with zoom=1, center=(25,25),
+        // viewport 500x500: pos_a = (225, 225), pos_b = (275, 275). Tolerance ±2 px.
+        let expected_a = egui::pos2(225.0, 225.0);
+        let expected_b = egui::pos2(275.0, 275.0);
+        let tolerance = 2.0;
+        let found_on_frame1 = segments1.iter().any(|[p1, p2]| {
+            let d_a1 = p1.distance(expected_a);
+            let d_b1 = p2.distance(expected_b);
+            let d_a2 = p2.distance(expected_a);
+            let d_b2 = p1.distance(expected_b);
+            (d_a1 < tolerance && d_b1 < tolerance) || (d_a2 < tolerance && d_b2 < tolerance)
+        });
+        assert!(
+            found_on_frame1,
+            "Frame 1: no LineSegment matches expected endpoints (~225,225 -> ~275,275); got {:?}",
+            segments1
+        );
+
+        // --- act: 2nd frame (unchanged) — detect duplicate-lines regression ---
+        let output2 = ctx.run_ui(input, |ui| {
+            ui.add(&mut map);
+        });
+
+        let segments2: Vec<[egui::Pos2; 2]> = output2
+            .shapes
+            .iter()
+            .filter_map(|cs| match cs.shape {
+                Shape::LineSegment { points, .. } => Some(points),
+                _ => None,
+            })
+            .collect();
+
+        assert_eq!(
+            segments1.len(),
+            segments2.len(),
+            "Frame 2: expected {} line segments (no duplication across frames), got {}",
+            segments1.len(),
+            segments2.len()
+        );
     }
 
     // ---------- posición ----------
@@ -1096,11 +1223,11 @@ mod tests {
     fn notify_inserts_and_updates_entities() {
         let mut map = Map::new();
         let t1 = Instant::now();
-        assert!(map.notify(5, t1).is_ok());
+        map.notify(5, t1);
         assert_eq!(map.entities.get(&5), Some(&t1));
 
         let t2 = t1 + Duration::from_secs(1);
-        assert!(map.notify(5, t2).is_ok());
+        map.notify(5, t2);
         assert_eq!(map.entities.get(&5), Some(&t2));
         assert_eq!(map.entities.len(), 1);
     }

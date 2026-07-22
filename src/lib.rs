@@ -42,4 +42,7 @@
 //! - `puffin`: instruments the widget's hot paths with the
 //!   [`puffin`](https://crates.io/crates/puffin) profiler.
 
+#![forbid(unsafe_code)]
+#![warn(missing_docs)]
+
 pub mod map;
