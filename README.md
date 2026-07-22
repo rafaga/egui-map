@@ -18,7 +18,7 @@ Add the dependency:
 
 ```toml
 [dependencies]
-egui-map = "0.0.19"
+egui-map = "0.0"
 ```
 
 Feed the map a set of nodes and add it to your UI:

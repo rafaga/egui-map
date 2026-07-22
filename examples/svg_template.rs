@@ -24,7 +24,10 @@ impl NodeTemplate for SvgNodes {
             _ => egui::include_image!("server_mango.svg"),
         };
         let rect = egui::Rect::from_center_size(position, Vec2::splat(size));
-        ui.put(rect, egui::Image::new(source).fit_to_exact_size(Vec2::splat(size)));
+        ui.put(
+            rect,
+            egui::Image::new(source).fit_to_exact_size(Vec2::splat(size)),
+        );
         ui.painter().text(
             position + Vec2::new(0.0, size / 2.0),
             Align2::CENTER_TOP,
@@ -84,22 +87,25 @@ fn main() -> eframe::Result<()> {
     ] {
         let mut point = MapPoint::new(id, RawPoint::new(x, y));
         point.set_name(name.to_string());
-        match point.get_id(){
+        match point.get_id() {
             1 => point.connections.push(0.to_string()),
-            2 => {point.connections.push(0.to_string()); point.connections.push(1.to_string());},
+            2 => {
+                point.connections.push(0.to_string());
+                point.connections.push(1.to_string());
+            }
             _ => point.connections.push(1.to_string()),
         }
         points.insert(id, point);
     }
     let mut lines = HashMap::new();
-    let ids = vec![[1,2], [2,3]];
-    let mut cont=0;
+    let ids = vec![[1, 2], [2, 3]];
+    let mut cont = 0;
     for id in ids {
         let point1 = points.get(&id[0]).unwrap();
         let point2 = points.get(&id[1]).unwrap();
         let line = MapLine::new(point1.raw_point, point2.raw_point);
         lines.entry(cont.to_string()).or_insert(line);
-        cont+=1;
+        cont += 1;
     }
     let mut map = Map::new();
     map.add_hashmap_points(points);
@@ -123,7 +129,7 @@ fn main() -> eframe::Result<()> {
                 loaders_installed = true;
             }
             if last_pulse.elapsed().as_secs() >= 3 {
-                map.notify(2, Instant::now()).ok();
+                map.notify(2, Instant::now());
                 last_pulse = Instant::now();
             }
             ui.add(&mut map);

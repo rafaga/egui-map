@@ -1,7 +1,7 @@
 //! Built-in animation effects, used when no custom
 //! [`NodeTemplate`](crate::map::objects::NodeTemplate) is installed.
 
-use crate::map::{Error, objects::RawPoint};
+use crate::map::objects::RawPoint;
 use egui::{Color32, Painter, Shape, epaint::CircleShape};
 use std::time::Instant;
 
@@ -12,19 +12,18 @@ impl Animation {
     /// Draws one frame of an expanding, fading circle centered on `center`.
     ///
     /// The pulse starts at `initial_time` and plays for about 3.5 seconds,
-    /// growing in radius while its transparency decreases. Returns `Ok(true)`
+    /// growing in radius while its transparency decreases. Returns `true`
     /// while the animation is still playing (the caller should request a
-    /// repaint) and `Ok(false)` once it has finished, so the caller can drop
-    /// the notification.
+    /// repaint) and `false` once it has finished, so the caller can drop the
+    /// notification.
     pub(crate) fn pulse(
         painter: &Painter,
         center: RawPoint,
         zoom: f32,
         initial_time: Instant,
         color: Color32,
-    ) -> Result<bool, Error> {
+    ) -> bool {
         let current_instant = Instant::now();
-        let mut result = false;
         let time_diff = current_instant.duration_since(initial_time);
         let secs_played = time_diff.as_secs_f32();
         let radius = (4.00 + (40.00 * secs_played)) * zoom;
@@ -40,10 +39,7 @@ impl Animation {
         );
         let circle = Shape::Circle(CircleShape::filled(center.into(), radius, corrected_color));
         painter.extend(vec![circle]);
-        if secs_played < 3.50 {
-            result = true;
-        }
-        Ok(result)
+        secs_played < 3.50
     }
 }
 
@@ -71,7 +67,7 @@ mod tests {
             Instant::now(),
             Color32::RED,
         );
-        assert!(matches!(result, Ok(true)));
+        assert!(result);
     }
 
     #[test]
@@ -86,6 +82,6 @@ mod tests {
             initial_time,
             Color32::RED,
         );
-        assert!(matches!(result, Ok(false)));
+        assert!(!result);
     }
 }

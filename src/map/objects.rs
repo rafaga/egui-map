@@ -395,9 +395,8 @@ impl From<[[i64; 2]; 2]> for RawLine {
 ///
 /// Multiplying or dividing a `MapStyle` by a number scales the stroke widths
 /// and the font size, leaving colors untouched; the widget uses this to scale
-/// the active style with the current zoom factor. Those operators panic if
-/// `border`, `line` or `font` are `None`, so they must only be applied to
-/// fully populated styles such as the ones in [`MapSettings::default()`].
+/// the active style with the current zoom factor. Fields that are `None` are
+/// left untouched by those operators.
 #[derive(Clone, Debug)]
 pub struct MapStyle {
     /// Stroke used for the widget border.
@@ -437,99 +436,84 @@ impl Default for MapStyle {
     }
 }
 
+impl MapStyle {
+    /// Returns a copy with the stroke widths and font size scaled by `factor`.
+    /// Fields that are `None` are left untouched.
+    fn scaled(mut self, factor: f32) -> Self {
+        if let Some(border) = self.border.as_mut() {
+            border.width *= factor;
+        }
+        if let Some(line) = self.line.as_mut() {
+            line.width *= factor;
+        }
+        if let Some(font) = self.font.as_mut() {
+            font.size *= factor;
+        }
+        self
+    }
+}
+
 impl Mul<i64> for MapStyle {
-    // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn mul(mut self, rhs: i64) -> Self::Output {
-        self.border.as_mut().unwrap().width *= rhs as f32;
-        self.line.as_mut().unwrap().width *= rhs as f32;
-        self.font.as_mut().unwrap().size *= rhs as f32;
-        self
+    fn mul(self, rhs: i64) -> Self::Output {
+        self.scaled(rhs as f32)
     }
 }
 
 impl Mul<i32> for MapStyle {
-    // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn mul(mut self, rhs: i32) -> Self::Output {
-        self.border.as_mut().unwrap().width *= rhs as f32;
-        self.line.as_mut().unwrap().width *= rhs as f32;
-        self.font.as_mut().unwrap().size *= rhs as f32;
-        self
+    fn mul(self, rhs: i32) -> Self::Output {
+        self.scaled(rhs as f32)
     }
 }
 
 impl Mul<f32> for MapStyle {
-    // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn mul(mut self, rhs: f32) -> Self::Output {
-        self.border.as_mut().unwrap().width *= rhs;
-        self.line.as_mut().unwrap().width *= rhs;
-        self.font.as_mut().unwrap().size *= rhs;
-        self
+    fn mul(self, rhs: f32) -> Self::Output {
+        self.scaled(rhs)
     }
 }
 
 impl Mul<f64> for MapStyle {
-    // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn mul(mut self, rhs: f64) -> Self::Output {
-        self.border.as_mut().unwrap().width *= rhs as f32;
-        self.line.as_mut().unwrap().width *= rhs as f32;
-        self.font.as_mut().unwrap().size *= rhs as f32;
-        self
+    fn mul(self, rhs: f64) -> Self::Output {
+        self.scaled(rhs as f32)
     }
 }
 
 impl Div<i64> for MapStyle {
-    // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn div(mut self, rhs: i64) -> Self::Output {
-        self.border.as_mut().unwrap().width /= rhs as f32;
-        self.line.as_mut().unwrap().width /= rhs as f32;
-        self.font.as_mut().unwrap().size /= rhs as f32;
-        self
+    fn div(self, rhs: i64) -> Self::Output {
+        self.scaled(1.0 / rhs as f32)
     }
 }
 
 impl Div<i32> for MapStyle {
-    // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn div(mut self, rhs: i32) -> Self::Output {
-        self.border.as_mut().unwrap().width /= rhs as f32;
-        self.line.as_mut().unwrap().width /= rhs as f32;
-        self.font.as_mut().unwrap().size /= rhs as f32;
-        self
+    fn div(self, rhs: i32) -> Self::Output {
+        self.scaled(1.0 / rhs as f32)
     }
 }
 
 impl Div<f32> for MapStyle {
-    // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn div(mut self, rhs: f32) -> Self::Output {
-        self.border.as_mut().unwrap().width /= rhs;
-        self.line.as_mut().unwrap().width /= rhs;
-        self.font.as_mut().unwrap().size /= rhs;
-        self
+    fn div(self, rhs: f32) -> Self::Output {
+        self.scaled(1.0 / rhs)
     }
 }
 
 impl Div<f64> for MapStyle {
-    // The multiplication of rational numbers is a closed operation.
     type Output = Self;
 
-    fn div(mut self, rhs: f64) -> Self::Output {
-        self.border.as_mut().unwrap().width /= rhs as f32;
-        self.line.as_mut().unwrap().width /= rhs as f32;
-        self.font.as_mut().unwrap().size /= rhs as f32;
-        self
+    fn div(self, rhs: f64) -> Self::Output {
+        self.scaled(1.0 / rhs as f32)
     }
 }
 
@@ -688,7 +672,7 @@ pub struct MapSettings {
     pub line_visible_zoom: f32,
     /// Zoom threshold above which node names become visible when
     /// [`node_text_visibility`](Self::node_text_visibility) is
-    /// [`VisibilitySetting::Allways`].
+    /// [`VisibilitySetting::Always`].
     pub label_visible_zoom: f32,
     /// Controls when node names are displayed.
     pub node_text_visibility: VisibilitySetting,
@@ -709,7 +693,7 @@ impl MapSettings {
             min_zoom: 0.0,
             line_visible_zoom: 0.0,
             label_visible_zoom: 0.0,
-            node_text_visibility: VisibilitySetting::Allways,
+            node_text_visibility: VisibilitySetting::Always,
             styles: vec![MapStyle::new()],
         }
     }
@@ -725,7 +709,7 @@ impl Default for MapSettings {
             min_zoom: 0.1,
             line_visible_zoom: 0.2,
             label_visible_zoom: 0.58,
-            node_text_visibility: VisibilitySetting::Allways,
+            node_text_visibility: VisibilitySetting::Always,
             styles: Vec::new(),
         };
 
@@ -774,7 +758,7 @@ pub enum VisibilitySetting {
     /// Only show the name of the node closest to the mouse pointer.
     Hover,
     /// Always show node names, subject to [`MapSettings::label_visible_zoom`].
-    Allways,
+    Always,
 }
 
 /// Provides the contents of the widget's right-click context menu.
@@ -1100,6 +1084,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::op_ref)] // se prueba a propósito la impl Add<&RawPoint>
     fn raw_point_add_ref() {
         let a = RawPoint::new(1.0, 2.0);
         let b = RawPoint::new(3.0, -4.0);
@@ -1110,6 +1095,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::op_ref)] // se prueba a propósito la impl Sub<&RawPoint>
     fn raw_point_sub_ref() {
         let a = RawPoint::new(1.0, 2.0);
         let b = RawPoint::new(3.0, -4.0);
@@ -1400,7 +1386,7 @@ mod tests {
         assert_eq!(s.min_zoom, 0.0);
         assert_eq!(s.line_visible_zoom, 0.0);
         assert_eq!(s.label_visible_zoom, 0.0);
-        assert_eq!(s.node_text_visibility, VisibilitySetting::Allways);
+        assert_eq!(s.node_text_visibility, VisibilitySetting::Always);
         assert_eq!(s.styles.len(), 1);
     }
 
@@ -1411,7 +1397,7 @@ mod tests {
         assert_eq!(s.min_zoom, 0.1);
         assert_eq!(s.line_visible_zoom, 0.2);
         assert_eq!(s.label_visible_zoom, 0.58);
-        assert_eq!(s.node_text_visibility, VisibilitySetting::Allways);
+        assert_eq!(s.node_text_visibility, VisibilitySetting::Always);
         // light + dark themes
         assert_eq!(s.styles.len(), 2);
         // light theme
@@ -1432,9 +1418,9 @@ mod tests {
     fn visibility_setting_equality() {
         assert_eq!(VisibilitySetting::Hidden, VisibilitySetting::Hidden);
         assert_eq!(VisibilitySetting::Hover, VisibilitySetting::Hover);
-        assert_eq!(VisibilitySetting::Allways, VisibilitySetting::Allways);
+        assert_eq!(VisibilitySetting::Always, VisibilitySetting::Always);
         assert_ne!(VisibilitySetting::Hidden, VisibilitySetting::Hover);
-        assert_ne!(VisibilitySetting::Hover, VisibilitySetting::Allways);
-        assert_ne!(VisibilitySetting::Hidden, VisibilitySetting::Allways);
+        assert_ne!(VisibilitySetting::Hover, VisibilitySetting::Always);
+        assert_ne!(VisibilitySetting::Hidden, VisibilitySetting::Always);
     }
 }
