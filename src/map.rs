@@ -279,9 +279,9 @@ impl Widget for &mut Map {
                     });
                 }
 
-                if cfg!(debug_assertions) {
-                    self.print_debug_info(paint, resp);
-                }
+                #[cfg(feature = "debug_overlay")]
+                self.print_debug_info(paint, resp);
+
             }
         });
         ui.allocate_space(self.map_area.size());
@@ -615,6 +615,7 @@ impl Map {
         }
     }
 
+    #[cfg(feature = "debug_overlay")]
     fn print_debug_info(&mut self, paint: Painter, resp: Response) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("printing debug data");

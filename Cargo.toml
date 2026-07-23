@@ -38,11 +38,12 @@ maintenance = { status = "actively-developed" }
 [features]
 default = []
 puffin = ["dep:puffin"]
+debug_overlay = []
 
 [dependencies]
 egui = { version = "0.35.0", features = ["bytemuck"]}
 kdtree = { version = "0.8.0" }
-puffin = { version = "0.20.0", optional=true, default-features = false}
+puffin = { version = "0.20.0", optional=true, default-features = false }
 
 [dev-dependencies]
 eframe = "0.35.0"
