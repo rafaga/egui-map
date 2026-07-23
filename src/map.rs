@@ -2,7 +2,7 @@
 //!
 //! [`Map`] is an [`egui::Widget`] that draws a 2D set of nodes
 //! ([`objects::MapPoint`]), the connection lines between them
-//! ([`objects::MapLine`]) and free-floating text labels
+//! ([`objects::MapSegment`]) and free-floating text labels
 //! ([`objects::MapLabel`]). Nodes are indexed in a kd-tree so that only the
 //! ones inside the current viewport are painted each frame.
 //!
@@ -26,13 +26,14 @@
 //! 2. For every connection, choose a unique string id and push it into
 //!    [`MapPoint::connections`] of **both** endpoint nodes.
 //! 3. Load the nodes with [`Map::add_hashmap_points`], then load a
-//!    [`HashMap`] of [`MapLine`] keyed by those same connection ids with
-//!    [`Map::add_lines`].
+//!    [`Vec`] of [`MapSegment`] keyed by those same connection ids and
+//!    add it to the widget with [`Map::add_lines`].
 //!
 //! ```
 //! use egui_map::map::Map;
-//! use egui_map::map::objects::{MapLine, MapPoint, RawPoint};
+//! use egui_map::map::objects::{MapPoint, MapSegment, RawPoint};
 //! use std::collections::HashMap;
+//! use std::rc::Rc;
 //!
 //! // 1. Create the nodes.
 //! let mut points: HashMap<usize, MapPoint> = HashMap::new();
@@ -52,16 +53,18 @@
 //! map.add_hashmap_points(points);
 //!
 //! // 3. Provide the line geometry keyed by the same connection id.
-//! let mut lines: HashMap<String, MapLine> = HashMap::new();
-//! let mut line = MapLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0));
-//! line.id = Some("1-2".to_string());
-//! lines.insert("1-2".to_string(), line);
+//! let mut lines: Vec<MapSegment> = Vec::new();
+//! lines.push(
+//!     MapSegment::new(Rc::from("1-2"), RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0))
+//! );
 //! map.add_lines(lines);
 //! ```
 //!
 //! A line is only drawn while the zoom level is above
-//! [`MapSettings::line_visible_zoom`] and at least one of its endpoints is
-//! inside the viewport.
+//! [`MapSettings::line_visible_zoom`] and its bounding box intersects the
+//! viewport. Segments are culled broad-phase with an R-tree built by
+//! [`Map::add_lines`], so long lines crossing the view are drawn even when
+//! both endpoints lie outside of it.
 //!
 //! ## Custom node rendering
 //!
@@ -73,13 +76,13 @@
 
 use crate::map::animation::Animation;
 use crate::map::objects::{
-    ContextMenuManager, MapBounds, MapLabel, MapLine, MapPoint, MapSettings, MapStyle, RawLine,
+    ContextMenuManager, MapBounds, MapLabel, MapPoint, MapSegment, MapSettings, MapStyle, RawLine,
     RawPoint, TextSettings, VisibilitySetting,
 };
 use egui::{epaint::CircleShape, widgets::*, *};
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -91,7 +94,7 @@ pub mod objects;
 /// An interactive 2D map widget.
 ///
 /// `Map` renders a set of nodes ([`objects::MapPoint`]), connection lines
-/// ([`objects::MapLine`]) and text labels ([`objects::MapLabel`]). The user can
+/// ([`objects::MapSegment`]) and text labels ([`objects::MapLabel`]). The user can
 /// pan the view by dragging and zoom with the mouse wheel (hold `Ctrl` — or
 /// `Cmd` on macOS — to zoom faster), or use the built-in zoom slider drawn at
 /// the top-right corner of the widget.
@@ -130,7 +133,7 @@ pub struct Map {
     zoom: f32,
     previous_zoom: f32,
     points: Option<HashMap<usize, MapPoint>>,
-    lines: Option<HashMap<Rc<str>, MapLine>>,
+    segments: Option<rstar::RTree<MapSegment>>,
     labels: Vec<MapLabel>,
     tree: Option<KdTree<f32, usize, [f32; 2]>>,
     visible_points: Vec<isize>,
@@ -146,7 +149,6 @@ pub struct Map {
     pub settings: MapSettings,
     menu_manager: Option<Rc<dyn ContextMenuManager>>,
     node_template: Option<Rc<dyn NodeTemplate>>,
-    visible_lines: HashSet<Rc<str>>,
     markers: HashMap<usize, usize>,
 }
 
@@ -279,9 +281,8 @@ impl Widget for &mut Map {
                     });
                 }
 
-                if cfg!(debug_assertions) {
-                    self.print_debug_info(paint, resp);
-                }
+                #[cfg(feature = "debug_overlay")]
+                self.print_debug_info(paint, resp);
             }
         });
         ui.allocate_space(self.map_area.size());
@@ -302,7 +303,6 @@ impl Map {
             map_area: Rect::NOTHING,
             tree: None,
             points: None,
-            lines: None,
             labels: Vec::new(),
             visible_points: Vec::new(),
             current: MapBounds::default(),
@@ -314,8 +314,8 @@ impl Map {
             entities: HashMap::new(),
             menu_manager: None,
             node_template: None,
-            visible_lines: HashSet::new(),
             markers: HashMap::new(),
+            segments: None,
         }
     }
 
@@ -353,25 +353,11 @@ impl Map {
             let point: [f32; 2] = center.into();
             let vis_pos = tree.within(&point, radius, &squared_euclidean).unwrap();
             self.visible_points.clear();
-            self.visible_lines.clear();
             for point in vis_pos {
                 self.visible_points.push(point.1.cast_signed());
-                let system = self.points.as_ref().unwrap().get(point.1);
-                for connection in &system.unwrap().connections {
-                    // Reuse the Rc key stored in the lines map instead of
-                    // allocating a new String per connection.
-                    if let Some((key, _)) = self
-                        .lines
-                        .as_ref()
-                        .and_then(|lines| lines.get_key_value(connection.as_str()))
-                    {
-                        self.visible_lines.insert(Rc::clone(key));
-                    }
-                }
             }
         }
     }
-
     /// Loads the node set and (re)builds the spatial index.
     ///
     /// This replaces any previously loaded points, computes the bounding box of
@@ -488,29 +474,21 @@ impl Map {
     ///
     /// Lines are keyed by a connection id that the endpoint nodes must
     /// reference through [`MapPoint::connections`] — push each line's key into
-    /// the `connections` of the nodes it joins. A line is only drawn while at
-    /// least one of its endpoints is visible and the zoom level is above
+    /// the `connections` of the nodes it joins. The segments are stored in an
+    /// R-tree keyed by bounding box: a line is drawn while its bounding box
+    /// intersects the viewport and the zoom level is above
     /// [`MapSettings::line_visible_zoom`].
     ///
     /// See the [module-level example](self#connecting-nodes-with-lines) for
     /// the complete wiring.
-    pub fn add_lines(&mut self, lines: HashMap<String, MapLine>) {
+    pub fn add_lines(&mut self, segments: Vec<MapSegment>) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("add_lines");
-        // Intern the keys as Rc<str> so visible_lines can share them without
-        // allocating new Strings on every viewport recalculation.
-        self.lines = Some(
-            lines
-                .into_iter()
-                .map(|(key, line)| (Rc::from(key.as_str()), line))
-                .collect(),
-        );
-        // Refresh visible_lines so lines loaded *after* the points (the
-        // natural order in the examples) are drawn from the first frame,
-        // without needing a pan/zoom to trigger the recalculation. Safe to
-        // call before add_hashmap_points: it early-returns while the spatial
-        // index does not exist yet.
-        self.calculate_visible_points();
+        // Intern the keys as Rc<str> and build the broad-phase spatial index
+        // over the line bounding boxes, so viewport culling and hit-testing
+        // discard whole regions without touching every segment.
+
+        self.segments = Some(rstar::RTree::bulk_load(segments));
     }
 
     fn adjust_bounds(&mut self) {
@@ -615,6 +593,7 @@ impl Map {
         }
     }
 
+    #[cfg(feature = "debug_overlay")]
     fn print_debug_info(&mut self, paint: Painter, resp: Response) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("printing debug data");
@@ -822,6 +801,7 @@ impl Map {
         // Drawing Lines
         if self.zoom > self.settings.line_visible_zoom
             && let Some(mut stroke) = self.current_style().line
+            && let Some(segments) = &self.segments
         {
             let mut shape_vec = vec![];
             let transparency_range = self.zoom - self.settings.line_visible_zoom;
@@ -837,12 +817,20 @@ impl Map {
                 );
                 stroke = Stroke::new(stroke.width, color);
             }
-            for line in &self.visible_lines {
-                if let Some(connection) = self.lines.as_ref().unwrap().get(line) {
-                    let pos_a = connection.raw_line.points[0] * self.zoom - min_point;
-                    let pos_b = connection.raw_line.points[1] * self.zoom - min_point;
-                    shape_vec.push(Shape::line_segment([pos_a.into(), pos_b.into()], stroke));
-                }
+            // Broad-phase: query the segment R-tree with the viewport AABB
+            // (in map coordinates), padded by the stroke width so lines at
+            // the very edge are not clipped prematurely.
+            let center = self.current.pos / self.zoom;
+            let padding = stroke.width / self.zoom;
+            let half = RawPoint::new(
+                self.map_area.width() / 2.0 / self.zoom + padding,
+                self.map_area.height() / 2.0 / self.zoom + padding,
+            );
+            let query = rstar::AABB::from_corners(center - half, center + half);
+            for segment in segments.locate_in_envelope_intersecting(query) {
+                let pos_a = segment.raw_line.points[0] * self.zoom - min_point;
+                let pos_b = segment.raw_line.points[1] * self.zoom - min_point;
+                shape_vec.push(Shape::line_segment([pos_a.into(), pos_b.into()], stroke));
             }
             painter.extend(shape_vec);
         }
@@ -873,6 +861,39 @@ impl Map {
             .entry(id_node)
             .and_modify(|value| *value = time)
             .or_insert(time);
+    }
+
+    /// Returns the id of the line closest to `point`, in map coordinates,
+    /// when it lies within `tolerance` map units of the segment.
+    ///
+    /// Broad-phase candidates are taken from the segment R-tree built by
+    /// [`Map::add_lines`]; the exact point-to-segment distance is then
+    /// computed against the line geometry and the closest match wins. Returns
+    /// `None` when no lines are loaded or every segment is farther than
+    /// `tolerance`. A negative `tolerance` behaves like `0.0`.
+    ///
+    /// To hit-test a mouse click, convert the screen position to map
+    /// coordinates first (`map = (screen + origin) / zoom`, see the
+    /// [coordinate model](self#coordinate-model)) and pick a tolerance scaled
+    /// by `1.0 / zoom` so it stays constant in screen pixels.
+    pub fn line_at(&self, point: [f32; 2], tolerance: f32) -> Option<Rc<str>> {
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("line_at");
+        let segments = self.segments.as_ref()?;
+        let tolerance = tolerance.max(0.0);
+
+        let center = RawPoint::from(point);
+        let padding = RawPoint::new(tolerance, tolerance);
+        let query = rstar::AABB::from_corners(center - padding, center + padding);
+
+        let mut closest: Option<(f32, Rc<str>)> = None;
+        for segment in segments.locate_in_envelope_intersecting(query) {
+            let distance = segment.raw_line.distance_to_point(center);
+            if distance <= tolerance && closest.as_ref().is_none_or(|(best, _)| distance < *best) {
+                closest = Some((distance, Rc::clone(&segment.id)));
+            }
+        }
+        closest.map(|(_, id)| id)
     }
 
     /// Installs a right-click context menu whose contents are built by the
@@ -937,11 +958,10 @@ mod tests {
         assert_eq!(map.zoom, 1.0);
         assert_eq!(map.previous_zoom, 1.0);
         assert!(map.points.is_none());
-        assert!(map.lines.is_none());
+        assert!(map.segments.is_none());
         assert!(map.tree.is_none());
         assert!(map.labels.is_empty());
         assert!(map.visible_points.is_empty());
-        assert!(map.visible_lines.is_empty());
         assert!(map.markers.is_empty());
         assert!(map.entities.is_empty());
         assert_eq!(map.min_size, (None, None));
@@ -1015,47 +1035,97 @@ mod tests {
         assert_eq!(map.visible_points.len(), 3);
     }
 
-    #[test]
-    fn add_hashmap_points_populates_visible_lines() {
-        let mut points = sample_points();
-        points
-            .get_mut(&1)
-            .unwrap()
-            .connections
-            .push("1-2".to_string());
-        let mut lines = HashMap::new();
-        lines.insert(
-            "1-2".to_string(),
-            MapLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)),
-        );
-        let mut map = Map::new();
-        map.add_lines(lines);
-        map.add_hashmap_points(points);
-        assert!(map.visible_lines.contains("1-2"));
+    /// Renders one frame of `map` in a 500x500 viewport and returns the
+    /// painted line segments.
+    fn render_line_segments(map: &mut Map) -> Vec<[egui::Pos2; 2]> {
+        use egui::{Context, RawInput, Shape};
+        let ctx = Context::default();
+        let input = RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(500.0, 500.0),
+            )),
+            ..RawInput::default()
+        };
+        let output = ctx.run_ui(input, |ui| {
+            ui.add(&mut *map);
+        });
+        output
+            .shapes
+            .iter()
+            .filter_map(|cs| match cs.shape {
+                Shape::LineSegment { points, .. } => Some(points),
+                _ => None,
+            })
+            .collect()
     }
 
     #[test]
-    fn add_lines_after_points_populates_visible_lines() {
-        // Regression: loading points before lines must still paint lines on
-        // the first frame (previously visible_lines stayed empty until the
-        // user panned or zoomed, because add_lines never recalculated it).
-        let mut points = sample_points();
-        points
-            .get_mut(&1)
-            .unwrap()
-            .connections
-            .push("1-2".to_string());
+    fn segment_crossing_viewport_is_painted_even_with_far_endpoints() {
+        // With the old endpoint-based rule this line was culled: both
+        // endpoints sit beyond the point-culling radius. With the R-tree the
+        // segment AABB intersects the viewport, so it is painted — no points
+        // needed at all.
         let mut map = Map::new();
-        map.add_hashmap_points(points);
+        map.set_zoom(1.0);
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("long"),
+            RawPoint::new(-4000.0, -1.0),
+            RawPoint::new(4000.0, 1.0),
+        ));
+        map.add_lines(lines);
+        map.set_pos([0.0, 0.0]);
 
-        let mut lines = HashMap::new();
-        lines.insert(
-            "1-2".to_string(),
-            MapLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)),
-        );
+        let segments = render_line_segments(&mut map);
+        assert_eq!(segments.len(), 1);
+    }
+
+    #[test]
+    fn segment_outside_viewport_is_not_painted() {
+        let mut map = Map::new();
+        map.set_zoom(1.0);
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("far"),
+            RawPoint::new(10_000.0, 10_000.0),
+            RawPoint::new(10_100.0, 10_100.0),
+        ));
+        map.add_lines(lines);
+        map.set_pos([0.0, 0.0]);
+
+        assert!(render_line_segments(&mut map).is_empty());
+    }
+
+    #[test]
+    fn add_lines_builds_segment_tree() {
+        let mut map = Map::new();
+        map.add_hashmap_points(sample_points());
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("1-2"),
+            RawPoint::new(0.0, 0.0),
+            RawPoint::new(10.0, 10.0),
+        ));
         map.add_lines(lines);
 
-        assert!(map.visible_lines.contains("1-2"));
+        let tree = map
+            .segments
+            .as_ref()
+            .expect("add_lines must build the segment tree");
+        assert_eq!(tree.size(), 1);
+
+        // Broad-phase query: a viewport containing (0,0) must hit the segment;
+        // a far-away viewport must not.
+        let hit_query =
+            rstar::AABB::from_corners(RawPoint::new(-1.0, -1.0), RawPoint::new(1.0, 1.0));
+        let hits: Vec<_> = tree.locate_in_envelope_intersecting(hit_query).collect();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(&*hits[0].id, "1-2");
+
+        let miss_query =
+            rstar::AABB::from_corners(RawPoint::new(100.0, 100.0), RawPoint::new(200.0, 200.0));
+        assert_eq!(tree.locate_in_envelope_intersecting(miss_query).count(), 0);
     }
 
     #[test]
@@ -1071,11 +1141,12 @@ mod tests {
         let mut point_b = MapPoint::new(1, RawPoint::new(50.0, 50.0));
         point_b.connections.push("a0".to_string());
 
-        let mut lines = HashMap::new();
-        lines.insert(
-            "a0".to_string(),
-            MapLine::new(point_a.raw_point, point_b.raw_point),
-        );
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("a0"),
+            point_a.raw_point,
+            point_b.raw_point,
+        ));
 
         let mut points = HashMap::new();
         points.insert(0usize, point_a);
@@ -1085,11 +1156,6 @@ mod tests {
         map.add_lines(lines);
 
         map.set_pos([25.0, 25.0]);
-
-        assert!(
-            map.visible_lines.contains("a0"),
-            "visible_lines must contain \"a0\" after add_hashmap_points"
-        );
 
         // --- act: 1st frame (no CentralPanel — run_ui creates the root Ui) ---
         let ctx = Context::default();
@@ -1208,16 +1274,97 @@ mod tests {
     #[test]
     fn add_lines_stores_lines() {
         let mut map = Map::new();
-        let mut lines = HashMap::new();
-        lines.insert(
-            "a-b".to_string(),
-            MapLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(1.0, 1.0)),
-        );
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("a-b"),
+            RawPoint::new(0.0, 0.0),
+            RawPoint::new(1.0, 1.0),
+        ));
         map.add_lines(lines);
-        assert!(map.lines.as_ref().unwrap().contains_key("a-b"));
+        let tree = map.segments.as_ref().unwrap();
+        assert_eq!(tree.size(), 1);
+        assert_eq!(
+            &*tree
+                .locate_in_envelope_intersecting(rstar::AABB::from_corners(
+                    RawPoint::new(-1.0, -1.0),
+                    RawPoint::new(2.0, 2.0),
+                ))
+                .next()
+                .unwrap()
+                .id,
+            "a-b"
+        );
     }
 
     // ---------- notificaciones y marcadores ----------
+
+    #[test]
+    fn line_at_returns_closest_line_within_tolerance() {
+        let mut map = Map::new();
+        map.add_hashmap_points(sample_points());
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("horizontal"),
+            RawPoint::new(0.0, 0.0),
+            RawPoint::new(10.0, 0.0),
+        ));
+        lines.push(MapSegment::new(
+            Rc::from("vertical"),
+            RawPoint::new(20.0, -5.0),
+            RawPoint::new(20.0, 5.0),
+        ));
+        map.add_lines(lines);
+
+        // 1.5 units above the horizontal segment.
+        let hit = map.line_at([5.0, 1.5], 2.0).expect("line must be hit");
+        assert_eq!(&*hit, "horizontal");
+
+        // Closest to the vertical segment.
+        let hit = map.line_at([19.0, 0.0], 2.0).expect("line must be hit");
+        assert_eq!(&*hit, "vertical");
+    }
+
+    #[test]
+    fn line_at_returns_none_beyond_tolerance() {
+        let mut map = Map::new();
+        map.add_hashmap_points(sample_points());
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("1-2"),
+            RawPoint::new(0.0, 0.0),
+            RawPoint::new(10.0, 10.0),
+        ));
+        map.add_lines(lines);
+
+        // Distance from (5,4) to the diagonal segment (0,0)-(10,10) is
+        // |5-4|/sqrt(2) ~= 0.707.
+        assert!(map.line_at([5.0, 4.0], 0.8).is_some());
+        assert!(map.line_at([5.0, 4.0], 0.5).is_none());
+        assert!(map.line_at([100.0, 100.0], 5.0).is_none());
+    }
+
+    #[test]
+    fn line_at_returns_none_without_lines() {
+        let map = Map::new();
+        assert!(map.line_at([0.0, 0.0], 10.0).is_none());
+    }
+
+    #[test]
+    fn line_at_negative_tolerance_behaves_like_zero() {
+        let mut map = Map::new();
+        map.add_hashmap_points(sample_points());
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("1-2"),
+            RawPoint::new(0.0, 0.0),
+            RawPoint::new(10.0, 10.0),
+        ));
+        map.add_lines(lines);
+
+        // Exact point on the segment is hit even with tolerance clamped to 0.
+        assert!(map.line_at([5.0, 5.0], -1.0).is_some());
+        assert!(map.line_at([5.0, 5.1], -1.0).is_none());
+    }
 
     #[test]
     fn notify_inserts_and_updates_entities() {

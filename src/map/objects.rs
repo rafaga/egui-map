@@ -1,13 +1,15 @@
 //! Data types consumed by the [`Map`](super::Map) widget.
 //!
 //! This module contains the geometry primitives ([`RawPoint`], [`RawLine`]),
-//! the map content types ([`MapPoint`], [`MapLine`], [`MapLabel`]) and the
+//! the map content types ([`MapPoint`], [`MapSegment`], [`MapLabel`]) and the
 //! customization points of the widget: [`MapSettings`], [`MapStyle`],
 //! [`VisibilitySetting`], [`ContextMenuManager`] and [`NodeTemplate`].
 
 use egui::{Align2, Color32, FontFamily, FontId, Pos2, Stroke, Ui};
+use rstar::AABB;
 use std::convert::{From, Into};
 use std::ops::{Add, Div, DivAssign, Mul, MulAssign, Sub};
+use std::rc::Rc;
 use std::time::Instant;
 
 /// A point (or vector) in 2D map coordinates.
@@ -28,7 +30,7 @@ use std::time::Instant;
 /// assert_eq!((a + b).components, [4.0, 1.0]);
 /// assert_eq!((a * 2.0f32).components, [2.0, 4.0]);
 /// ```
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct RawPoint {
     /// The `x` and `y` components of the point.
     pub components: [f32; 2],
@@ -38,6 +40,27 @@ impl RawPoint {
     /// Creates a point from its `x` and `y` coordinates.
     pub fn new(x: f32, y: f32) -> Self {
         Self { components: [x, y] }
+    }
+}
+
+impl rstar::Point for RawPoint {
+    type Scalar = f32;
+    const DIMENSIONS: usize = 2;
+
+    fn generate(mut generator: impl FnMut(usize) -> Self::Scalar) -> Self {
+        let mut components = [0.0; 2];
+        for (i, component) in components.iter_mut().enumerate() {
+            *component = generator(i);
+        }
+        Self { components }
+    }
+
+    fn nth(&self, index: usize) -> Self::Scalar {
+        self.components[index]
+    }
+
+    fn nth_mut(&mut self, index: usize) -> &mut Self::Scalar {
+        &mut self.components[index]
     }
 }
 
@@ -373,6 +396,40 @@ impl RawLine {
         let y = (self.points[0].components[1] + self.points[1].components[1]) / 2.0;
         RawPoint::new(x, y)
     }
+
+    /// Returns the Euclidean distance from `point` to the closest point on
+    /// this segment.
+    ///
+    /// The closest point is the perpendicular projection of `point` onto the
+    /// segment's supporting line, clamped to the segment itself; for a
+    /// zero-length segment it is simply the distance to the endpoint.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use egui_map::map::objects::{RawLine, RawPoint};
+    ///
+    /// let line = RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 0.0));
+    /// assert_eq!(line.distance_to_point(RawPoint::new(5.0, 3.0)), 3.0);
+    /// // Beyond the end of the segment, the endpoint is the closest point.
+    /// assert_eq!(line.distance_to_point(RawPoint::new(14.0, 0.0)), 4.0);
+    /// ```
+    pub fn distance_to_point(self, point: RawPoint) -> f32 {
+        let [a, b] = self.points;
+        let ab = b - a;
+        let ap = point - a;
+        let len_sq = ab.components[0].powi(2) + ab.components[1].powi(2);
+        if len_sq == 0.0 {
+            // Degenerate segment: both endpoints coincide.
+            return (ap.components[0].powi(2) + ap.components[1].powi(2)).sqrt();
+        }
+        let t = ((ap.components[0] * ab.components[0] + ap.components[1] * ab.components[1])
+            / len_sq)
+            .clamp(0.0, 1.0);
+        let closest = a + ab * t;
+        let d = point - closest;
+        (d.components[0].powi(2) + d.components[1].powi(2)).sqrt()
+    }
 }
 
 impl From<RawLine> for [Pos2; 2] {
@@ -544,25 +601,52 @@ impl MapLabel {
     }
 }
 
-/// A connection line between two points on the map.
+/// A connection line between two points on the map, ready to be stored in an
+/// [`rstar::RTree`].
 ///
-/// Lines are installed with [`Map::add_lines`](super::Map::add_lines), keyed by
-/// an id that nodes reference through [`MapPoint::connections`].
+/// `MapSegment` is the line object of the widget: it carries the segment
+/// geometry ([`RawLine`]) plus its precomputed axis-aligned bounding box
+/// ([`AABB`]), which the R-tree uses as the spatial envelope for broad-phase
+/// viewport culling and hit-testing. Lines are installed with
+/// [`Map::add_lines`](super::Map::add_lines), keyed by an id that nodes
+/// reference through [`MapPoint::connections`].
 #[derive(Clone, Debug)]
-pub struct MapLine {
-    /// Optional identifier of the line.
-    pub id: Option<String>,
+pub struct MapSegment {
+    /// Identifier shared with the line key (and with the
+    /// [`MapPoint::connections`] of the endpoint nodes).
+    pub id: Rc<str>,
     /// The segment geometry, in map coordinates.
     pub raw_line: RawLine,
+    /// Axis-aligned bounding box of the segment, in map coordinates.
+    pub aabb: AABB<RawPoint>,
 }
 
-impl MapLine {
-    /// Creates a line between `point1` and `point2` with no id.
-    pub fn new(point1: RawPoint, point2: RawPoint) -> Self {
-        MapLine {
-            id: None,
+impl MapSegment {
+    /// Creates a segment for `id` from `point1` to `point2`, computing its
+    /// bounding box.
+    pub fn new(id: Rc<str>, point1: RawPoint, point2: RawPoint) -> Self {
+        Self {
+            id,
             raw_line: RawLine::new(point1, point2),
+            aabb: AABB::from_corners(
+                RawPoint::new(
+                    point1.components[0].min(point2.components[0]),
+                    point1.components[1].min(point2.components[1]),
+                ),
+                RawPoint::new(
+                    point1.components[0].max(point2.components[0]),
+                    point1.components[1].max(point2.components[1]),
+                ),
+            ),
         }
+    }
+}
+
+impl rstar::RTreeObject for MapSegment {
+    type Envelope = AABB<RawPoint>;
+
+    fn envelope(&self) -> Self::Envelope {
+        self.aabb
     }
 }
 
@@ -579,8 +663,10 @@ pub struct MapPoint {
     ///
     /// Each entry must match a key of the map passed to
     /// [`Map::add_lines`](super::Map::add_lines). The usual pattern is to push
-    /// the same line id into the `connections` of **both** endpoint nodes; a
-    /// line is drawn as soon as any node referencing it becomes visible.
+    /// the same line id into the `connections` of **both** endpoint nodes.
+    /// Line visibility is computed from the segment bounding boxes (R-tree),
+    /// not from node visibility, so a line is drawn whenever its bounding box
+    /// intersects the viewport.
     pub connections: Vec<String>,
     /// Node identifier, used for lookups, notifications and markers.
     id: usize,
@@ -931,6 +1017,46 @@ mod tests {
         assert_eq!(p.components, [3.5, -2.0]);
     }
 
+    // ---------- MapSegment ----------
+
+    #[test]
+    fn map_segment_new_computes_tight_aabb() {
+        let seg = MapSegment::new(
+            Rc::from("1-2"),
+            RawPoint::new(10.0, -5.0),
+            RawPoint::new(-2.0, 7.0),
+        );
+        assert_eq!(&*seg.id, "1-2");
+        assert_eq!(seg.aabb.lower().components, [-2.0, -5.0]);
+        assert_eq!(seg.aabb.upper().components, [10.0, 7.0]);
+        assert_eq!(seg.raw_line.points[0].components, [10.0, -5.0]);
+        assert_eq!(seg.raw_line.points[1].components, [-2.0, 7.0]);
+    }
+
+    #[test]
+    fn map_segment_envelope_returns_its_aabb() {
+        let seg = MapSegment::new(
+            Rc::from("a"),
+            RawPoint::new(0.0, 0.0),
+            RawPoint::new(4.0, 2.0),
+        );
+        let envelope: AABB<RawPoint> = rstar::RTreeObject::envelope(&seg);
+        assert_eq!(envelope.lower().components, [0.0, 0.0]);
+        assert_eq!(envelope.upper().components, [4.0, 2.0]);
+    }
+
+    #[test]
+    fn map_segment_degenerate_line_has_point_aabb() {
+        // A zero-length segment must still produce a valid (empty-area) AABB.
+        let seg = MapSegment::new(
+            Rc::from("p"),
+            RawPoint::new(3.0, 3.0),
+            RawPoint::new(3.0, 3.0),
+        );
+        assert_eq!(seg.aabb.lower().components, [3.0, 3.0]);
+        assert_eq!(seg.aabb.upper().components, [3.0, 3.0]);
+    }
+
     #[test]
     fn raw_point_default() {
         let p = RawPoint::default();
@@ -1184,6 +1310,27 @@ mod tests {
     }
 
     #[test]
+    fn raw_line_distance_to_point_on_segment() {
+        let line = RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 0.0));
+        assert_eq!(line.distance_to_point(RawPoint::new(5.0, 3.0)), 3.0);
+        assert_eq!(line.distance_to_point(RawPoint::new(5.0, 0.0)), 0.0);
+    }
+
+    #[test]
+    fn raw_line_distance_to_point_beyond_endpoints() {
+        let line = RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 0.0));
+        // Past the end of the segment, the closest point is the endpoint.
+        assert_eq!(line.distance_to_point(RawPoint::new(14.0, 0.0)), 4.0);
+        assert_eq!(line.distance_to_point(RawPoint::new(-3.0, -4.0)), 5.0);
+    }
+
+    #[test]
+    fn raw_line_distance_to_point_degenerate_segment() {
+        let line = RawLine::new(RawPoint::new(1.0, 1.0), RawPoint::new(1.0, 1.0));
+        assert_eq!(line.distance_to_point(RawPoint::new(4.0, 5.0)), 5.0);
+    }
+
+    #[test]
     fn raw_line_into_pos2_array() {
         let line = RawLine::new(RawPoint::new(1.0, 2.0), RawPoint::new(3.0, 4.0));
         let arr: [Pos2; 2] = line.into();
@@ -1309,18 +1456,6 @@ mod tests {
         let l = MapLabel::default();
         assert_eq!(l.text, String::new());
         assert_eq!(l.center, Pos2::new(0.0, 0.0));
-    }
-
-    // ---------- MapLine ----------
-
-    #[test]
-    fn map_line_new() {
-        let a = RawPoint::new(1.0, 2.0);
-        let b = RawPoint::new(3.0, 4.0);
-        let line = MapLine::new(a, b);
-        assert!(line.id.is_none());
-        assert_eq!(line.raw_line.points[0].components, [1.0, 2.0]);
-        assert_eq!(line.raw_line.points[1].components, [3.0, 4.0]);
     }
 
     // ---------- MapPoint ----------
