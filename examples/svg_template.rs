@@ -6,7 +6,7 @@
 
 use eframe::egui::{self, Align2, Color32, Pos2, Stroke, Ui, Vec2};
 use egui_map::map::Map;
-use egui_map::map::objects::{MapLine, MapPoint, NodeTemplate, RawPoint, VisibilitySetting};
+use egui_map::map::objects::{MapPoint, NodeTemplate, RawLine, RawPoint, VisibilitySetting};
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
@@ -103,7 +103,7 @@ fn main() -> eframe::Result<()> {
     for id in ids {
         let point1 = points.get(&id[0]).unwrap();
         let point2 = points.get(&id[1]).unwrap();
-        let line = MapLine::new(point1.raw_point, point2.raw_point);
+        let line = RawLine::new(point1.raw_point, point2.raw_point);
         lines.entry(cont.to_string()).or_insert(line);
         cont += 1;
     }

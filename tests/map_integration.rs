@@ -2,7 +2,7 @@
 
 use egui_map::map::Map;
 use egui_map::map::objects::{
-    MapLabel, MapLine, MapPoint, MapSettings, RawLine, RawPoint, VisibilitySetting,
+    MapLabel, MapPoint, MapSettings, RawLine, RawPoint, VisibilitySetting,
 };
 use std::collections::HashMap;
 use std::time::Instant;
@@ -65,7 +65,7 @@ fn map_add_labels_and_lines() {
     let mut lines = HashMap::new();
     lines.insert(
         "1-2".to_string(),
-        MapLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)),
+        RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)),
     );
     map.add_lines(lines);
 }

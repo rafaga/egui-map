@@ -5,7 +5,7 @@
 
 use eframe::egui;
 use egui_map::map::Map;
-use egui_map::map::objects::{MapLabel, MapLine, MapPoint, RawPoint};
+use egui_map::map::objects::{MapLabel, MapPoint, RawLine, RawPoint};
 use std::collections::HashMap;
 
 fn main() -> eframe::Result<()> {
@@ -38,11 +38,11 @@ fn main() -> eframe::Result<()> {
     map.add_lines(HashMap::from([
         (
             "1-2".to_string(),
-            MapLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(100.0, 50.0)),
+            RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(100.0, 50.0)),
         ),
         (
             "1-3".to_string(),
-            MapLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(50.0, -80.0)),
+            RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(50.0, -80.0)),
         ),
     ]));
 

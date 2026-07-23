@@ -1,6 +1,6 @@
 [package]
 name = "egui-map"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 authors = ["Rafael Amador <rafaga@duck.com"]
 description = "Visual component to draw a map on screen."
@@ -44,6 +44,7 @@ debug_overlay = []
 egui = { version = "0.35.0", features = ["bytemuck"]}
 kdtree = { version = "0.8.0" }
 puffin = { version = "0.20.0", optional=true, default-features = false }
+rstar = "0.13.0"
 
 [dev-dependencies]
 eframe = "0.35.0"

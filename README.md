@@ -45,7 +45,7 @@ map.add_hashmap_points(points);
 Lines are wired in three steps: create the nodes, register a unique connection id in the `connections` of **both** endpoints, and load the line geometry keyed by that same id:
 
 ```rust
-use egui_map::map::objects::{MapLine, MapPoint, RawPoint};
+use egui_map::map::objects::{MapPoint, RawLine, RawPoint};
 use std::collections::HashMap;
 
 let mut points: HashMap<usize, MapPoint> = HashMap::new();
@@ -59,12 +59,12 @@ for id in [1, 2] {
 map.add_hashmap_points(points);
 
 // Line geometry, keyed by the same connection id.
-let mut lines: HashMap<String, MapLine> = HashMap::new();
-lines.insert("1-2".to_string(), MapLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)));
+let mut lines: HashMap<String, RawLine> = HashMap::new();
+lines.insert("1-2".to_string(), RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)));
 map.add_lines(lines);
 ```
 
-A line is only drawn while the zoom level is above `MapSettings::line_visible_zoom` and at least one of its endpoints is inside the viewport.
+A line is only drawn while the zoom level is above `MapSettings::line_visible_zoom` and its bounding box intersects the viewport. Segments are culled broad-phase with an R-tree, so long lines crossing the view are drawn even when both endpoints lie outside of it.
 
 ### Custom node rendering and animations
 
