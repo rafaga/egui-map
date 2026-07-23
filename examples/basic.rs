@@ -5,7 +5,7 @@
 
 use eframe::egui;
 use egui_map::map::Map;
-use egui_map::map::objects::{MapLabel, MapPoint, RawLine, RawPoint};
+use egui_map::map::objects::{MapLabel, MapPoint, MapSegment, RawPoint};
 use std::collections::HashMap;
 
 fn main() -> eframe::Result<()> {
@@ -35,16 +35,17 @@ fn main() -> eframe::Result<()> {
     // 3. Load the nodes, then the line geometry keyed by the same ids.
     let mut map = Map::new();
     map.add_hashmap_points(points);
-    map.add_lines(HashMap::from([
-        (
-            "1-2".to_string(),
-            RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(100.0, 50.0)),
-        ),
-        (
-            "1-3".to_string(),
-            RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(50.0, -80.0)),
-        ),
-    ]));
+    let seg1 = MapSegment::new(
+        std::rc::Rc::from("1-2"),
+        RawPoint::new(0.0, 0.0),
+        RawPoint::new(100.0, 50.0),
+    );
+    let seg2 = MapSegment::new(
+        std::rc::Rc::from("1-3"),
+        RawPoint::new(0.0, 0.0),
+        RawPoint::new(50.0, -80.0),
+    );
+    map.add_lines(vec![seg1, seg2]);
 
     // A free-floating label. Its position is in screen coordinates.
     map.add_labels(vec![MapLabel {

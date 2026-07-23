@@ -26,13 +26,14 @@
 //! 2. For every connection, choose a unique string id and push it into
 //!    [`MapPoint::connections`] of **both** endpoint nodes.
 //! 3. Load the nodes with [`Map::add_hashmap_points`], then load a
-//!    [`HashMap`] of [`RawLine`] keyed by those same connection ids with
-//!    [`Map::add_lines`].
+//!    [`Vec`] of [`MapSegment`] keyed by those same connection ids and
+//!    add it to the widget with [`Map::add_lines`].
 //!
 //! ```
 //! use egui_map::map::Map;
-//! use egui_map::map::objects::{MapPoint, RawLine, RawPoint};
+//! use egui_map::map::objects::{MapPoint, MapSegment, RawPoint};
 //! use std::collections::HashMap;
+//! use std::rc::Rc;
 //!
 //! // 1. Create the nodes.
 //! let mut points: HashMap<usize, MapPoint> = HashMap::new();
@@ -52,10 +53,9 @@
 //! map.add_hashmap_points(points);
 //!
 //! // 3. Provide the line geometry keyed by the same connection id.
-//! let mut lines: HashMap<String, RawLine> = HashMap::new();
-//! lines.insert(
-//!     "1-2".to_string(),
-//!     RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)),
+//! let mut lines: Vec<MapSegment> = Vec::new();
+//! lines.push(
+//!     MapSegment::new(Rc::from("1-2"), RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0))
 //! );
 //! map.add_lines(lines);
 //! ```
@@ -481,18 +481,13 @@ impl Map {
     ///
     /// See the [module-level example](self#connecting-nodes-with-lines) for
     /// the complete wiring.
-    pub fn add_lines(&mut self, lines: HashMap<String, RawLine>) {
+    pub fn add_lines(&mut self, segments: Vec<MapSegment>) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("add_lines");
         // Intern the keys as Rc<str> and build the broad-phase spatial index
         // over the line bounding boxes, so viewport culling and hit-testing
         // discard whole regions without touching every segment.
-        let segments: Vec<MapSegment> = lines
-            .into_iter()
-            .map(|(key, line)| {
-                MapSegment::new(Rc::from(key.as_str()), line.points[0], line.points[1])
-            })
-            .collect();
+
         self.segments = Some(rstar::RTree::bulk_load(segments));
     }
 
@@ -1073,11 +1068,12 @@ mod tests {
         // needed at all.
         let mut map = Map::new();
         map.set_zoom(1.0);
-        let mut lines = HashMap::new();
-        lines.insert(
-            "long".to_string(),
-            RawLine::new(RawPoint::new(-4000.0, -1.0), RawPoint::new(4000.0, 1.0)),
-        );
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("long"),
+            RawPoint::new(-4000.0, -1.0),
+            RawPoint::new(4000.0, 1.0),
+        ));
         map.add_lines(lines);
         map.set_pos([0.0, 0.0]);
 
@@ -1089,14 +1085,12 @@ mod tests {
     fn segment_outside_viewport_is_not_painted() {
         let mut map = Map::new();
         map.set_zoom(1.0);
-        let mut lines = HashMap::new();
-        lines.insert(
-            "far".to_string(),
-            RawLine::new(
-                RawPoint::new(10_000.0, 10_000.0),
-                RawPoint::new(10_100.0, 10_100.0),
-            ),
-        );
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("far"),
+            RawPoint::new(10_000.0, 10_000.0),
+            RawPoint::new(10_100.0, 10_100.0),
+        ));
         map.add_lines(lines);
         map.set_pos([0.0, 0.0]);
 
@@ -1107,11 +1101,12 @@ mod tests {
     fn add_lines_builds_segment_tree() {
         let mut map = Map::new();
         map.add_hashmap_points(sample_points());
-        let mut lines = HashMap::new();
-        lines.insert(
-            "1-2".to_string(),
-            RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)),
-        );
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("1-2"),
+            RawPoint::new(0.0, 0.0),
+            RawPoint::new(10.0, 10.0),
+        ));
         map.add_lines(lines);
 
         let tree = map
@@ -1146,11 +1141,12 @@ mod tests {
         let mut point_b = MapPoint::new(1, RawPoint::new(50.0, 50.0));
         point_b.connections.push("a0".to_string());
 
-        let mut lines = HashMap::new();
-        lines.insert(
-            "a0".to_string(),
-            RawLine::new(point_a.raw_point, point_b.raw_point),
-        );
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("a0"),
+            point_a.raw_point,
+            point_b.raw_point,
+        ));
 
         let mut points = HashMap::new();
         points.insert(0usize, point_a);
@@ -1278,11 +1274,12 @@ mod tests {
     #[test]
     fn add_lines_stores_lines() {
         let mut map = Map::new();
-        let mut lines = HashMap::new();
-        lines.insert(
-            "a-b".to_string(),
-            RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(1.0, 1.0)),
-        );
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("a-b"),
+            RawPoint::new(0.0, 0.0),
+            RawPoint::new(1.0, 1.0),
+        ));
         map.add_lines(lines);
         let tree = map.segments.as_ref().unwrap();
         assert_eq!(tree.size(), 1);
@@ -1305,15 +1302,17 @@ mod tests {
     fn line_at_returns_closest_line_within_tolerance() {
         let mut map = Map::new();
         map.add_hashmap_points(sample_points());
-        let mut lines = HashMap::new();
-        lines.insert(
-            "horizontal".to_string(),
-            RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 0.0)),
-        );
-        lines.insert(
-            "vertical".to_string(),
-            RawLine::new(RawPoint::new(20.0, -5.0), RawPoint::new(20.0, 5.0)),
-        );
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("horizontal"),
+            RawPoint::new(0.0, 0.0),
+            RawPoint::new(10.0, 0.0),
+        ));
+        lines.push(MapSegment::new(
+            Rc::from("vertical"),
+            RawPoint::new(20.0, -5.0),
+            RawPoint::new(20.0, 5.0),
+        ));
         map.add_lines(lines);
 
         // 1.5 units above the horizontal segment.
@@ -1329,11 +1328,12 @@ mod tests {
     fn line_at_returns_none_beyond_tolerance() {
         let mut map = Map::new();
         map.add_hashmap_points(sample_points());
-        let mut lines = HashMap::new();
-        lines.insert(
-            "1-2".to_string(),
-            RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)),
-        );
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("1-2"),
+            RawPoint::new(0.0, 0.0),
+            RawPoint::new(10.0, 10.0),
+        ));
         map.add_lines(lines);
 
         // Distance from (5,4) to the diagonal segment (0,0)-(10,10) is
@@ -1353,11 +1353,12 @@ mod tests {
     fn line_at_negative_tolerance_behaves_like_zero() {
         let mut map = Map::new();
         map.add_hashmap_points(sample_points());
-        let mut lines = HashMap::new();
-        lines.insert(
-            "1-2".to_string(),
-            RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)),
-        );
+        let mut lines = Vec::new();
+        lines.push(MapSegment::new(
+            Rc::from("1-2"),
+            RawPoint::new(0.0, 0.0),
+            RawPoint::new(10.0, 10.0),
+        ));
         map.add_lines(lines);
 
         // Exact point on the segment is hit even with tolerance clamped to 0.

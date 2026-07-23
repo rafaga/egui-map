@@ -2,9 +2,10 @@
 
 use egui_map::map::Map;
 use egui_map::map::objects::{
-    MapLabel, MapPoint, MapSettings, RawLine, RawPoint, VisibilitySetting,
+    MapLabel, MapPoint, MapSegment, MapSettings, RawPoint, VisibilitySetting,
 };
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::time::Instant;
 
 fn sample_points() -> HashMap<usize, MapPoint> {
@@ -62,11 +63,12 @@ fn map_add_labels_and_lines() {
         center: egui::Pos2::new(3.0, 4.0),
     }]);
 
-    let mut lines = HashMap::new();
-    lines.insert(
-        "1-2".to_string(),
-        RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)),
-    );
+    let mut lines = Vec::new();
+    lines.push(MapSegment::new(
+        Rc::from("1-2"),
+        RawPoint::new(0.0, 0.0),
+        RawPoint::new(10.0, 10.0),
+    ));
     map.add_lines(lines);
 }
 
@@ -98,9 +100,13 @@ fn raw_point_arithmetic_from_outside_crate() {
 
 #[test]
 fn raw_line_geometry_from_outside_crate() {
-    let line = RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(6.0, 8.0));
-    assert_eq!(line.distance(), 10.0);
-    assert_eq!(line.midpoint().components, [3.0, 4.0]);
+    let segment = MapSegment::new(
+        Rc::from("test"),
+        RawPoint::new(0.0, 0.0),
+        RawPoint::new(6.0, 8.0),
+    );
+    assert_eq!(segment.raw_line.distance(), 10.0);
+    assert_eq!(segment.raw_line.midpoint().components, [3.0, 4.0]);
 }
 
 #[test]
