@@ -6,7 +6,6 @@
 use eframe::egui::{self, Align2, Color32, Pos2, Stroke, Ui, Vec2};
 use egui_map::map::Map;
 use egui_map::map::objects::{MapPoint, NodeTemplate, RawPoint, VisibilitySetting};
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -70,7 +69,7 @@ impl NodeTemplate for CircleNodes {
 }
 
 fn main() -> eframe::Result<()> {
-    let mut points = HashMap::new();
+    let mut points = Vec::new();
     for (id, name, x, y) in [
         (1, "Alpha", 0.0, 0.0),
         (2, "Beta", 100.0, 50.0),
@@ -78,11 +77,11 @@ fn main() -> eframe::Result<()> {
     ] {
         let mut point = MapPoint::new(id, RawPoint::new(x, y));
         point.set_name(name.to_string());
-        points.insert(id, point);
+        points.push(point);
     }
 
     let mut map = Map::new();
-    map.add_hashmap_points(points);
+    map.add_points(points);
     map.set_node_template(Rc::new(CircleNodes));
     // Show node names on hover so selection_ui gets called.
     map.settings.node_text_visibility = VisibilitySetting::Hover;

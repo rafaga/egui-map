@@ -82,7 +82,7 @@ use crate::map::objects::{
 use egui::{epaint::CircleShape, widgets::*, *};
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
-use std::collections::HashMap;
+use std::collections::{HashMap};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -358,6 +358,73 @@ impl Map {
             }
         }
     }
+
+/// Loads the node set and (re)builds the spatial index.
+    ///
+    /// This replaces any previously loaded points, computes the bounding box of
+    /// the whole set, centers the view on its midpoint and refreshes the list
+    /// of visible nodes. It must be called at least once before the widget can
+    /// display anything.
+    ///
+    /// The kd-tree built here is what enables viewport culling and
+    /// nearest-neighbor hover lookups, so calling this method on every frame is
+    /// discouraged; call it only when the node set changes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use egui_map::map::Map;
+    /// use egui_map::map::objects::{MapPoint, RawPoint};
+    ///
+    /// let mut points = Vec::new();
+    /// points.push(MapPoint::new(1, RawPoint::new(0.0, 0.0)));
+    /// points.push(MapPoint::new(2, RawPoint::new(10.0, 10.0)));
+    ///
+    /// let mut map = Map::new();
+    /// map.add_points(points);
+    ///
+    /// // The view is centered on the midpoint of the loaded nodes.
+    /// assert_eq!(map.get_pos(), [5.0, 5.0]);
+    /// ```
+    pub fn add_points(&mut self,points: Vec<MapPoint>) {
+        let mut tree = KdTree::<f32, usize, [f32; 2]>::new(2);
+        let mut hash_map = HashMap::new();
+        let mut min = RawPoint::new(f32::INFINITY, f32::INFINITY);
+        let mut max = RawPoint::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
+        for entry in points {
+            for i in 0..min.components.len() {
+                if entry.raw_point.components[i] < min.components[i] {
+                    min.components[i] = entry.raw_point.components[i];
+                }
+                if entry.raw_point.components[i] > max.components[i] {
+                    max.components[i] = entry.raw_point.components[i];
+                }
+            }
+            let _result = tree.add(entry.raw_point.components, entry.get_id());
+            hash_map.insert(entry.get_id(), entry);
+        }
+        // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
+        self.reference.min = min;
+        self.reference.max = max;
+        self.points = Some(hash_map);
+        self.tree = Some(tree);
+        self.reference.pos = RawLine::new(min, max).midpoint();
+        // we create a rect that include every node in the map
+        // Stupid fix because rect area could be infinite
+        // I need to implement a more elegant fix
+        if self.map_area.area() == 0.0 {
+            self.reference.dist = 3000.00;
+        } else {
+            let rect = RawLine::new(
+                RawPoint::from(self.map_area.left_top()),
+                RawPoint::from(self.map_area.right_bottom()),
+            );
+            self.reference.dist = rect.distance();
+        }
+        self.current = self.reference.clone();
+        self.calculate_visible_points();
+    }
+
     /// Loads the node set and (re)builds the spatial index.
     ///
     /// This replaces any previously loaded points, computes the bounding box of
@@ -386,6 +453,7 @@ impl Map {
     /// // The view is centered on the midpoint of the loaded nodes.
     /// assert_eq!(map.get_pos(), [5.0, 5.0]);
     /// ```
+    #[deprecated(since="0.2.3", note="please use `add_points` instead")]
     pub fn add_hashmap_points(&mut self, hash_map: HashMap<usize, MapPoint>) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("add_hashmap_points");
@@ -940,11 +1008,11 @@ mod tests {
     use super::*;
     use std::time::Duration;
 
-    fn sample_points() -> HashMap<usize, MapPoint> {
-        let mut map = HashMap::new();
-        map.insert(1, MapPoint::new(1, RawPoint::new(0.0, 0.0)));
-        map.insert(2, MapPoint::new(2, RawPoint::new(10.0, 10.0)));
-        map.insert(3, MapPoint::new(3, RawPoint::new(-10.0, -10.0)));
+    fn sample_points() -> Vec<MapPoint> {
+        let mut map = Vec::new();
+        map.push( MapPoint::new(1, RawPoint::new(0.0, 0.0)));
+        map.push( MapPoint::new(2, RawPoint::new(10.0, 10.0)));
+        map.push( MapPoint::new(3, RawPoint::new(-10.0, -10.0)));
         map
     }
 
@@ -1007,7 +1075,7 @@ mod tests {
     #[test]
     fn add_hashmap_points_computes_bounds() {
         let mut map = Map::new();
-        map.add_hashmap_points(sample_points());
+        map.add_points(sample_points());
 
         assert_eq!(map.reference.min.components, [-10.0, -10.0]);
         assert_eq!(map.reference.max.components, [10.0, 10.0]);
@@ -1028,7 +1096,7 @@ mod tests {
     #[test]
     fn add_hashmap_points_populates_visible_points() {
         let mut map = Map::new();
-        map.add_hashmap_points(sample_points());
+        map.add_points(sample_points());
         // todos los puntos de muestra caen dentro del radio por defecto
         assert_eq!(map.visible_points.len(), 3);
     }
@@ -1098,7 +1166,7 @@ mod tests {
     #[test]
     fn add_lines_builds_segment_tree() {
         let mut map = Map::new();
-        map.add_hashmap_points(sample_points());
+        map.add_points(sample_points());
         let mut lines = Vec::new();
         lines.push(MapSegment::new(
             Rc::from("1-2"),
@@ -1146,11 +1214,11 @@ mod tests {
             point_b.raw_point,
         ));
 
-        let mut points = HashMap::new();
-        points.insert(0usize, point_a);
-        points.insert(1usize, point_b);
+        let mut points = Vec::new();
+        points.push(point_a);
+        points.push(point_b);
         // Load points before lines — the natural order shown in the examples.
-        map.add_hashmap_points(points);
+        map.add_points(points);
         map.add_lines(lines);
 
         map.set_pos([25.0, 25.0]);
@@ -1234,7 +1302,7 @@ mod tests {
     #[test]
     fn set_pos_from_nodeid_with_valid_id() {
         let mut map = Map::new();
-        map.add_hashmap_points(sample_points());
+        map.add_points(sample_points());
         map.set_pos_from_nodeid(2);
         assert_eq!(map.get_pos(), [10.0, 10.0]);
     }
@@ -1242,7 +1310,7 @@ mod tests {
     #[test]
     fn set_pos_from_nodeid_with_invalid_id_keeps_position() {
         let mut map = Map::new();
-        map.add_hashmap_points(sample_points());
+        map.add_points(sample_points());
         let before = map.reference.pos.components;
         map.set_pos_from_nodeid(999);
         assert_eq!(map.reference.pos.components, before);
@@ -1299,7 +1367,7 @@ mod tests {
     #[test]
     fn line_at_returns_closest_line_within_tolerance() {
         let mut map = Map::new();
-        map.add_hashmap_points(sample_points());
+        map.add_points(sample_points());
         let mut lines = Vec::new();
         lines.push(MapSegment::new(
             Rc::from("horizontal"),
@@ -1325,7 +1393,7 @@ mod tests {
     #[test]
     fn line_at_returns_none_beyond_tolerance() {
         let mut map = Map::new();
-        map.add_hashmap_points(sample_points());
+        map.add_points(sample_points());
         let mut lines = Vec::new();
         lines.push(MapSegment::new(
             Rc::from("1-2"),
@@ -1350,7 +1418,7 @@ mod tests {
     #[test]
     fn line_at_negative_tolerance_behaves_like_zero() {
         let mut map = Map::new();
-        map.add_hashmap_points(sample_points());
+        map.add_points(sample_points());
         let mut lines = Vec::new();
         lines.push(MapSegment::new(
             Rc::from("1-2"),

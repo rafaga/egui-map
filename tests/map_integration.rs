@@ -4,15 +4,14 @@ use egui_map::map::Map;
 use egui_map::map::objects::{
     MapLabel, MapPoint, MapSegment, MapSettings, RawPoint, VisibilitySetting,
 };
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
 
-fn sample_points() -> HashMap<usize, MapPoint> {
-    let mut map = HashMap::new();
-    map.insert(1, MapPoint::new(1, RawPoint::new(0.0, 0.0)));
-    map.insert(2, MapPoint::new(2, RawPoint::new(10.0, 10.0)));
-    map.insert(3, MapPoint::new(3, RawPoint::new(-10.0, -10.0)));
+fn sample_points() -> Vec<MapPoint> {
+    let mut map = Vec::new();
+    map.push(MapPoint::new(1, RawPoint::new(0.0, 0.0)));
+    map.push(MapPoint::new(2, RawPoint::new(10.0, 10.0)));
+    map.push(MapPoint::new(3, RawPoint::new(-10.0, -10.0)));
     map
 }
 
@@ -21,7 +20,7 @@ fn sample_points() -> HashMap<usize, MapPoint> {
 #[test]
 fn map_initial_position_is_points_midpoint() {
     let mut map = Map::new();
-    map.add_hashmap_points(sample_points());
+    map.add_points(sample_points());
     // el punto medio de (-10,-10)..(10,10) es el origen
     assert_eq!(map.get_pos(), [0.0, 0.0]);
 }
@@ -29,7 +28,7 @@ fn map_initial_position_is_points_midpoint() {
 #[test]
 fn map_position_workflow() {
     let mut map = Map::new();
-    map.add_hashmap_points(sample_points());
+    map.add_points(sample_points());
 
     map.set_pos_from_nodeid(2);
     assert_eq!(map.get_pos(), [10.0, 10.0]);
@@ -56,7 +55,7 @@ fn map_zoom_workflow() {
 #[test]
 fn map_add_labels_and_lines() {
     let mut map = Map::new();
-    map.add_hashmap_points(sample_points());
+    map.add_points(sample_points());
 
     map.add_labels(vec![MapLabel {
         text: "The Forge".to_string(),
@@ -75,7 +74,7 @@ fn map_add_labels_and_lines() {
 #[test]
 fn map_notify_and_markers() {
     let mut map = Map::new();
-    map.add_hashmap_points(sample_points());
+    map.add_points(sample_points());
 
     map.notify(1, Instant::now());
     map.update_marker(0, 2);

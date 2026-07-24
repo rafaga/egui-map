@@ -6,11 +6,10 @@
 //use eframe::egui;
 use egui_map::map::Map;
 use egui_map::map::objects::{/*MapLabel,*/ MapPoint, MapSegment, RawPoint};
-use std::collections::HashMap;
 
 fn main() -> eframe::Result<()> {
     // 1. Create the nodes, keyed by id.
-    let mut points = HashMap::new();
+    let mut points = Vec::new();
     for (id, name, x, y) in [
         (1, "Alpha", 0.0, 0.0),
         (2, "Beta", 100.0, 50.0),
@@ -18,14 +17,14 @@ fn main() -> eframe::Result<()> {
     ] {
         let mut point = MapPoint::new(id, RawPoint::new(x, y));
         point.set_name(name.to_string());
-        points.insert(id, point);
+        points.push(point);
     }
 
     // 2. Register each connection id on BOTH endpoint nodes.
     for (line_id, endpoints) in [("1-2", [1, 2]), ("1-3", [1, 3])] {
         for id in endpoints {
             points
-                .get_mut(&id)
+                .get_mut(id)
                 .unwrap()
                 .connections
                 .push(line_id.to_string());
@@ -34,7 +33,7 @@ fn main() -> eframe::Result<()> {
 
     // 3. Load the nodes, then the line geometry keyed by the same ids.
     let mut map = Map::new();
-    map.add_hashmap_points(points);
+    map.add_points(points);
     let seg1 = MapSegment::new(
         std::rc::Rc::from("1-2"),
         RawPoint::new(0.0, 0.0),
