@@ -7,7 +7,6 @@
 use eframe::egui::{self, Align2, Color32, Pos2, Stroke, Ui, Vec2};
 use egui_map::map::Map;
 use egui_map::map::objects::{MapPoint, MapSegment, NodeTemplate, RawPoint, VisibilitySetting};
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -79,7 +78,7 @@ impl NodeTemplate for SvgNodes {
 }
 
 fn main() -> eframe::Result<()> {
-    let mut points = HashMap::new();
+    let mut points = Vec::new();
     for (id, name, x, y) in [
         (1, "router-01", 0.0, 0.0),
         (2, "switch-01", 100.0, 50.0),
@@ -95,14 +94,14 @@ fn main() -> eframe::Result<()> {
             }
             _ => point.connections.push(1.to_string()),
         }
-        points.insert(id, point);
+        points.push(point);
     }
     let mut vec_segmnents = Vec::new();
     let ids = vec![[1, 2], [2, 3]];
     let mut cont = 0;
     for id in ids {
-        let point1 = points.get(&id[0]).unwrap();
-        let point2 = points.get(&id[1]).unwrap();
+        let point1 = points.get(id[0]).unwrap();
+        let point2 = points.get(id[1]).unwrap();
         let line = MapSegment::new(
             Rc::from(cont.to_string()),
             point1.raw_point,
@@ -112,7 +111,7 @@ fn main() -> eframe::Result<()> {
         cont += 1;
     }
     let mut map = Map::new();
-    map.add_hashmap_points(points);
+    map.add_points(points);
     map.add_lines(vec_segmnents);
     map.set_node_template(Rc::new(SvgNodes));
     // Show node names on hover so selection_ui gets called.
