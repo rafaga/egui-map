@@ -584,12 +584,10 @@ impl Map {
             puffin::profile_scope!("asign_visual_style");
 
             self.current_index = style_index;
-            let map_style = self.current_style();
-            let visuals = &mut ui_obj.style_mut().visuals;
-            visuals.extreme_bg_color = map_style.background_color;
-            if let Some(border) = map_style.border {
-                visuals.window_stroke = border;
-            }
+            let map_style = self.settings.styles.get_mut(style_index).unwrap();
+            let visuals = &ui_obj.style().visuals;
+            map_style.background_color = visuals.extreme_bg_color;
+            map_style.border = Some(visuals.window_stroke);
         }
     }
 

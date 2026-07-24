@@ -3,9 +3,9 @@
 //!
 //! Run with: cargo run --example basic
 
-use eframe::egui;
+//use eframe::egui;
 use egui_map::map::Map;
-use egui_map::map::objects::{MapLabel, MapPoint, MapSegment, RawPoint};
+use egui_map::map::objects::{/*MapLabel,*/ MapPoint, MapSegment, RawPoint};
 use std::collections::HashMap;
 
 fn main() -> eframe::Result<()> {
@@ -48,10 +48,10 @@ fn main() -> eframe::Result<()> {
     map.add_lines(vec![seg1, seg2]);
 
     // A free-floating label. Its position is in screen coordinates.
-    map.add_labels(vec![MapLabel {
+    /*map.add_labels(vec![MapLabel {
         text: "Example region".to_string(),
         center: egui::pos2(100.0, 100.0),
-    }]);
+    }]);*/
 
     eframe::run_ui_native(
         "egui-map: basic",
