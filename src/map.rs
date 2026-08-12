@@ -82,6 +82,7 @@ use crate::map::objects::{
 use egui::{epaint::CircleShape, widgets::*, *};
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
+use rstar::RTree;
 use std::collections::{HashMap};
 use std::rc::Rc;
 use std::time::Instant;
@@ -453,7 +454,7 @@ impl Map {
     /// // The view is centered on the midpoint of the loaded nodes.
     /// assert_eq!(map.get_pos(), [5.0, 5.0]);
     /// ```
-    #[deprecated(since="0.2.3", note="please use `add_points` instead")]
+    //#[deprecated(since="0.2.3", note="please use `add_points` instead")]
     pub fn add_hashmap_points(&mut self, hash_map: HashMap<usize, MapPoint>) {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("add_hashmap_points");
@@ -558,6 +559,11 @@ impl Map {
 
         self.segments = Some(rstar::RTree::bulk_load(segments));
     }
+
+    pub fn add_hashmap_lines(&mut self, segments:HashMap<(usize,usize),MapSegment>) {
+        let segments: Vec<MapSegment> = segments.into_iter().map(|(_,v)| v).collect();
+        self.segments = Some(rstar::RTree::bulk_load(segments));
+    }   
 
     fn adjust_bounds(&mut self) {
         #[cfg(feature = "puffin")]
