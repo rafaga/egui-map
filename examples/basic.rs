@@ -5,7 +5,7 @@
 
 //use eframe::egui;
 use egui_map::map::Map;
-use egui_map::map::objects::{/*MapLabel,*/ MapPoint, MapSegment, RawPoint};
+use egui_map::map::objects::{/*MapLabel,*/ MapPoint, MapSegment};
 
 fn main() -> eframe::Result<()> {
     // 1. Create the nodes, keyed by id.
@@ -15,35 +15,23 @@ fn main() -> eframe::Result<()> {
         (2, "Beta", 100.0, 50.0),
         (3, "Gamma", 50.0, -80.0),
     ] {
-        let mut point = MapPoint::new(id, RawPoint::new(x, y));
+        let mut point = MapPoint::new(id, [x, y]);
         point.set_name(name.to_string());
         points.push(point);
     }
 
     // 2. Register each connection id on BOTH endpoint nodes.
-    for (line_id, endpoints) in [("1-2", [1, 2]), ("1-3", [1, 3])] {
+    for (line_id, endpoints) in [((1, 2), [1, 2]), ((1, 3), [1, 3])] {
         for id in endpoints {
-            points
-                .get_mut(id)
-                .unwrap()
-                .connections
-                .push(line_id.to_string());
+            points.get_mut(id).unwrap().connections.push(line_id);
         }
     }
 
     // 3. Load the nodes, then the line geometry keyed by the same ids.
     let mut map = Map::new();
     map.add_points(points);
-    let seg1 = MapSegment::new(
-        std::rc::Rc::from("1-2"),
-        RawPoint::new(0.0, 0.0),
-        RawPoint::new(100.0, 50.0),
-    );
-    let seg2 = MapSegment::new(
-        std::rc::Rc::from("1-3"),
-        RawPoint::new(0.0, 0.0),
-        RawPoint::new(50.0, -80.0),
-    );
+    let seg1 = MapSegment::new((1, 2), [0.0, 0.0], [100.0, 50.0]);
+    let seg2 = MapSegment::new((1, 3), [0.0, 0.0], [50.0, -80.0]);
     map.add_lines(vec![seg1, seg2]);
 
     // A free-floating label. Its position is in screen coordinates.

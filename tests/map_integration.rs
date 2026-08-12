@@ -2,16 +2,15 @@
 
 use egui_map::map::Map;
 use egui_map::map::objects::{
-    MapLabel, MapPoint, MapSegment, MapSettings, RawPoint, VisibilitySetting,
+    MapLabel, MapPoint, MapSegment, MapSettings, RawLine, RawPoint, VisibilitySetting,
 };
-use std::rc::Rc;
 use std::time::Instant;
 
 fn sample_points() -> Vec<MapPoint> {
     let mut map = Vec::new();
-    map.push(MapPoint::new(1, RawPoint::new(0.0, 0.0)));
-    map.push(MapPoint::new(2, RawPoint::new(10.0, 10.0)));
-    map.push(MapPoint::new(3, RawPoint::new(-10.0, -10.0)));
+    map.push(MapPoint::new(1, [0.0, 0.0]));
+    map.push(MapPoint::new(2, [10.0, 10.0]));
+    map.push(MapPoint::new(3, [-10.0, -10.0]));
     map
 }
 
@@ -63,11 +62,7 @@ fn map_add_labels_and_lines() {
     }]);
 
     let mut lines = Vec::new();
-    lines.push(MapSegment::new(
-        Rc::from("1-2"),
-        RawPoint::new(0.0, 0.0),
-        RawPoint::new(10.0, 10.0),
-    ));
+    lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]));
     map.add_lines(lines);
 }
 
@@ -99,22 +94,21 @@ fn raw_point_arithmetic_from_outside_crate() {
 
 #[test]
 fn raw_line_geometry_from_outside_crate() {
-    let segment = MapSegment::new(
-        Rc::from("test"),
-        RawPoint::new(0.0, 0.0),
-        RawPoint::new(6.0, 8.0),
-    );
-    assert_eq!(segment.raw_line.distance(), 10.0);
-    assert_eq!(segment.raw_line.midpoint().components, [3.0, 4.0]);
+    let segment = MapSegment::new((1, 2), [0.0, 0.0], [6.0, 8.0]);
+    // `MapSegment` only carries `point1`/`point2` (like `sde::objects::SdeSegment`);
+    // build a `RawLine` from them for the distance/midpoint math.
+    let line = RawLine::new(RawPoint::from(segment.point1), RawPoint::from(segment.point2));
+    assert_eq!(line.distance(), 10.0);
+    assert_eq!(line.midpoint().components, [3.0, 4.0]);
 }
 
 #[test]
 fn map_point_api_from_outside_crate() {
-    let mut point = MapPoint::new(30000142, RawPoint::new(1.0, 2.0));
+    let mut point = MapPoint::new(30000142, [1.0, 2.0]);
     assert_eq!(point.get_id(), 30000142);
     point.set_name("Jita".to_string());
     assert_eq!(point.get_name(), "Jita");
-    point.connections.push("1-2".to_string());
+    point.connections.push((30000142, 30000144));
     assert_eq!(point.connections.len(), 1);
 }
 

@@ -23,41 +23,35 @@
 //! Lines are wired up in three steps:
 //!
 //! 1. Create the nodes as a [`HashMap`] keyed by node id.
-//! 2. For every connection, choose a unique string id and push it into
+//! 2. For every connection, choose a unique `(usize, usize)` id -- typically
+//!    the pair of node ids it joins -- and push it into
 //!    [`MapPoint::connections`] of **both** endpoint nodes.
 //! 3. Load the nodes with [`Map::add_hashmap_points`], then load a
-//!    [`Vec`] of [`MapSegment`] keyed by those same connection ids and
-//!    add it to the widget with [`Map::add_lines`].
+//!    [`HashMap`] of [`MapSegment`] keyed by those same connection ids and
+//!    add it to the widget with [`Map::add_hashmap_lines`].
 //!
 //! ```
 //! use egui_map::map::Map;
-//! use egui_map::map::objects::{MapPoint, MapSegment, RawPoint};
+//! use egui_map::map::objects::{MapPoint, MapSegment};
 //! use std::collections::HashMap;
-//! use std::rc::Rc;
 //!
 //! // 1. Create the nodes.
 //! let mut points: HashMap<usize, MapPoint> = HashMap::new();
-//! points.insert(1, MapPoint::new(1, RawPoint::new(0.0, 0.0)));
-//! points.insert(2, MapPoint::new(2, RawPoint::new(10.0, 10.0)));
+//! points.insert(1, MapPoint::new(1, [0.0, 0.0]));
+//! points.insert(2, MapPoint::new(2, [10.0, 10.0]));
 //!
 //! // 2. Register the connection id on both endpoints.
 //! for id in [1, 2] {
-//!     points
-//!         .get_mut(&id)
-//!         .unwrap()
-//!         .connections
-//!         .push("1-2".to_string());
+//!     points.get_mut(&id).unwrap().connections.push((1, 2));
 //! }
 //!
 //! let mut map = Map::new();
 //! map.add_hashmap_points(points);
 //!
 //! // 3. Provide the line geometry keyed by the same connection id.
-//! let mut lines: Vec<MapSegment> = Vec::new();
-//! lines.push(
-//!     MapSegment::new(Rc::from("1-2"), RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0))
-//! );
-//! map.add_lines(lines);
+//! let mut lines: HashMap<(usize, usize), MapSegment> = HashMap::new();
+//! lines.insert((1, 2), MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]));
+//! map.add_hashmap_lines(lines);
 //! ```
 //!
 //! A line is only drawn while the zoom level is above
@@ -82,7 +76,6 @@ use crate::map::objects::{
 use egui::{epaint::CircleShape, widgets::*, *};
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
-use rstar::RTree;
 use std::collections::{HashMap};
 use std::rc::Rc;
 use std::time::Instant;
@@ -116,11 +109,11 @@ pub mod objects;
 /// ```no_run
 /// # fn example(ui: &mut egui::Ui) {
 /// use egui_map::map::Map;
-/// use egui_map::map::objects::{MapPoint, RawPoint};
+/// use egui_map::map::objects::MapPoint;
 /// use std::collections::HashMap;
 ///
 /// let mut points = HashMap::new();
-/// points.insert(1, MapPoint::new(1, RawPoint::new(0.0, 0.0)));
+/// points.insert(1, MapPoint::new(1, [0.0, 0.0]));
 ///
 /// let mut map = Map::new();
 /// map.add_hashmap_points(points);
@@ -229,7 +222,7 @@ impl Widget for &mut Map {
 
                 for marker in &self.markers {
                     if let Some(point) = self.points.as_ref().unwrap().get(marker.1) {
-                        let adjusted_point = point.raw_point * self.zoom - min_point;
+                        let adjusted_point = RawPoint::from(point.coords) * self.zoom - min_point;
                         if let Some(template) = &self.node_template {
                             template.marker_ui(ui, adjusted_point.into(), self.zoom);
                         } else {
@@ -375,11 +368,11 @@ impl Map {
     ///
     /// ```
     /// use egui_map::map::Map;
-    /// use egui_map::map::objects::{MapPoint, RawPoint};
+    /// use egui_map::map::objects::MapPoint;
     ///
     /// let mut points = Vec::new();
-    /// points.push(MapPoint::new(1, RawPoint::new(0.0, 0.0)));
-    /// points.push(MapPoint::new(2, RawPoint::new(10.0, 10.0)));
+    /// points.push(MapPoint::new(1, [0.0, 0.0]));
+    /// points.push(MapPoint::new(2, [10.0, 10.0]));
     ///
     /// let mut map = Map::new();
     /// map.add_points(points);
@@ -394,14 +387,14 @@ impl Map {
         let mut max = RawPoint::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
         for entry in points {
             for i in 0..min.components.len() {
-                if entry.raw_point.components[i] < min.components[i] {
-                    min.components[i] = entry.raw_point.components[i];
+                if entry.coords[i] < min.components[i] {
+                    min.components[i] = entry.coords[i];
                 }
-                if entry.raw_point.components[i] > max.components[i] {
-                    max.components[i] = entry.raw_point.components[i];
+                if entry.coords[i] > max.components[i] {
+                    max.components[i] = entry.coords[i];
                 }
             }
-            let _result = tree.add(entry.raw_point.components, entry.get_id());
+            let _result = tree.add(entry.coords, entry.get_id());
             hash_map.insert(entry.get_id(), entry);
         }
         // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
@@ -441,12 +434,12 @@ impl Map {
     ///
     /// ```
     /// use egui_map::map::Map;
-    /// use egui_map::map::objects::{MapPoint, RawPoint};
+    /// use egui_map::map::objects::MapPoint;
     /// use std::collections::HashMap;
     ///
     /// let mut points = HashMap::new();
-    /// points.insert(1, MapPoint::new(1, RawPoint::new(0.0, 0.0)));
-    /// points.insert(2, MapPoint::new(2, RawPoint::new(10.0, 10.0)));
+    /// points.insert(1, MapPoint::new(1, [0.0, 0.0]));
+    /// points.insert(2, MapPoint::new(2, [10.0, 10.0]));
     ///
     /// let mut map = Map::new();
     /// map.add_hashmap_points(points);
@@ -464,14 +457,14 @@ impl Map {
 
         for entry in hash_map.iter() {
             for i in 0..min.components.len() {
-                if entry.1.raw_point.components[i] < min.components[i] {
-                    min.components[i] = entry.1.raw_point.components[i];
+                if entry.1.coords[i] < min.components[i] {
+                    min.components[i] = entry.1.coords[i];
                 }
-                if entry.1.raw_point.components[i] > max.components[i] {
-                    max.components[i] = entry.1.raw_point.components[i];
+                if entry.1.coords[i] > max.components[i] {
+                    max.components[i] = entry.1.coords[i];
                 }
             }
-            let _result = tree.add(entry.1.raw_point.into(), *entry.0);
+            let _result = tree.add(entry.1.coords, *entry.0);
         }
 
         // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
@@ -506,7 +499,7 @@ impl Map {
         if let Some(hash_map) = &self.points
             && let Some(map_point) = hash_map.get(&node_id)
         {
-            self.reference.pos = map_point.raw_point;
+            self.reference.pos = RawPoint::from(map_point.coords);
             self.adjust_bounds();
             self.calculate_visible_points();
         }
@@ -560,10 +553,20 @@ impl Map {
         self.segments = Some(rstar::RTree::bulk_load(segments));
     }
 
-    pub fn add_hashmap_lines(&mut self, segments:HashMap<(usize,usize),MapSegment>) {
-        let segments: Vec<MapSegment> = segments.into_iter().map(|(_,v)| v).collect();
+    /// Replaces the set of connection lines between nodes, from a map keyed
+    /// by the same `(usize, usize)` id used in [`MapSegment::id`] and
+    /// referenced by [`MapPoint::connections`].
+    ///
+    /// Equivalent to [`add_lines`](Self::add_lines) but avoids callers having
+    /// to collect their segments into a `Vec` first when they already have
+    /// them keyed in a `HashMap` (e.g. straight from an adapter that mirrors
+    /// them 1:1 by id, with no intermediate ordering to preserve).
+    pub fn add_hashmap_lines(&mut self, segments: HashMap<(usize, usize), MapSegment>) {
+        #[cfg(feature = "puffin")]
+        puffin::profile_scope!("add_hashmap_lines");
+        let segments: Vec<MapSegment> = segments.into_values().collect();
         self.segments = Some(rstar::RTree::bulk_load(segments));
-    }   
+    }
 
     fn adjust_bounds(&mut self) {
         #[cfg(feature = "puffin")]
@@ -811,7 +814,7 @@ impl Map {
             if let Some(system) = hashm.as_ref().unwrap().get(&parsed_point) {
                 #[cfg(feature = "puffin")]
                 puffin::profile_scope!("painting_points_m");
-                let viewport_point = system.raw_point * self.zoom - min_point;
+                let viewport_point = RawPoint::from(system.coords) * self.zoom - min_point;
                 if let Some(node_template) = &self.node_template {
                     if nearest_id.unwrap_or(&0usize) == &system.get_id() {
                         node_template.selection_ui(ui_obj, viewport_point.into(), self.zoom);
@@ -898,10 +901,12 @@ impl Map {
                 self.map_area.width() / 2.0 / self.zoom + padding,
                 self.map_area.height() / 2.0 / self.zoom + padding,
             );
-            let query = rstar::AABB::from_corners(center - half, center + half);
+            let query =
+                rstar::AABB::from_corners((center - half).into(), (center + half).into());
             for segment in segments.locate_in_envelope_intersecting(query) {
-                let pos_a = segment.raw_line.points[0] * self.zoom - min_point;
-                let pos_b = segment.raw_line.points[1] * self.zoom - min_point;
+                let raw_line = segment.raw_line();
+                let pos_a = raw_line.points[0] * self.zoom - min_point;
+                let pos_b = raw_line.points[1] * self.zoom - min_point;
                 shape_vec.push(Shape::line_segment([pos_a.into(), pos_b.into()], stroke));
             }
             painter.extend(shape_vec);
@@ -948,7 +953,7 @@ impl Map {
     /// coordinates first (`map = (screen + origin) / zoom`, see the
     /// [coordinate model](self#coordinate-model)) and pick a tolerance scaled
     /// by `1.0 / zoom` so it stays constant in screen pixels.
-    pub fn line_at(&self, point: [f32; 2], tolerance: f32) -> Option<Rc<str>> {
+    pub fn line_at(&self, point: [f32; 2], tolerance: f32) -> Option<(usize, usize)> {
         #[cfg(feature = "puffin")]
         puffin::profile_scope!("line_at");
         let segments = self.segments.as_ref()?;
@@ -956,13 +961,14 @@ impl Map {
 
         let center = RawPoint::from(point);
         let padding = RawPoint::new(tolerance, tolerance);
-        let query = rstar::AABB::from_corners(center - padding, center + padding);
+        let query =
+            rstar::AABB::from_corners((center - padding).into(), (center + padding).into());
 
-        let mut closest: Option<(f32, Rc<str>)> = None;
+        let mut closest: Option<(f32, (usize, usize))> = None;
         for segment in segments.locate_in_envelope_intersecting(query) {
-            let distance = segment.raw_line.distance_to_point(center);
+            let distance = segment.raw_line().distance_to_point(center);
             if distance <= tolerance && closest.as_ref().is_none_or(|(best, _)| distance < *best) {
-                closest = Some((distance, Rc::clone(&segment.id)));
+                closest = Some((distance, segment.id));
             }
         }
         closest.map(|(_, id)| id)
@@ -1016,9 +1022,9 @@ mod tests {
 
     fn sample_points() -> Vec<MapPoint> {
         let mut map = Vec::new();
-        map.push( MapPoint::new(1, RawPoint::new(0.0, 0.0)));
-        map.push( MapPoint::new(2, RawPoint::new(10.0, 10.0)));
-        map.push( MapPoint::new(3, RawPoint::new(-10.0, -10.0)));
+        map.push( MapPoint::new(1, [0.0, 0.0]));
+        map.push( MapPoint::new(2, [10.0, 10.0]));
+        map.push( MapPoint::new(3, [-10.0, -10.0]));
         map
     }
 
@@ -1141,11 +1147,7 @@ mod tests {
         let mut map = Map::new();
         map.set_zoom(1.0);
         let mut lines = Vec::new();
-        lines.push(MapSegment::new(
-            Rc::from("long"),
-            RawPoint::new(-4000.0, -1.0),
-            RawPoint::new(4000.0, 1.0),
-        ));
+        lines.push(MapSegment::new((1, 2), [-4000.0, -1.0], [4000.0, 1.0]));
         map.add_lines(lines);
         map.set_pos([0.0, 0.0]);
 
@@ -1158,11 +1160,7 @@ mod tests {
         let mut map = Map::new();
         map.set_zoom(1.0);
         let mut lines = Vec::new();
-        lines.push(MapSegment::new(
-            Rc::from("far"),
-            RawPoint::new(10_000.0, 10_000.0),
-            RawPoint::new(10_100.0, 10_100.0),
-        ));
+        lines.push(MapSegment::new((1, 2), [10_000.0, 10_000.0], [10_100.0, 10_100.0]));
         map.add_lines(lines);
         map.set_pos([0.0, 0.0]);
 
@@ -1174,11 +1172,7 @@ mod tests {
         let mut map = Map::new();
         map.add_points(sample_points());
         let mut lines = Vec::new();
-        lines.push(MapSegment::new(
-            Rc::from("1-2"),
-            RawPoint::new(0.0, 0.0),
-            RawPoint::new(10.0, 10.0),
-        ));
+        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]));
         map.add_lines(lines);
 
         let tree = map
@@ -1189,14 +1183,12 @@ mod tests {
 
         // Broad-phase query: a viewport containing (0,0) must hit the segment;
         // a far-away viewport must not.
-        let hit_query =
-            rstar::AABB::from_corners(RawPoint::new(-1.0, -1.0), RawPoint::new(1.0, 1.0));
+        let hit_query = rstar::AABB::from_corners([-1.0, -1.0], [1.0, 1.0]);
         let hits: Vec<_> = tree.locate_in_envelope_intersecting(hit_query).collect();
         assert_eq!(hits.len(), 1);
-        assert_eq!(&*hits[0].id, "1-2");
+        assert_eq!(hits[0].id, (1, 2));
 
-        let miss_query =
-            rstar::AABB::from_corners(RawPoint::new(100.0, 100.0), RawPoint::new(200.0, 200.0));
+        let miss_query = rstar::AABB::from_corners([100.0, 100.0], [200.0, 200.0]);
         assert_eq!(tree.locate_in_envelope_intersecting(miss_query).count(), 0);
     }
 
@@ -1208,17 +1200,13 @@ mod tests {
         let mut map = Map::new();
         map.set_zoom(1.0);
 
-        let mut point_a = MapPoint::new(0, RawPoint::new(0.0, 0.0));
-        point_a.connections.push("a0".to_string());
-        let mut point_b = MapPoint::new(1, RawPoint::new(50.0, 50.0));
-        point_b.connections.push("a0".to_string());
+        let mut point_a = MapPoint::new(0, [0.0, 0.0]);
+        point_a.connections.push((0, 1));
+        let mut point_b = MapPoint::new(1, [50.0, 50.0]);
+        point_b.connections.push((0, 1));
 
         let mut lines = Vec::new();
-        lines.push(MapSegment::new(
-            Rc::from("a0"),
-            point_a.raw_point,
-            point_b.raw_point,
-        ));
+        lines.push(MapSegment::new((0, 1), point_a.coords, point_b.coords));
 
         let mut points = Vec::new();
         points.push(point_a);
@@ -1347,24 +1335,19 @@ mod tests {
     fn add_lines_stores_lines() {
         let mut map = Map::new();
         let mut lines = Vec::new();
-        lines.push(MapSegment::new(
-            Rc::from("a-b"),
-            RawPoint::new(0.0, 0.0),
-            RawPoint::new(1.0, 1.0),
-        ));
+        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [1.0, 1.0]));
         map.add_lines(lines);
         let tree = map.segments.as_ref().unwrap();
         assert_eq!(tree.size(), 1);
         assert_eq!(
-            &*tree
-                .locate_in_envelope_intersecting(rstar::AABB::from_corners(
-                    RawPoint::new(-1.0, -1.0),
-                    RawPoint::new(2.0, 2.0),
-                ))
-                .next()
-                .unwrap()
-                .id,
-            "a-b"
+            tree.locate_in_envelope_intersecting(rstar::AABB::from_corners(
+                [-1.0, -1.0],
+                [2.0, 2.0],
+            ))
+            .next()
+            .unwrap()
+            .id,
+            (1, 2)
         );
     }
 
@@ -1375,25 +1358,17 @@ mod tests {
         let mut map = Map::new();
         map.add_points(sample_points());
         let mut lines = Vec::new();
-        lines.push(MapSegment::new(
-            Rc::from("horizontal"),
-            RawPoint::new(0.0, 0.0),
-            RawPoint::new(10.0, 0.0),
-        ));
-        lines.push(MapSegment::new(
-            Rc::from("vertical"),
-            RawPoint::new(20.0, -5.0),
-            RawPoint::new(20.0, 5.0),
-        ));
+        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 0.0]));
+        lines.push(MapSegment::new((3, 4), [20.0, -5.0], [20.0, 5.0]));
         map.add_lines(lines);
 
         // 1.5 units above the horizontal segment.
         let hit = map.line_at([5.0, 1.5], 2.0).expect("line must be hit");
-        assert_eq!(&*hit, "horizontal");
+        assert_eq!(hit, (1, 2));
 
         // Closest to the vertical segment.
         let hit = map.line_at([19.0, 0.0], 2.0).expect("line must be hit");
-        assert_eq!(&*hit, "vertical");
+        assert_eq!(hit, (3, 4));
     }
 
     #[test]
@@ -1401,11 +1376,7 @@ mod tests {
         let mut map = Map::new();
         map.add_points(sample_points());
         let mut lines = Vec::new();
-        lines.push(MapSegment::new(
-            Rc::from("1-2"),
-            RawPoint::new(0.0, 0.0),
-            RawPoint::new(10.0, 10.0),
-        ));
+        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]));
         map.add_lines(lines);
 
         // Distance from (5,4) to the diagonal segment (0,0)-(10,10) is
@@ -1426,11 +1397,7 @@ mod tests {
         let mut map = Map::new();
         map.add_points(sample_points());
         let mut lines = Vec::new();
-        lines.push(MapSegment::new(
-            Rc::from("1-2"),
-            RawPoint::new(0.0, 0.0),
-            RawPoint::new(10.0, 10.0),
-        ));
+        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]));
         map.add_lines(lines);
 
         // Exact point on the segment is hit even with tolerance clamped to 0.

@@ -22,13 +22,13 @@
 //!
 //! ```no_run
 //! use egui_map::map::Map;
-//! use egui_map::map::objects::{MapPoint, RawPoint};
+//! use egui_map::map::objects::MapPoint;
 //! use std::collections::HashMap;
 //!
 //! // Build the node set, keyed by node id.
 //! let mut points: HashMap<usize, MapPoint> = HashMap::new();
-//! points.insert(1, MapPoint::new(1, RawPoint::new(0.0, 0.0)));
-//! points.insert(2, MapPoint::new(2, RawPoint::new(100.0, 50.0)));
+//! points.insert(1, MapPoint::new(1, [0.0, 0.0]));
+//! points.insert(2, MapPoint::new(2, [100.0, 50.0]));
 //!
 //! let mut map = Map::new();
 //! map.add_hashmap_points(points);

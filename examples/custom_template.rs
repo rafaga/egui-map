@@ -5,7 +5,7 @@
 
 use eframe::egui::{self, Align2, Color32, Pos2, Stroke, Ui, Vec2};
 use egui_map::map::Map;
-use egui_map::map::objects::{MapPoint, NodeTemplate, RawPoint, VisibilitySetting};
+use egui_map::map::objects::{MapPoint, NodeTemplate, VisibilitySetting};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -75,7 +75,7 @@ fn main() -> eframe::Result<()> {
         (2, "Beta", 100.0, 50.0),
         (3, "Gamma", 50.0, -80.0),
     ] {
-        let mut point = MapPoint::new(id, RawPoint::new(x, y));
+        let mut point = MapPoint::new(id, [x, y]);
         point.set_name(name.to_string());
         points.push(point);
     }

@@ -9,7 +9,6 @@ use egui::{Align2, Color32, FontFamily, FontId, Pos2, Stroke, Ui};
 use rstar::AABB;
 use std::convert::{From, Into};
 use std::ops::{Add, Div, DivAssign, Mul, MulAssign, Sub};
-use std::rc::Rc;
 use std::time::Instant;
 
 /// A point (or vector) in 2D map coordinates.
@@ -604,84 +603,109 @@ impl MapLabel {
 /// A connection line between two points on the map, ready to be stored in an
 /// [`rstar::RTree`].
 ///
-/// `MapSegment` is the line object of the widget: it carries the segment
-/// geometry ([`RawLine`]) plus its precomputed axis-aligned bounding box
-/// ([`AABB`]), which the R-tree uses as the spatial envelope for broad-phase
-/// viewport culling and hit-testing. Lines are installed with
-/// [`Map::add_lines`](super::Map::add_lines), keyed by an id that nodes
-/// reference through [`MapPoint::connections`].
-#[derive(Clone, Debug)]
+/// Mirrors `sde::objects::SdeSegment`'s shape (`id`, `point1`, `point2`) so
+/// callers that already hold `sde` connection data can build one with a
+/// straight field-for-field copy; the only structural difference is `f32`
+/// instead of `f64` for the coordinates, matching `egui`'s own coordinate
+/// type (`egui` — and therefore this widget — doesn't work in `f64`).
+///
+/// Lines are installed with [`Map::add_hashmap_lines`](super::Map::add_hashmap_lines),
+/// keyed by an id that nodes reference through [`MapPoint::connections`].
+/// The bounding box the R-tree uses for broad-phase viewport culling and
+/// hit-testing is computed on demand from `point1`/`point2` in
+/// [`envelope`](rstar::RTreeObject::envelope) rather than cached on the
+/// struct, same as `SdeSegment`.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MapSegment {
     /// Identifier shared with the line key (and with the
     /// [`MapPoint::connections`] of the endpoint nodes).
-    pub id: Rc<str>,
-    /// The segment geometry, in map coordinates.
-    pub raw_line: RawLine,
-    /// Axis-aligned bounding box of the segment, in map coordinates.
-    pub aabb: AABB<RawPoint>,
+    pub id: (usize, usize),
+    /// One endpoint of the segment, in map coordinates.
+    pub point1: [f32; 2],
+    /// The other endpoint of the segment, in map coordinates.
+    pub point2: [f32; 2],
 }
 
 impl MapSegment {
-    /// Creates a segment for `id` from `point1` to `point2`, computing its
-    /// bounding box.
-    pub fn new(id: Rc<str>, point1: RawPoint, point2: RawPoint) -> Self {
-        Self {
-            id,
-            raw_line: RawLine::new(point1, point2),
-            aabb: AABB::from_corners(
-                RawPoint::new(
-                    point1.components[0].min(point2.components[0]),
-                    point1.components[1].min(point2.components[1]),
-                ),
-                RawPoint::new(
-                    point1.components[0].max(point2.components[0]),
-                    point1.components[1].max(point2.components[1]),
-                ),
-            ),
-        }
+    /// Creates a segment for `id` between `point1` and `point2`.
+    pub fn new(id: (usize, usize), point1: [f32; 2], point2: [f32; 2]) -> Self {
+        Self { id, point1, point2 }
+    }
+
+    /// The segment geometry as a [`RawLine`], for the distance/midpoint math
+    /// callers already get from that type.
+    pub(crate) fn raw_line(&self) -> RawLine {
+        RawLine::new(RawPoint::from(self.point1), RawPoint::from(self.point2))
     }
 }
 
 impl rstar::RTreeObject for MapSegment {
-    type Envelope = AABB<RawPoint>;
+    type Envelope = AABB<[f32; 2]>;
 
     fn envelope(&self) -> Self::Envelope {
-        self.aabb
+        AABB::from_corners(
+            [
+                self.point1[0].min(self.point2[0]),
+                self.point1[1].min(self.point2[1]),
+            ],
+            [
+                self.point1[0].max(self.point2[0]),
+                self.point1[1].max(self.point2[1]),
+            ],
+        )
     }
 }
 
-/// A node on the map: an id, a position and an optional display name.
+/// A node on the map: an id, a 2D position and an optional display name.
+///
+/// Mirrors `sde::objects::SdePoint`'s shape (public `coords`/`id`/`name`/
+/// `connections` fields) so callers that already hold `sde` map-query data
+/// can build one with a straight field-for-field copy. Structural
+/// differences from `SdePoint`:
+///
+/// - `f32` instead of `f64` for `coords`, matching `egui`'s own coordinate
+///   type.
+/// - 2 components instead of 3: this widget only ever renders a 2D map, so
+///   there's no third axis to carry.
+/// - `id` is a plain `usize`, not `Option<usize>`. `SdePoint` uses `None`
+///   for a bare coordinate with no entity behind it (e.g. a bounding-box
+///   corner); every `MapPoint` loaded into the widget represents a real,
+///   placed node whose id is used directly as the point-set `HashMap` key
+///   and the kd-tree payload (see [`Map::add_hashmap_points`]), so an
+///   optional id would just push an `.unwrap()` (or a silently dropped
+///   node) into those call sites with no caller ever passing `None`.
 ///
 /// Nodes are loaded into the widget through
 /// [`Map::add_hashmap_points`](super::Map::add_hashmap_points), keyed by their
 /// id.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MapPoint {
     /// Position of the node, in map coordinates.
-    pub raw_point: RawPoint,
+    pub coords: [f32; 2],
+    /// Node identifier, used for lookups, notifications and markers.
+    pub id: usize,
+    /// Display name shown next to the node; `None` if it was never set.
+    pub name: Option<String>,
     /// Ids of the lines connecting this node with others.
     ///
     /// Each entry must match a key of the map passed to
-    /// [`Map::add_lines`](super::Map::add_lines). The usual pattern is to push
-    /// the same line id into the `connections` of **both** endpoint nodes.
-    /// Line visibility is computed from the segment bounding boxes (R-tree),
-    /// not from node visibility, so a line is drawn whenever its bounding box
-    /// intersects the viewport.
-    pub connections: Vec<String>,
-    /// Node identifier, used for lookups, notifications and markers.
-    id: usize,
-    /// Display name shown next to the node.
-    name: String,
+    /// [`Map::add_hashmap_lines`](super::Map::add_hashmap_lines) (and
+    /// [`MapSegment::id`]). The usual pattern is to push the same pair into
+    /// the `connections` of **both** endpoint nodes. Line visibility is
+    /// computed from the segment bounding boxes (R-tree), not from node
+    /// visibility, so a line is drawn whenever its bounding box intersects
+    /// the viewport.
+    pub connections: Vec<(usize, usize)>,
 }
 
 impl MapPoint {
     /// Creates a node with the given `id` at the given map coordinates.
-    pub fn new(id: usize, coords: RawPoint) -> MapPoint {
+    pub fn new(id: usize, coords: [f32; 2]) -> MapPoint {
         MapPoint {
-            raw_point: coords,
+            coords,
             id,
             connections: Vec::new(),
-            name: String::new(),
+            name: None,
         }
     }
 
@@ -692,12 +716,12 @@ impl MapPoint {
 
     /// Returns the node display name (empty if it was never set).
     pub fn get_name(&self) -> String {
-        self.name.clone()
+        self.name.clone().unwrap_or_default()
     }
 
     /// Sets the node display name.
     pub fn set_name(&mut self, value: String) {
-        self.name = value;
+        self.name = Some(value);
     }
 }
 
@@ -1021,40 +1045,30 @@ mod tests {
 
     #[test]
     fn map_segment_new_computes_tight_aabb() {
-        let seg = MapSegment::new(
-            Rc::from("1-2"),
-            RawPoint::new(10.0, -5.0),
-            RawPoint::new(-2.0, 7.0),
-        );
-        assert_eq!(&*seg.id, "1-2");
-        assert_eq!(seg.aabb.lower().components, [-2.0, -5.0]);
-        assert_eq!(seg.aabb.upper().components, [10.0, 7.0]);
-        assert_eq!(seg.raw_line.points[0].components, [10.0, -5.0]);
-        assert_eq!(seg.raw_line.points[1].components, [-2.0, 7.0]);
+        let seg = MapSegment::new((1, 2), [10.0, -5.0], [-2.0, 7.0]);
+        assert_eq!(seg.id, (1, 2));
+        let envelope: AABB<[f32; 2]> = rstar::RTreeObject::envelope(&seg);
+        assert_eq!(envelope.lower(), [-2.0, -5.0]);
+        assert_eq!(envelope.upper(), [10.0, 7.0]);
+        assert_eq!(seg.raw_line().points[0].components, [10.0, -5.0]);
+        assert_eq!(seg.raw_line().points[1].components, [-2.0, 7.0]);
     }
 
     #[test]
     fn map_segment_envelope_returns_its_aabb() {
-        let seg = MapSegment::new(
-            Rc::from("a"),
-            RawPoint::new(0.0, 0.0),
-            RawPoint::new(4.0, 2.0),
-        );
-        let envelope: AABB<RawPoint> = rstar::RTreeObject::envelope(&seg);
-        assert_eq!(envelope.lower().components, [0.0, 0.0]);
-        assert_eq!(envelope.upper().components, [4.0, 2.0]);
+        let seg = MapSegment::new((1, 2), [0.0, 0.0], [4.0, 2.0]);
+        let envelope: AABB<[f32; 2]> = rstar::RTreeObject::envelope(&seg);
+        assert_eq!(envelope.lower(), [0.0, 0.0]);
+        assert_eq!(envelope.upper(), [4.0, 2.0]);
     }
 
     #[test]
     fn map_segment_degenerate_line_has_point_aabb() {
         // A zero-length segment must still produce a valid (empty-area) AABB.
-        let seg = MapSegment::new(
-            Rc::from("p"),
-            RawPoint::new(3.0, 3.0),
-            RawPoint::new(3.0, 3.0),
-        );
-        assert_eq!(seg.aabb.lower().components, [3.0, 3.0]);
-        assert_eq!(seg.aabb.upper().components, [3.0, 3.0]);
+        let seg = MapSegment::new((1, 2), [3.0, 3.0], [3.0, 3.0]);
+        let envelope: AABB<[f32; 2]> = rstar::RTreeObject::envelope(&seg);
+        assert_eq!(envelope.lower(), [3.0, 3.0]);
+        assert_eq!(envelope.upper(), [3.0, 3.0]);
     }
 
     #[test]
@@ -1462,24 +1476,26 @@ mod tests {
 
     #[test]
     fn map_point_new() {
-        let p = MapPoint::new(42, RawPoint::new(1.0, 2.0));
+        let p = MapPoint::new(42, [1.0, 2.0]);
         assert_eq!(p.get_id(), 42);
-        assert_eq!(p.raw_point.components, [1.0, 2.0]);
+        assert_eq!(p.coords, [1.0, 2.0]);
         assert!(p.connections.is_empty());
+        assert_eq!(p.name, None);
         assert_eq!(p.get_name(), String::new());
     }
 
     #[test]
     fn map_point_set_and_get_name() {
-        let mut p = MapPoint::new(1, RawPoint::default());
+        let mut p = MapPoint::new(1, [0.0, 0.0]);
         p.set_name("Jita".to_string());
+        assert_eq!(p.name, Some("Jita".to_string()));
         assert_eq!(p.get_name(), "Jita");
     }
 
     #[test]
     fn map_point_from_occupied_entry() {
         let mut map: HashMap<usize, MapPoint> = HashMap::new();
-        let mut original = MapPoint::new(7, RawPoint::new(5.0, 6.0));
+        let mut original = MapPoint::new(7, [5.0, 6.0]);
         original.set_name("Amarr".to_string());
         map.insert(7, original);
 
@@ -1488,7 +1504,7 @@ mod tests {
             let cloned = MapPoint::from(entry);
             assert_eq!(cloned.get_id(), 7);
             assert_eq!(cloned.get_name(), "Amarr");
-            assert_eq!(cloned.raw_point.components, [5.0, 6.0]);
+            assert_eq!(cloned.coords, [5.0, 6.0]);
         } else {
             panic!("se esperaba una entrada ocupada");
         }

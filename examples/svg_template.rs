@@ -6,7 +6,7 @@
 
 use eframe::egui::{self, Align2, Color32, Pos2, Stroke, Ui, Vec2};
 use egui_map::map::Map;
-use egui_map::map::objects::{MapPoint, MapSegment, NodeTemplate, RawPoint, VisibilitySetting};
+use egui_map::map::objects::{MapPoint, MapSegment, NodeTemplate, VisibilitySetting};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -84,15 +84,15 @@ fn main() -> eframe::Result<()> {
         (2, "switch-01", 100.0, 50.0),
         (3, "Zeus", 100.0, 130.0),
     ] {
-        let mut point = MapPoint::new(id, RawPoint::new(x, y));
+        let mut point = MapPoint::new(id, [x, y]);
         point.set_name(name.to_string());
         match point.get_id() {
-            1 => point.connections.push(0.to_string()),
+            1 => point.connections.push((0, 1)),
             2 => {
-                point.connections.push(0.to_string());
-                point.connections.push(1.to_string());
+                point.connections.push((0, 1));
+                point.connections.push((1, 2));
             }
-            _ => point.connections.push(1.to_string()),
+            _ => point.connections.push((1, 2)),
         }
         points.push(point);
     }
@@ -102,11 +102,7 @@ fn main() -> eframe::Result<()> {
     for id in ids {
         let point1 = points.get(id[0]).unwrap();
         let point2 = points.get(id[1]).unwrap();
-        let line = MapSegment::new(
-            Rc::from(cont.to_string()),
-            point1.raw_point,
-            point2.raw_point,
-        );
+        let line = MapSegment::new((cont, cont + 1), point1.coords, point2.coords);
         vec_segmnents.push(line);
         cont += 1;
     }
