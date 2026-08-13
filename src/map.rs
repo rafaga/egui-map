@@ -76,7 +76,7 @@ use crate::map::objects::{
 use egui::{epaint::CircleShape, widgets::*, *};
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -353,7 +353,7 @@ impl Map {
         }
     }
 
-/// Loads the node set and (re)builds the spatial index.
+    /// Loads the node set and (re)builds the spatial index.
     ///
     /// This replaces any previously loaded points, computes the bounding box of
     /// the whole set, centers the view on its midpoint and refreshes the list
@@ -380,7 +380,7 @@ impl Map {
     /// // The view is centered on the midpoint of the loaded nodes.
     /// assert_eq!(map.get_pos(), [5.0, 5.0]);
     /// ```
-    pub fn add_points(&mut self,points: Vec<MapPoint>) {
+    pub fn add_points(&mut self, points: Vec<MapPoint>) {
         let mut tree = KdTree::<f32, usize, [f32; 2]>::new(2);
         let mut hash_map = HashMap::new();
         let mut min = RawPoint::new(f32::INFINITY, f32::INFINITY);
@@ -901,8 +901,7 @@ impl Map {
                 self.map_area.width() / 2.0 / self.zoom + padding,
                 self.map_area.height() / 2.0 / self.zoom + padding,
             );
-            let query =
-                rstar::AABB::from_corners((center - half).into(), (center + half).into());
+            let query = rstar::AABB::from_corners((center - half).into(), (center + half).into());
             for segment in segments.locate_in_envelope_intersecting(query) {
                 let raw_line = segment.raw_line();
                 let pos_a = raw_line.points[0] * self.zoom - min_point;
@@ -961,8 +960,7 @@ impl Map {
 
         let center = RawPoint::from(point);
         let padding = RawPoint::new(tolerance, tolerance);
-        let query =
-            rstar::AABB::from_corners((center - padding).into(), (center + padding).into());
+        let query = rstar::AABB::from_corners((center - padding).into(), (center + padding).into());
 
         let mut closest: Option<(f32, (usize, usize))> = None;
         for segment in segments.locate_in_envelope_intersecting(query) {
@@ -1022,9 +1020,9 @@ mod tests {
 
     fn sample_points() -> Vec<MapPoint> {
         let mut map = Vec::new();
-        map.push( MapPoint::new(1, [0.0, 0.0]));
-        map.push( MapPoint::new(2, [10.0, 10.0]));
-        map.push( MapPoint::new(3, [-10.0, -10.0]));
+        map.push(MapPoint::new(1, [0.0, 0.0]));
+        map.push(MapPoint::new(2, [10.0, 10.0]));
+        map.push(MapPoint::new(3, [-10.0, -10.0]));
         map
     }
 
@@ -1160,7 +1158,11 @@ mod tests {
         let mut map = Map::new();
         map.set_zoom(1.0);
         let mut lines = Vec::new();
-        lines.push(MapSegment::new((1, 2), [10_000.0, 10_000.0], [10_100.0, 10_100.0]));
+        lines.push(MapSegment::new(
+            (1, 2),
+            [10_000.0, 10_000.0],
+            [10_100.0, 10_100.0],
+        ));
         map.add_lines(lines);
         map.set_pos([0.0, 0.0]);
 

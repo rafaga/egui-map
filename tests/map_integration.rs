@@ -97,7 +97,10 @@ fn raw_line_geometry_from_outside_crate() {
     let segment = MapSegment::new((1, 2), [0.0, 0.0], [6.0, 8.0]);
     // `MapSegment` only carries `point1`/`point2` (like `sde::objects::SdeSegment`);
     // build a `RawLine` from them for the distance/midpoint math.
-    let line = RawLine::new(RawPoint::from(segment.point1), RawPoint::from(segment.point2));
+    let line = RawLine::new(
+        RawPoint::from(segment.point1),
+        RawPoint::from(segment.point2),
+    );
     assert_eq!(line.distance(), 10.0);
     assert_eq!(line.midpoint().components, [3.0, 4.0]);
 }
