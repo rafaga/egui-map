@@ -36,6 +36,16 @@
 //! // Then, on every frame of your egui update loop:
 //! // ui.add(&mut map);
 //! ```
+//!
+//! ## Profiling
+//!
+//! The widget's hot paths (rendering, viewport culling, point/line loading)
+//! are instrumented with [`profiling`](https://docs.rs/profiling) scopes.
+//! These are no-ops unless the final binary enables one of `profiling`'s
+//! backend features (e.g. `profile-with-tracy`); this crate never needs a
+//! feature of its own for that — enabling the backend feature anywhere in
+//! the dependency graph activates it here too, because `profiling` is a
+//! normal, unconditional dependency.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

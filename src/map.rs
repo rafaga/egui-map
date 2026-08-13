@@ -167,12 +167,14 @@ impl Widget for &mut Map {
         let canvas = egui::Frame::canvas(ui.style()).inner_margin(Margin::symmetric(3, 5));
 
         let inner_response = canvas.show(ui, |ui| {
+            profiling::scope!("paint_map");
 
             if ui.is_rect_visible(self.map_area) {
                 let (resp, paint) =
                     ui.allocate_painter(self.map_area.size(), egui::Sense::click_and_drag());
                 let vec = resp.drag_delta();
                 if vec.length() != 0.0 {
+                    profiling::scope!("calculating_points_in_visible_area");
 
                     let coords = RawPoint::from(vec.to_pos2());
                     let new_pos = self.reference.pos - (coords / self.zoom);
@@ -258,6 +260,7 @@ impl Widget for &mut Map {
                 self.capture_mouse_events(ui, &resp);
 
                 if self.zoom != self.previous_zoom {
+                    profiling::scope!("calculating viewport with zoom");
                     self.adjust_bounds();
                     self.calculate_visible_points();
                     self.previous_zoom = self.zoom;
@@ -330,6 +333,7 @@ impl Map {
     }
 
     fn calculate_visible_points(&mut self) {
+        profiling::scope!("calculate_visible_points");
         if self.current.dist > 0.0
             && self.current.dist < f32::INFINITY
             && let Some(tree) = &self.tree
@@ -441,6 +445,7 @@ impl Map {
     /// ```
     //#[deprecated(since="0.2.3", note="please use `add_points` instead")]
     pub fn add_hashmap_points(&mut self, hash_map: HashMap<usize, MapPoint>) {
+        profiling::scope!("add_hashmap_points");
         let mut min = RawPoint::new(f32::INFINITY, f32::INFINITY);
         let mut max = RawPoint::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
         let mut tree = KdTree::<f32, usize, [f32; 2]>::new(2);
@@ -484,6 +489,7 @@ impl Map {
     /// Does nothing if no points have been loaded yet or if `node_id` is
     /// unknown.
     pub fn set_pos_from_nodeid(&mut self, node_id: usize) {
+        profiling::scope!("set_pos_from_nodeid");
         if let Some(hash_map) = &self.points
             && let Some(map_point) = hash_map.get(&node_id)
         {
@@ -495,6 +501,7 @@ impl Map {
 
     /// Centers the view on the given map coordinates.
     pub fn set_pos(&mut self, position: [f32; 2]) {
+        profiling::scope!("set_pos");
         let point = RawPoint::from(position);
         self.reference.pos = point;
         self.adjust_bounds();
@@ -503,6 +510,7 @@ impl Map {
 
     /// Returns the map coordinates the view is currently centered on.
     pub fn get_pos(&self) -> [f32; 2] {
+        profiling::scope!("get_pos");
         self.reference.pos.into()
     }
 
@@ -511,6 +519,7 @@ impl Map {
     /// Labels are only rendered while the zoom level is below
     /// [`MapSettings::line_visible_zoom`].
     pub fn add_labels(&mut self, labels: Vec<MapLabel>) {
+        profiling::scope!("add_labels");
         self.labels = labels;
     }
 
@@ -526,6 +535,7 @@ impl Map {
     /// See the [module-level example](self#connecting-nodes-with-lines) for
     /// the complete wiring.
     pub fn add_lines(&mut self, segments: Vec<MapSegment>) {
+        profiling::scope!("add_lines");
         // Intern the keys as Rc<str> and build the broad-phase spatial index
         // over the line bounding boxes, so viewport culling and hit-testing
         // discard whole regions without touching every segment.
@@ -542,11 +552,13 @@ impl Map {
     /// them keyed in a `HashMap` (e.g. straight from an adapter that mirrors
     /// them 1:1 by id, with no intermediate ordering to preserve).
     pub fn add_hashmap_lines(&mut self, segments: HashMap<(usize, usize), MapSegment>) {
+        profiling::scope!("add_hashmap_lines");
         let segments: Vec<MapSegment> = segments.into_values().collect();
         self.segments = Some(rstar::RTree::bulk_load(segments));
     }
 
     fn adjust_bounds(&mut self) {
+        profiling::scope!("adjust_bounds");
         self.current.max = self.reference.max * self.zoom;
         self.current.min = self.reference.min * self.zoom;
         self.current.dist = self.reference.dist / self.zoom;
@@ -554,9 +566,11 @@ impl Map {
     }
 
     fn capture_mouse_events(&mut self, ui: &Ui, _resp: &Response) {
+        profiling::scope!("capture_mouse_events");
         // capture MouseWheel Event for Zoom control change
         if ui.rect_contains_pointer(self.map_area) {
             ui.input(|x| {
+                profiling::scope!("capture_mouse_events");
 
                 if !x.events.is_empty() {
                     for event in &x.events {
@@ -629,6 +643,7 @@ impl Map {
         let style_index = ui_obj.visuals().dark_mode as usize;
 
         if self.current_index != style_index {
+            profiling::scope!("asign_visual_style");
 
             self.current_index = style_index;
             let map_style = self.settings.styles.get_mut(style_index).unwrap();
@@ -640,6 +655,7 @@ impl Map {
 
     #[cfg(feature = "debug_overlay")]
     fn print_debug_info(&mut self, paint: Painter, resp: Response) {
+        profiling::scope!("printing debug data");
 
         let mut init_pos = Pos2::new(
             self.map_area.left_top().x + 10.00,
@@ -710,6 +726,7 @@ impl Map {
     }
 
     fn paint_sub_components(&mut self, ui_obj: &mut Ui, rect: Rect) {
+        profiling::scope!("map_ui_paint_sub_components");
         let zoom_slider = egui::Slider::new(
             &mut self.zoom,
             self.settings.min_zoom..=self.settings.max_zoom,
@@ -778,6 +795,7 @@ impl Map {
         for temp_point in vec_points {
             let parsed_point = temp_point.cast_unsigned();
             if let Some(system) = hashm.as_ref().unwrap().get(&parsed_point) {
+                profiling::scope!("painting_points_m");
                 let viewport_point = RawPoint::from(system.coords) * self.zoom - min_point;
                 if let Some(node_template) = &self.node_template {
                     if nearest_id.unwrap_or(&0usize) == &system.get_id() {
@@ -834,6 +852,7 @@ impl Map {
     }
 
     fn paint_map_lines(&self, painter: &Painter, min_point: &RawPoint) {
+        profiling::scope!("paint_map_lines");
 
         // Drawing Lines
         if self.zoom > self.settings.line_visible_zoom
@@ -875,6 +894,7 @@ impl Map {
     }
 
     fn paint_label(&self, paint: &Painter, text_settings: &TextSettings) {
+        profiling::scope!("paint_label");
         paint.text(
             text_settings.position.into(),
             text_settings.anchor,
@@ -891,6 +911,7 @@ impl Map {
     /// the same node restarts the animation. The effect can be customized with
     /// [`objects::NodeTemplate::notification_ui`].
     pub fn notify(&mut self, id_node: usize, time: Instant) {
+        profiling::scope!("notify");
         self.entities
             .entry(id_node)
             .and_modify(|value| *value = time)
@@ -911,6 +932,7 @@ impl Map {
     /// [coordinate model](self#coordinate-model)) and pick a tolerance scaled
     /// by `1.0 / zoom` so it stays constant in screen pixels.
     pub fn line_at(&self, point: [f32; 2], tolerance: f32) -> Option<(usize, usize)> {
+        profiling::scope!("line_at");
         let segments = self.segments.as_ref()?;
         let tolerance = tolerance.max(0.0);
 

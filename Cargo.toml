@@ -43,6 +43,7 @@ debug_overlay = []
 egui = { version = "0.36.1", features = ["bytemuck"]}
 kdtree = { version = "0.8.0" }
 rstar = "0.13.0"
+profiling = "1.0"
 
 [dev-dependencies]
 eframe = "0.36.1"
