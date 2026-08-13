@@ -37,13 +37,11 @@ maintenance = { status = "actively-developed" }
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [features]
 default = []
-puffin = ["dep:puffin"]
 debug_overlay = []
 
 [dependencies]
 egui = { version = "0.36.1", features = ["bytemuck"]}
 kdtree = { version = "0.8.0" }
-puffin = { version = "0.20.0", optional=true, default-features = false }
 rstar = "0.13.0"
 
 [dev-dependencies]
