@@ -40,12 +40,13 @@
 //! ## Profiling
 //!
 //! The widget's hot paths (rendering, viewport culling, point/line loading)
-//! are instrumented with [`profiling`](https://docs.rs/profiling) scopes.
-//! These are no-ops unless the final binary enables one of `profiling`'s
-//! backend features (e.g. `profile-with-tracy`); this crate never needs a
-//! feature of its own for that — enabling the backend feature anywhere in
-//! the dependency graph activates it here too, because `profiling` is a
-//! normal, unconditional dependency.
+//! are instrumented with [`tracing`](https://docs.rs/tracing) spans. These
+//! are cheap no-ops unless a `tracing` subscriber is installed somewhere in
+//! the final binary; this crate never needs a feature of its own for that —
+//! a consumer that installs a subscriber (e.g. `tracing_tracy::TracyLayer`,
+//! for the [Tracy](https://github.com/wolfpld/tracy) profiler) picks up
+//! these spans for free, because `tracing` is a normal, unconditional
+//! dependency shared across the whole dependency graph.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]
