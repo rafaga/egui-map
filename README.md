@@ -100,7 +100,25 @@ See the `NodeTemplate` rustdoc for a complete example with a custom node shape a
 
 ## Crate features
 
-- `puffin`: instruments the widget's hot paths with the [`puffin`](https://crates.io/crates/puffin) profiler.
+- `debug_overlay`: draws a small text overlay with the widget's internal viewport state (bounds, current position, distance) for debugging.
+
+## Profiling
+
+The widget's hot paths (rendering, viewport culling, point/line loading) are instrumented with [`tracing`](https://docs.rs/tracing) spans. `tracing` is a normal, unconditional dependency of this crate, and the spans are cheap no-ops unless a subscriber is installed somewhere in your binary -- `egui-map` never installs one itself.
+
+To see these spans in the [Tracy](https://github.com/wolfpld/tracy) profiler, install a `tracing_tracy::TracyLayer` in your own `main`, e.g.:
+
+```rust
+tracing_subscriber::registry()
+    .with(tracing_tracy::TracyLayer::default())
+    .init();
+```
+
+The `tracy` feature pulls in `tracing-subscriber` and `tracing-tracy` so `examples/tracy_profile.rs` can demonstrate exactly this. Run it (with a Tracy capture window already listening) with:
+
+```sh
+cargo run --example tracy_profile --features tracy
+```
 
 ## License
 

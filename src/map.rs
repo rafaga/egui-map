@@ -197,7 +197,15 @@ impl Widget for &mut Map {
                     }
                 }
 
-                let rect_midpoint = RawPoint::from(self.map_area.center());
+                // `resp.rect` is the actual painter rect allocated inside the
+                // canvas frame's inner `Ui`, which is offset from
+                // `self.map_area` by the frame's `inner_margin` (the outer
+                // `Ui` used to compute `map_area` predates that margin).
+                // Using `self.map_area.center()` here used to leave every
+                // painted point (including a freshly-centered node) shifted
+                // by the margin amount, so `set_pos_from_nodeid`/`set_pos`
+                // never landed exactly in the middle of the widget.
+                let rect_midpoint = RawPoint::from(resp.rect.center());
                 let min_point = self.current.pos - rect_midpoint;
                 let vec_points = &self.visible_points;
                 let hashm = &self.points;
@@ -570,7 +578,7 @@ impl Map {
         // capture MouseWheel Event for Zoom control change
         if ui.rect_contains_pointer(self.map_area) {
             ui.input(|x| {
-                let _span = tracing::info_span!("capture_mouse_events").entered();
+                let _span = tracing::info_span!("capture_mouse_events_input").entered();
 
                 if !x.events.is_empty() {
                     for event in &x.events {

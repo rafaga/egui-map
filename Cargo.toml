@@ -38,13 +38,26 @@ maintenance = { status = "actively-developed" }
 [features]
 default = []
 debug_overlay = []
+# Pulls in `tracing-subscriber` + `tracing-tracy` so the `tracy_profile`
+# example can install a real Tracy subscriber. The crate's own spans
+# (`tracing::info_span!`) are always present and are zero-cost no-ops
+# without this feature -- it only exists to demonstrate/exercise wiring
+# a subscriber, consumers are free to do the same in their own binary
+# instead of enabling it here.
+tracy = ["dep:tracing-subscriber", "dep:tracing-tracy"]
 
 [dependencies]
 egui = { version = "0.36.1", features = ["bytemuck"]}
 kdtree = { version = "0.8.0" }
 rstar = "0.13.0"
 tracing = "0.1"
+tracing-subscriber = { version = "0.3.23", optional = true }
+tracing-tracy = { version = "0.11.4", optional = true }
 
 [dev-dependencies]
 eframe = "0.36.1"
 egui_extras = { version = "0.36.1", features = ["svg"] }
+
+[[example]]
+name = "tracy_profile"
+required-features = ["tracy"]
