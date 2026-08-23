@@ -506,9 +506,32 @@ impl Map {
 
     /// Centers the view on the node with the given id.
     ///
-    /// Does nothing if no points have been loaded yet or if `node_id` is
-    /// unknown.
-    pub fn set_pos_from_nodeid(&mut self, node_id: usize) {
+    /// Returns `true` if the view moved. Returns `false` — leaving the view
+    /// untouched — when no points have been loaded yet or when `node_id` is
+    /// not among them; that case also emits a `tracing` warning, since a
+    /// silently ignored id is otherwise indistinguishable from a node that
+    /// was centered but drawn in the wrong place.
+    ///
+    /// A `false` here usually means the id belongs to a different set than
+    /// the one loaded through [`Map::add_hashmap_points`] — for example a
+    /// map showing only part of the universe, or ids coming from a different
+    /// query than the one that produced the nodes.
+    ///
+    /// ```
+    /// use egui_map::map::Map;
+    /// use egui_map::map::objects::MapPoint;
+    ///
+    /// let mut map = Map::new();
+    /// map.add_points(vec![MapPoint::new(1, [10.0, 20.0])]);
+    ///
+    /// assert!(map.set_pos_from_nodeid(1));
+    /// assert_eq!(map.get_pos(), [10.0, 20.0]);
+    ///
+    /// // Unknown id: the view stays where it was.
+    /// assert!(!map.set_pos_from_nodeid(999));
+    /// assert_eq!(map.get_pos(), [10.0, 20.0]);
+    /// ```
+    pub fn set_pos_from_nodeid(&mut self, node_id: usize) -> bool {
         let _span = tracing::info_span!("set_pos_from_nodeid").entered();
         if let Some(hash_map) = &self.points
             && let Some(map_point) = hash_map.get(&node_id)
@@ -516,6 +539,14 @@ impl Map {
             self.reference.pos = RawPoint::from(map_point.coords);
             self.adjust_bounds();
             self.calculate_visible_points();
+            true
+        } else {
+            tracing::warn!(
+                node_id,
+                loaded_nodes = self.points.as_ref().map_or(0, |p| p.len()),
+                "set_pos_from_nodeid: unknown node id, the view was left unchanged"
+            );
+            false
         }
     }
 
@@ -1297,7 +1328,7 @@ mod tests {
     fn set_pos_from_nodeid_with_valid_id() {
         let mut map = Map::new();
         map.add_points(sample_points());
-        map.set_pos_from_nodeid(2);
+        assert!(map.set_pos_from_nodeid(2));
         assert_eq!(map.get_pos(), [10.0, 10.0]);
     }
 
@@ -1365,14 +1396,15 @@ mod tests {
         let mut map = Map::new();
         map.add_points(sample_points());
         let before = map.reference.pos.components;
-        map.set_pos_from_nodeid(999);
+        // An unknown id must report the failure instead of silently no-op'ing.
+        assert!(!map.set_pos_from_nodeid(999));
         assert_eq!(map.reference.pos.components, before);
     }
 
     #[test]
     fn set_pos_from_nodeid_without_points_does_nothing() {
         let mut map = Map::new();
-        map.set_pos_from_nodeid(1);
+        assert!(!map.set_pos_from_nodeid(1));
         assert_eq!(map.reference.pos.components, [0.0, 0.0]);
     }
 

@@ -29,7 +29,11 @@ fn map_position_workflow() {
     let mut map = Map::new();
     map.add_points(sample_points());
 
-    map.set_pos_from_nodeid(2);
+    assert!(map.set_pos_from_nodeid(2));
+    assert_eq!(map.get_pos(), [10.0, 10.0]);
+
+    // An id that was never loaded reports failure and leaves the view put.
+    assert!(!map.set_pos_from_nodeid(4321));
     assert_eq!(map.get_pos(), [10.0, 10.0]);
 
     map.set_pos([5.0, -5.0]);
