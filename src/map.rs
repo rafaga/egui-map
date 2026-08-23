@@ -70,10 +70,10 @@
 
 use crate::map::animation::Animation;
 use crate::map::objects::{
-    ContextMenuManager, MapBounds, MapLabel, MapPoint, MapSegment, MapSettings, MapStyle, RawLine,
-    RawPoint, TextSettings, VisibilitySetting,
+    ContextMenuManager, MapBounds, MapLabel, MapPoint, MapSegment, MapSettings, MapStyle,
+    NodeAnimation, RawLine, RawPoint, SteadyAnimation, TextSettings, VisibilitySetting,
 };
-use egui::{epaint::CircleShape, widgets::*, *};
+use egui::{widgets::*, *};
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
 use std::collections::HashMap;
@@ -135,7 +135,8 @@ pub struct Map {
     reference: MapBounds,
     current: MapBounds,
     current_index: usize,
-    entities: HashMap<usize, Instant>,
+    notifications: HashMap<usize, Notification>,
+    node_states: HashMap<usize, NodeState>,
     min_size: (Option<f32>, Option<f32>),
     max_size: (Option<f32>, Option<f32>),
     /// Behavior and appearance configuration (zoom limits, visibility
@@ -144,6 +145,125 @@ pub struct Map {
     menu_manager: Option<Rc<dyn ContextMenuManager>>,
     node_template: Option<Rc<dyn NodeTemplate>>,
     markers: HashMap<usize, usize>,
+}
+
+/// A one-off effect attached to a node, with the moment it started.
+#[derive(Clone, Copy, Debug)]
+struct Notification {
+    started: Instant,
+    animation: NodeAnimation,
+    /// `None` falls back to the current style's `alert_color`.
+    color: Option<Color32>,
+}
+
+/// Lasting state attached to a node, drawn until it is cleared.
+#[derive(Clone, Copy, Debug)]
+struct NodeState {
+    animation: SteadyAnimation,
+    /// `None` falls back to the current style's `alert_color`.
+    color: Option<Color32>,
+}
+
+/// A borrowed node, obtained from [`Map::node`], that an animation can be
+/// attached to.
+///
+/// Modifiers such as [`NodeHandle::color`] come first; the effect method is the
+/// terminal call that writes everything at once. A modifier on its own does
+/// nothing, so there is no way to configure a notification that does not exist.
+///
+/// Effects come in two families, and which one you call decides how it ends:
+///
+/// - [`pulse`](Self::pulse), [`ripple`](Self::ripple),
+///   [`countdown`](Self::countdown), [`scale_in`](Self::scale_in) and
+///   [`crosshair`](Self::crosshair) play once from the [`Instant`] you pass and
+///   stop on their own.
+/// - [`halo`](Self::halo), [`blink`](Self::blink) and [`orbit`](Self::orbit)
+///   are lasting state: they run until [`clear`](Self::clear), and keep the app
+///   repainting the whole time.
+///
+/// A node can carry one of each at once; the state is drawn underneath the
+/// event.
+pub struct NodeHandle<'a> {
+    map: &'a mut Map,
+    id: usize,
+    color: Option<Color32>,
+}
+
+impl NodeHandle<'_> {
+    /// Overrides the colour of the effect about to be attached.
+    ///
+    /// Without this the effect uses the current style's `alert_color`.
+    pub fn color(mut self, color: Color32) -> Self {
+        self.color = Some(color);
+        self
+    }
+
+    fn notify_with(self, animation: NodeAnimation, at: Instant) {
+        self.map.notifications.insert(
+            self.id,
+            Notification {
+                started: at,
+                animation,
+                color: self.color,
+            },
+        );
+    }
+
+    fn set_state(self, animation: SteadyAnimation) {
+        self.map.node_states.insert(
+            self.id,
+            NodeState {
+                animation,
+                color: self.color,
+            },
+        );
+    }
+
+    /// Expanding, fading disc. Reads as "one thing happened here".
+    pub fn pulse(self, at: Instant) {
+        self.notify_with(NodeAnimation::Pulse, at);
+    }
+
+    /// Three staggered expanding rings. Reads as "activity is ongoing".
+    pub fn ripple(self, at: Instant) {
+        self.notify_with(NodeAnimation::Ripple, at);
+    }
+
+    /// A ring emptying clockwise. Reads as "how old is this information".
+    pub fn countdown(self, at: Instant) {
+        self.notify_with(NodeAnimation::CountdownArc, at);
+    }
+
+    /// A disc that overshoots and settles. For a node that just appeared.
+    pub fn scale_in(self, at: Instant) {
+        self.notify_with(NodeAnimation::ScaleIn, at);
+    }
+
+    /// Four ticks converging on the node. Reads as "target acquired".
+    pub fn crosshair(self, at: Instant) {
+        self.notify_with(NodeAnimation::Crosshair, at);
+    }
+
+    /// Lasting ring whose opacity breathes. Runs until [`Self::clear`].
+    pub fn halo(self) {
+        self.set_state(SteadyAnimation::Halo);
+    }
+
+    /// Lasting thick ring blinking on and off. Runs until [`Self::clear`].
+    pub fn blink(self) {
+        self.set_state(SteadyAnimation::Blink);
+    }
+
+    /// Lasting dot circling the node. Runs until [`Self::clear`].
+    pub fn orbit(self) {
+        self.set_state(SteadyAnimation::Orbit);
+    }
+
+    /// Removes both the notification and the lasting state of this node.
+    pub fn clear(self) {
+        self.map.notifications.remove(&self.id);
+        self.map.node_states.remove(&self.id);
+    }
 }
 
 impl Default for Map {
@@ -225,8 +345,8 @@ impl Widget for &mut Map {
                 // Safety net: drop stale notifications even if their node is
                 // outside the viewport and never finishes its animation.
                 let now = Instant::now();
-                self.entities
-                    .retain(|_, init| now.duration_since(*init).as_secs_f32() < 10.0);
+                self.notifications
+                    .retain(|_, n| now.duration_since(n.started).as_secs_f32() < 10.0);
 
                 self.paint_map_lines(&paint, &min_point);
 
@@ -234,7 +354,7 @@ impl Widget for &mut Map {
                     self.paint_map_points(vec_points, hashm, &paint, ui, &min_point, &resp)
                 {
                     for node in nodes_to_remove {
-                        self.entities.remove(&node);
+                        self.notifications.remove(&node);
                     }
                 }
 
@@ -244,33 +364,23 @@ impl Widget for &mut Map {
                         if let Some(template) = &self.node_template {
                             template.marker_ui(ui, adjusted_point.into(), self.zoom);
                         } else {
-                            let mut shapes = Vec::new();
                             let color = if ui.visuals().dark_mode {
                                 Color32::LIGHT_GREEN
                             } else {
                                 Color32::GREEN
                             };
-                            let millis = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .unwrap_or_default()
-                                .as_millis();
-                            let mut transparency = (millis % 2550 / 5) as i64;
-                            if transparency > 255 {
-                                transparency = 255 - (transparency - 255)
-                            }
-                            let corrected_color = Color32::from_rgba_unmultiplied(
-                                color.r(),
-                                color.g(),
-                                color.b(),
-                                transparency as u8,
-                            );
-                            shapes.push(Shape::Circle(CircleShape::stroke(
-                                adjusted_point.into(),
-                                4.0 * self.zoom,
-                                Stroke::new(9.0 * self.zoom, corrected_color),
-                            )));
+                            // Frame time, so every marker in this frame shares
+                            // one clock instead of each sampling the wall clock
+                            // at a slightly different moment.
+                            let time = ui.input(|i| i.time) as f32;
+                            let effect = match self.settings.marker_animation {
+                                SteadyAnimation::Blink => Animation::blink,
+                                SteadyAnimation::Halo => Animation::halo,
+                                SteadyAnimation::Orbit => Animation::orbit,
+                            };
+                            effect(ui.painter(), adjusted_point.into(), self.zoom, time, color);
+                            // Persistent effects never finish on their own.
                             ui.ctx().request_repaint();
-                            ui.painter().extend(shapes);
                         }
                     }
                 }
@@ -325,7 +435,8 @@ impl Map {
             min_size: (None, None),
             max_size: (None, None),
             current_index: 0,
-            entities: HashMap::new(),
+            notifications: HashMap::new(),
+            node_states: HashMap::new(),
             menu_manager: None,
             node_template: None,
             markers: HashMap::new(),
@@ -745,7 +856,10 @@ impl Map {
                 ),
                 Color32::LIGHT_GREEN,
             ),
-            (format!("DST {}", p(self.current.dist)), Color32::LIGHT_GREEN),
+            (
+                format!("DST {}", p(self.current.dist)),
+                Color32::LIGHT_GREEN,
+            ),
             (format!("ZOM {}", self.zoom), Color32::GREEN),
             (
                 format!(
@@ -775,10 +889,7 @@ impl Map {
         }
         let drag = resp.drag_delta();
         if drag.length() != 0.0 {
-            rows.push((
-                format!("DRG {}, {}", p(drag.x), p(drag.y)),
-                Color32::GOLD,
-            ));
+            rows.push((format!("DRG {}, {}", p(drag.x), p(drag.y)), Color32::GOLD));
         }
 
         // Drawn into a *detached* child `Ui` in the map's own layer.
@@ -905,25 +1016,63 @@ impl Map {
                 }
 
                 let system_id = system.get_id();
-                if let Some(init_time) = self.entities.get(&system_id) {
+
+                // Persistent node state is drawn first so a notification --
+                // the *event* -- sits on top of the *state*.
+                if let Some(state) = self.node_states.get(&system_id) {
+                    let color = state.color.unwrap_or(self.current_style().alert_color);
+                    if let Some(template) = &self.node_template {
+                        // There is no dedicated template hook for node state:
+                        // `marker_ui` is the persistent-visual one, so state and
+                        // markers share it. Adding a hook would break every
+                        // existing `NodeTemplate` implementor.
+                        template.marker_ui(ui_obj, viewport_point.into(), self.zoom);
+                    } else {
+                        let effect = match state.animation {
+                            SteadyAnimation::Blink => Animation::blink,
+                            SteadyAnimation::Halo => Animation::halo,
+                            SteadyAnimation::Orbit => Animation::orbit,
+                        };
+                        // Frame time, so every element animated this frame
+                        // shares one clock instead of sampling its own.
+                        let time = ui_obj.input(|i| i.time) as f32;
+                        effect(paint, viewport_point.into(), self.zoom, time, color);
+                    }
+                    // Persistent effects never finish on their own.
+                    ui_obj.ctx().request_repaint();
+                }
+
+                if let Some(notification) = self.notifications.get(&system_id) {
+                    let color = notification
+                        .color
+                        .unwrap_or(self.current_style().alert_color);
                     if let Some(template) = &self.node_template {
                         template.notification_ui(
                             ui_obj,
                             viewport_point.into(),
                             self.zoom,
-                            *init_time,
-                            self.current_style().alert_color,
+                            notification.started,
+                            color,
                         );
-                    } else if Animation::pulse(
-                        paint,
-                        viewport_point,
-                        self.zoom,
-                        *init_time,
-                        self.current_style().alert_color,
-                    ) {
-                        ui_obj.ctx().request_repaint();
                     } else {
-                        nodes_to_remove.push(system_id);
+                        let effect = match notification.animation {
+                            NodeAnimation::Pulse => Animation::pulse,
+                            NodeAnimation::Ripple => Animation::ripple,
+                            NodeAnimation::CountdownArc => Animation::countdown_arc,
+                            NodeAnimation::ScaleIn => Animation::scale_in,
+                            NodeAnimation::Crosshair => Animation::crosshair,
+                        };
+                        if effect(
+                            paint,
+                            viewport_point.into(),
+                            self.zoom,
+                            notification.started,
+                            color,
+                        ) {
+                            ui_obj.ctx().request_repaint();
+                        } else {
+                            nodes_to_remove.push(system_id);
+                        }
                     }
                 }
                 if let Some(node_template) = &self.node_template {
@@ -994,18 +1143,85 @@ impl Map {
         );
     }
 
-    /// Triggers a notification highlight on the node `id_node`.
+    /// Triggers a pulsing notification on the node `id_node`.
     ///
-    /// By default the notification is rendered as a pulsing circle that starts
-    /// at `time` and plays for about 3.5 seconds; calling `notify` again for
-    /// the same node restarts the animation. The effect can be customized with
-    /// [`objects::NodeTemplate::notification_ui`].
+    /// # Deprecated
+    ///
+    /// This only ever played one of the available effects. Use [`Map::node`]
+    /// and pick the effect you want:
+    ///
+    /// ```
+    /// # use egui_map::map::Map;
+    /// # use egui_map::map::objects::MapPoint;
+    /// # use std::time::Instant;
+    /// # let mut map = Map::new();
+    /// # map.add_points(vec![MapPoint::new(1, [0.0, 0.0])]);
+    /// # let time = Instant::now();
+    /// if let Some(node) = map.node(1) {
+    ///     node.pulse(time);
+    /// }
+    /// ```
+    ///
+    /// Note the one behavioural difference: `notify` accepts an id that was
+    /// never loaded (the notification simply never draws), while [`Map::node`]
+    /// returns `None` for it.
+    #[deprecated(
+        since = "0.4.0",
+        note = "use `map.node(id)` and pick an effect, e.g. `if let Some(n) = map.node(id) { n.pulse(time) }`"
+    )]
     pub fn notify(&mut self, id_node: usize, time: Instant) {
         let _span = tracing::info_span!("notify").entered();
-        self.entities
-            .entry(id_node)
-            .and_modify(|value| *value = time)
-            .or_insert(time);
+        self.notifications.insert(
+            id_node,
+            Notification {
+                started: time,
+                animation: NodeAnimation::Pulse,
+                color: None,
+            },
+        );
+    }
+
+    /// Borrows the node `id` so an animation can be attached to it.
+    ///
+    /// Returns `None` when `id` was never loaded through
+    /// [`Map::add_points`] / [`Map::add_hashmap_points`], so a stale or
+    /// mistyped id is a compile-time-visible case rather than a silent no-op.
+    ///
+    /// The handle carries optional configuration that must be set *before* the
+    /// effect, which is the terminal call:
+    ///
+    /// ```
+    /// # use egui_map::map::Map;
+    /// # use egui_map::map::objects::MapPoint;
+    /// # use std::time::Instant;
+    /// # let mut map = Map::new();
+    /// # map.add_points(vec![MapPoint::new(1, [0.0, 0.0])]);
+    /// # let time = Instant::now();
+    /// // a one-off event
+    /// if let Some(node) = map.node(1) {
+    ///     node.color(egui::Color32::RED).ripple(time);
+    /// }
+    ///
+    /// // lasting state, until cleared
+    /// if let Some(node) = map.node(1) {
+    ///     node.halo();
+    /// }
+    ///
+    /// assert!(map.node(999).is_none());
+    /// ```
+    pub fn node(&mut self, id: usize) -> Option<NodeHandle<'_>> {
+        if !self
+            .points
+            .as_ref()
+            .is_some_and(|points| points.contains_key(&id))
+        {
+            return None;
+        }
+        Some(NodeHandle {
+            map: self,
+            id,
+            color: None,
+        })
     }
 
     /// Returns the id of the line closest to `point`, in map coordinates,
@@ -1107,7 +1323,8 @@ mod tests {
         assert!(map.labels.is_empty());
         assert!(map.visible_points.is_empty());
         assert!(map.markers.is_empty());
-        assert!(map.entities.is_empty());
+        assert!(map.notifications.is_empty());
+        assert!(map.node_states.is_empty());
         assert_eq!(map.min_size, (None, None));
         assert_eq!(map.max_size, (None, None));
         assert_eq!(map.current_index, 0);
@@ -1535,17 +1752,146 @@ mod tests {
         assert!(map.line_at([5.0, 5.1], -1.0).is_none());
     }
 
+    /// The deprecated shortcut must keep behaving exactly as it did: a pulse,
+    /// restarted on every call, and tolerant of ids that were never loaded.
     #[test]
-    fn notify_inserts_and_updates_entities() {
+    #[allow(deprecated)]
+    fn deprecated_notify_still_records_a_pulse() {
         let mut map = Map::new();
         let t1 = Instant::now();
         map.notify(5, t1);
-        assert_eq!(map.entities.get(&5), Some(&t1));
+        let recorded = map.notifications.get(&5).expect("notify must record");
+        assert_eq!(recorded.started, t1);
+        assert_eq!(recorded.animation, NodeAnimation::Pulse);
+        assert_eq!(recorded.color, None);
 
         let t2 = t1 + Duration::from_secs(1);
         map.notify(5, t2);
-        assert_eq!(map.entities.get(&5), Some(&t2));
-        assert_eq!(map.entities.len(), 1);
+        assert_eq!(map.notifications.get(&5).unwrap().started, t2);
+        assert_eq!(map.notifications.len(), 1);
+    }
+
+    // ---------- NodeHandle ----------
+
+    fn map_with_nodes() -> Map {
+        let mut map = Map::new();
+        map.add_points(vec![
+            MapPoint::new(1, [0.0, 0.0]),
+            MapPoint::new(2, [10.0, 10.0]),
+        ]);
+        map
+    }
+
+    #[test]
+    fn node_returns_none_for_an_unknown_id() {
+        let mut map = map_with_nodes();
+        assert!(map.node(1).is_some());
+        assert!(map.node(999).is_none());
+        // and with nothing loaded at all
+        assert!(Map::new().node(1).is_none());
+    }
+
+    #[test]
+    fn each_event_effect_records_its_own_animation() {
+        let now = Instant::now();
+        for (apply, expected) in [
+            (
+                Box::new(|n: NodeHandle| n.pulse(now)) as Box<dyn FnOnce(NodeHandle)>,
+                NodeAnimation::Pulse,
+            ),
+            (
+                Box::new(|n: NodeHandle| n.ripple(now)),
+                NodeAnimation::Ripple,
+            ),
+            (
+                Box::new(|n: NodeHandle| n.countdown(now)),
+                NodeAnimation::CountdownArc,
+            ),
+            (
+                Box::new(|n: NodeHandle| n.scale_in(now)),
+                NodeAnimation::ScaleIn,
+            ),
+            (
+                Box::new(|n: NodeHandle| n.crosshair(now)),
+                NodeAnimation::Crosshair,
+            ),
+        ] {
+            let mut map = map_with_nodes();
+            apply(map.node(1).unwrap());
+            let recorded = map.notifications.get(&1).expect("effect must be recorded");
+            assert_eq!(recorded.animation, expected);
+            assert_eq!(recorded.started, now);
+            // an event effect must not leave lasting state behind
+            assert!(map.node_states.is_empty());
+        }
+    }
+
+    #[test]
+    fn each_steady_effect_records_lasting_state() {
+        for (apply, expected) in [
+            (
+                Box::new(|n: NodeHandle| n.halo()) as Box<dyn FnOnce(NodeHandle)>,
+                SteadyAnimation::Halo,
+            ),
+            (Box::new(|n: NodeHandle| n.blink()), SteadyAnimation::Blink),
+            (Box::new(|n: NodeHandle| n.orbit()), SteadyAnimation::Orbit),
+        ] {
+            let mut map = map_with_nodes();
+            apply(map.node(1).unwrap());
+            assert_eq!(map.node_states.get(&1).unwrap().animation, expected);
+            // lasting state must not masquerade as a notification
+            assert!(map.notifications.is_empty());
+        }
+    }
+
+    #[test]
+    fn color_modifier_reaches_both_families() {
+        let mut map = map_with_nodes();
+        map.node(1)
+            .unwrap()
+            .color(Color32::RED)
+            .pulse(Instant::now());
+        map.node(2).unwrap().color(Color32::BLUE).halo();
+
+        assert_eq!(map.notifications.get(&1).unwrap().color, Some(Color32::RED));
+        assert_eq!(map.node_states.get(&2).unwrap().color, Some(Color32::BLUE));
+    }
+
+    #[test]
+    fn a_node_can_carry_state_and_a_notification_at_once() {
+        let mut map = map_with_nodes();
+        map.node(1).unwrap().halo();
+        map.node(1).unwrap().ripple(Instant::now());
+
+        assert!(map.node_states.contains_key(&1));
+        assert!(map.notifications.contains_key(&1));
+    }
+
+    #[test]
+    fn clear_removes_both_families_for_that_node_only() {
+        let mut map = map_with_nodes();
+        map.node(1).unwrap().halo();
+        map.node(1).unwrap().ripple(Instant::now());
+        map.node(2).unwrap().halo();
+
+        map.node(1).unwrap().clear();
+
+        assert!(!map.node_states.contains_key(&1));
+        assert!(!map.notifications.contains_key(&1));
+        assert!(map.node_states.contains_key(&2), "node 2 must be untouched");
+    }
+
+    #[test]
+    fn re_triggering_replaces_the_previous_effect() {
+        let mut map = map_with_nodes();
+        map.node(1).unwrap().pulse(Instant::now());
+        map.node(1).unwrap().crosshair(Instant::now());
+
+        assert_eq!(map.notifications.len(), 1);
+        assert_eq!(
+            map.notifications.get(&1).unwrap().animation,
+            NodeAnimation::Crosshair
+        );
     }
 
     #[test]

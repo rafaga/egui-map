@@ -95,7 +95,9 @@ fn main() -> eframe::Result<()> {
         eframe::NativeOptions::default(),
         move |ui, _frame| {
             if last_pulse.elapsed().as_secs() >= 3 {
-                map.notify(2, Instant::now());
+                if let Some(node) = map.node(2) {
+                    node.pulse(Instant::now());
+                }
                 last_pulse = Instant::now();
             }
             ui.add(&mut map);

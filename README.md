@@ -9,7 +9,7 @@ An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D
 - Node names with configurable visibility rules (always / on hover / hidden).
 - Connection lines between nodes and free-floating text labels.
 - Text is sized in **screen pixels** (`MapSettings::node_text_size`, `MapSettings::label_text_size`), so names stay readable at any zoom level instead of shrinking away as you zoom out.
-- Pulsing notification effects and blinking markers attached to nodes.
+- Animations attached per node through `map.node(id)`: one-off events that end on their own (`pulse`, `ripple`, `countdown`, `scale_in`, `crosshair`) and lasting state that runs until `clear()` (`halo`, `blink`, `orbit`), each with an optional `color()`. The effects live in `map::animation::Animation` and can be reused from your own `NodeTemplate`.
 - Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits.
 - Built-in light and dark themes, customizable through `MapSettings`.
 

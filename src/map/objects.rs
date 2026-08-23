@@ -786,6 +786,15 @@ pub struct MapSettings {
     pub label_visible_zoom: f32,
     /// Controls when node names are displayed.
     pub node_text_visibility: VisibilitySetting,
+    /// Effect drawn on nodes registered with
+    /// [`Map::update_marker`](super::Map::update_marker).
+    ///
+    /// Persistent, so it keeps the app repainting for as long as a marker
+    /// exists. Ignored when a [`NodeTemplate`] is installed.
+    ///
+    /// Node *state* set through [`NodeHandle`](super::NodeHandle) picks its own
+    /// effect per node and does not read this field.
+    pub marker_animation: SteadyAnimation,
     /// Font size, **in screen pixels**, of the node names.
     ///
     /// This is a screen-space size: it deliberately does *not* scale with the
@@ -819,6 +828,7 @@ impl MapSettings {
             line_visible_zoom: 0.0,
             label_visible_zoom: 0.0,
             node_text_visibility: VisibilitySetting::Always,
+            marker_animation: SteadyAnimation::Blink,
             node_text_size: 12.0,
             label_text_size: 24.0,
             styles: vec![MapStyle::new()],
@@ -837,6 +847,7 @@ impl Default for MapSettings {
             line_visible_zoom: 0.2,
             label_visible_zoom: 0.58,
             node_text_visibility: VisibilitySetting::Always,
+            marker_animation: SteadyAnimation::Blink,
             node_text_size: 12.0,
             label_text_size: 24.0,
             styles: Vec::new(),
@@ -877,6 +888,54 @@ impl Default for MapSettings {
         });
         obj
     }
+}
+
+/// A built-in effect that plays once and ends.
+///
+/// Anchored to the [`Instant`] an event happened, these are the animations
+/// reached through [`NodeHandle`](super::NodeHandle): `map.node(id)?.ripple(t)`.
+/// The widget drops the notification and stops repainting once the effect
+/// finishes. See [`crate::map::animation`] for what each looks like and how
+/// long it runs.
+///
+/// Ignored when a [`NodeTemplate`] is installed — the template's
+/// `notification_ui` takes over. The effects stay reachable there through
+/// [`Animation`](crate::map::animation::Animation).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum NodeAnimation {
+    /// Expanding, fading disc. Reads as "one thing happened here".
+    #[default]
+    Pulse,
+    /// Three staggered expanding rings. Reads as "activity is ongoing".
+    Ripple,
+    /// A ring that empties clockwise. Reads as "how old is this information".
+    CountdownArc,
+    /// A disc that overshoots its size and settles. For nodes that just appeared.
+    ScaleIn,
+    /// Four ticks converging on the node. Reads as "target acquired".
+    Crosshair,
+}
+
+/// A built-in effect that runs until it is cleared.
+///
+/// Named after how long it lasts rather than after who uses it, because it has
+/// two consumers: node state set through [`NodeHandle`](super::NodeHandle)
+/// (`map.node(id)?.halo()`), and markers registered with
+/// [`Map::update_marker`](super::Map::update_marker), which pick their look
+/// with [`MapSettings::marker_animation`].
+///
+/// These never end, so the widget keeps requesting repaints for as long as one
+/// is active. That is fine for the handful of elements they are meant for, but
+/// it does keep the app redrawing — see [`crate::map::animation`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SteadyAnimation {
+    /// Thick ring blinking on and off. The long-standing marker look.
+    #[default]
+    Blink,
+    /// Ring whose opacity breathes in and out. Calmer than [`Self::Blink`].
+    Halo,
+    /// A dot circling the node. Reads as "under observation".
+    Orbit,
 }
 
 /// Controls when the name of a node is displayed next to it.
@@ -1557,6 +1616,7 @@ mod tests {
         assert_eq!(s.line_visible_zoom, 0.0);
         assert_eq!(s.label_visible_zoom, 0.0);
         assert_eq!(s.node_text_visibility, VisibilitySetting::Always);
+        assert_eq!(s.marker_animation, SteadyAnimation::Blink);
         assert_eq!(s.node_text_size, 12.0);
         assert_eq!(s.label_text_size, 24.0);
         assert_eq!(s.styles.len(), 1);
@@ -1570,6 +1630,7 @@ mod tests {
         assert_eq!(s.line_visible_zoom, 0.2);
         assert_eq!(s.label_visible_zoom, 0.58);
         assert_eq!(s.node_text_visibility, VisibilitySetting::Always);
+        assert_eq!(s.marker_animation, SteadyAnimation::Blink);
         assert_eq!(s.node_text_size, 12.0);
         assert_eq!(s.label_text_size, 24.0);
         // light + dark themes
