@@ -804,7 +804,7 @@ impl Map {
             .show_background(false)
             .show(&mut overlay_ui, |ui| {
                 for (text, color) in rows {
-                    ui.label(RichText::new(text).monospace().small().color(color));
+                    ui.label(RichText::new(text).monospace().color(color));
                 }
             });
     }
