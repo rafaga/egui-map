@@ -786,6 +786,21 @@ pub struct MapSettings {
     pub label_visible_zoom: f32,
     /// Controls when node names are displayed.
     pub node_text_visibility: VisibilitySetting,
+    /// Font size, **in screen pixels**, of the node names.
+    ///
+    /// This is a screen-space size: it deliberately does *not* scale with the
+    /// zoom factor, so a name stays exactly as readable when the map is zoomed
+    /// all the way out as when it is zoomed in. Because the nodes pack closer
+    /// together as you zoom out while the names keep their size, names take up
+    /// proportionally more of the view down there — use
+    /// [`label_visible_zoom`](Self::label_visible_zoom) or
+    /// [`node_text_visibility`](Self::node_text_visibility) to control when
+    /// they are worth showing at all.
+    pub node_text_size: f32,
+    /// Font size, **in screen pixels**, of the free-floating [`MapLabel`]s.
+    ///
+    /// Screen-space, exactly like [`node_text_size`](Self::node_text_size).
+    pub label_text_size: f32,
     /// Per-theme styles; index `0` is used in light mode, index `1` in dark
     /// mode.
     pub styles: Vec<MapStyle>,
@@ -804,6 +819,8 @@ impl MapSettings {
             line_visible_zoom: 0.0,
             label_visible_zoom: 0.0,
             node_text_visibility: VisibilitySetting::Always,
+            node_text_size: 12.0,
+            label_text_size: 24.0,
             styles: vec![MapStyle::new()],
         }
     }
@@ -820,6 +837,8 @@ impl Default for MapSettings {
             line_visible_zoom: 0.2,
             label_visible_zoom: 0.58,
             node_text_visibility: VisibilitySetting::Always,
+            node_text_size: 12.0,
+            label_text_size: 24.0,
             styles: Vec::new(),
         };
 
@@ -1538,6 +1557,8 @@ mod tests {
         assert_eq!(s.line_visible_zoom, 0.0);
         assert_eq!(s.label_visible_zoom, 0.0);
         assert_eq!(s.node_text_visibility, VisibilitySetting::Always);
+        assert_eq!(s.node_text_size, 12.0);
+        assert_eq!(s.label_text_size, 24.0);
         assert_eq!(s.styles.len(), 1);
     }
 
@@ -1549,6 +1570,8 @@ mod tests {
         assert_eq!(s.line_visible_zoom, 0.2);
         assert_eq!(s.label_visible_zoom, 0.58);
         assert_eq!(s.node_text_visibility, VisibilitySetting::Always);
+        assert_eq!(s.node_text_size, 12.0);
+        assert_eq!(s.label_text_size, 24.0);
         // light + dark themes
         assert_eq!(s.styles.len(), 2);
         // light theme

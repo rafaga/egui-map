@@ -195,7 +195,10 @@ impl Widget for &mut Map {
                 if self.zoom < self.settings.line_visible_zoom {
                     // filling text settings
                     let mut text_settings = TextSettings {
-                        size: 12.00 * self.zoom * 2.00,
+                        // Screen-space size: unlike the map geometry this is
+                        // NOT multiplied by the zoom, so the label stays just
+                        // as readable however far the map is zoomed out.
+                        size: self.settings.label_text_size,
                         anchor: Align2::CENTER_CENTER,
                         family: FontFamily::Proportional,
                         text: String::new(),
@@ -804,7 +807,7 @@ impl Map {
             .show_background(false)
             .show(&mut overlay_ui, |ui| {
                 for (text, color) in rows {
-                    ui.label(RichText::new(text).monospace().color(color));
+                    ui.label(RichText::new(text).monospace().small().color(color));
                 }
             });
     }
@@ -867,7 +870,10 @@ impl Map {
         }
         // filling text settings
         let mut text_settings = TextSettings {
-            size: 12.00 * self.zoom,
+            // Screen-space size: unlike the map geometry this is NOT
+            // multiplied by the zoom, so a node name stays just as readable
+            // when the map is zoomed all the way out.
+            size: self.settings.node_text_size,
             anchor: Align2::LEFT_BOTTOM,
             family: FontFamily::Proportional,
             text: String::new(),

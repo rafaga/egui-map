@@ -8,6 +8,7 @@ An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D
 - Spatial indexing via kd-tree: only the nodes inside the viewport are painted each frame.
 - Node names with configurable visibility rules (always / on hover / hidden).
 - Connection lines between nodes and free-floating text labels.
+- Text is sized in **screen pixels** (`MapSettings::node_text_size`, `MapSettings::label_text_size`), so names stay readable at any zoom level instead of shrinking away as you zoom out.
 - Pulsing notification effects and blinking markers attached to nodes.
 - Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits.
 - Built-in light and dark themes, customizable through `MapSettings`.
