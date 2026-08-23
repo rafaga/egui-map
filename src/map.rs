@@ -166,12 +166,24 @@ impl Widget for &mut Map {
 
         let canvas = egui::Frame::canvas(ui.style()).inner_margin(Margin::symmetric(3, 5));
 
+        // The frame consumes `total_margin` (inner margin + stroke width +
+        // outer margin) around whatever is drawn inside it. `map_area` is the
+        // widget's *whole* footprint, so the painter may only claim what is
+        // left after that margin. Allocating `map_area.size()` inside the
+        // frame made the frame grow to `map_area.size() + 2 * total_margin`
+        // and spill past the space the widget was given, which left the
+        // visible drawable region truncated on the right/bottom -- so its
+        // centre no longer matched the point `set_pos`/`set_pos_from_nodeid`
+        // centre on, and nodes were drawn half a margin off.
+        let frame_margin = canvas.total_margin().sum();
+        let painter_size = (self.map_area.size() - frame_margin).max(Vec2::ZERO);
+
         let inner_response = canvas.show(ui, |ui| {
             let _span = tracing::info_span!("paint_map").entered();
 
             if ui.is_rect_visible(self.map_area) {
                 let (resp, paint) =
-                    ui.allocate_painter(self.map_area.size(), egui::Sense::click_and_drag());
+                    ui.allocate_painter(painter_size, egui::Sense::click_and_drag());
                 let vec = resp.drag_delta();
                 if vec.length() != 0.0 {
                     let _span = tracing::info_span!("calculating_points_in_visible_area").entered();
@@ -197,14 +209,11 @@ impl Widget for &mut Map {
                     }
                 }
 
-                // `resp.rect` is the actual painter rect allocated inside the
-                // canvas frame's inner `Ui`, which is offset from
-                // `self.map_area` by the frame's `inner_margin` (the outer
-                // `Ui` used to compute `map_area` predates that margin).
-                // Using `self.map_area.center()` here used to leave every
-                // painted point (including a freshly-centered node) shifted
-                // by the margin amount, so `set_pos_from_nodeid`/`set_pos`
-                // never landed exactly in the middle of the widget.
+                // Centre on the rect we actually paint into. Now that the
+                // painter is sized to the frame's content area this is exactly
+                // `map_area.center()`, but deriving it from `resp.rect` keeps
+                // projection, hover hit-testing and the frame in agreement if
+                // the frame's margins ever change.
                 let rect_midpoint = RawPoint::from(resp.rect.center());
                 let min_point = self.current.pos - rect_midpoint;
                 let vec_points = &self.visible_points;
@@ -284,7 +293,10 @@ impl Widget for &mut Map {
                 self.print_debug_info(paint, resp);
             }
         });
-        ui.allocate_space(self.map_area.size());
+        // `Frame::show` already allocated the frame's outer rect in the parent
+        // `Ui` (that is what `inner_response.response.rect` reports), so the
+        // widget must not allocate `map_area` a second time -- doing so made
+        // it consume twice its own height in the surrounding layout.
         inner_response.response
     }
 }
@@ -1287,6 +1299,65 @@ mod tests {
         map.add_points(sample_points());
         map.set_pos_from_nodeid(2);
         assert_eq!(map.get_pos(), [10.0, 10.0]);
+    }
+
+    /// Regression: the widget used to allocate a painter of the full
+    /// `map_area.size()` *inside* the canvas frame, so the frame grew by
+    /// `2 * total_margin` and spilled out of the space the widget was given.
+    /// The drawable region was then truncated on the right/bottom and its
+    /// centre no longer matched `map_area.center()`, leaving a centred node
+    /// visibly off-centre by half a margin.
+    #[test]
+    fn centered_node_is_painted_at_the_middle_of_the_drawable_area() {
+        use egui::{Context, RawInput, Shape};
+
+        for screen_size in [egui::vec2(500.0, 500.0), egui::vec2(800.0, 400.0)] {
+            for zoom in [1.0, 2.0] {
+                let mut map = Map::new();
+                map.set_zoom(zoom);
+                map.add_points(vec![MapPoint::new(7, [123.0, 456.0])]);
+                map.set_pos_from_nodeid(7);
+
+                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, screen_size);
+                let ctx = Context::default();
+                let mut widget_rect = egui::Rect::NOTHING;
+                let mut output = ctx.run_ui(
+                    RawInput {
+                        screen_rect: Some(screen),
+                        ..RawInput::default()
+                    },
+                    |ui| {
+                        widget_rect = ui.add(&mut map).rect;
+                    },
+                );
+
+                // The widget must stay inside the space it was handed.
+                assert!(
+                    screen.contains_rect(widget_rect),
+                    "{screen_size:?} zoom {zoom}: widget rect {widget_rect:?} overflows {screen:?}"
+                );
+
+                // The centred node must land at the middle of the region the
+                // map actually paints into (the painter's clip rect).
+                let (node_center, drawable) = output
+                    .shapes
+                    .iter()
+                    .find_map(|cs| match &cs.shape {
+                        Shape::Circle(circle) => Some((circle.center, cs.clip_rect)),
+                        _ => None,
+                    })
+                    .expect("the node must be painted");
+
+                assert!(
+                    node_center.distance(drawable.center()) < 0.5,
+                    "{screen_size:?} zoom {zoom}: node painted at {node_center:?} but the \
+                     drawable area {drawable:?} is centred at {:?}",
+                    drawable.center()
+                );
+
+                output.textures_delta.clear();
+            }
+        }
     }
 
     #[test]
