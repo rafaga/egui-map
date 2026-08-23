@@ -290,7 +290,7 @@ impl Widget for &mut Map {
                 }
 
                 #[cfg(feature = "debug_overlay")]
-                self.print_debug_info(paint, resp);
+                self.print_debug_info(ui, &resp);
             }
         });
         // `Frame::show` already allocated the frame's outer rect in the parent
@@ -704,76 +704,109 @@ impl Map {
         }
     }
 
+    /// Floating debug read-out, compiled in only under the `debug_overlay`
+    /// feature.
+    ///
+    /// Deliberately unobtrusive: it renders as a collapsed `dbg` toggle in the
+    /// map's top-left corner with no background of its own, so it costs a few
+    /// dim pixels until a developer clicks it open. egui remembers the
+    /// open/closed state per widget instance, so it stays open across frames
+    /// once expanded.
     #[cfg(feature = "debug_overlay")]
-    fn print_debug_info(&mut self, paint: Painter, resp: Response) {
+    fn print_debug_info(&mut self, ui: &mut Ui, resp: &Response) {
         let _span = tracing::info_span!("printing debug data").entered();
 
-        let mut init_pos = Pos2::new(
-            self.map_area.left_top().x + 10.00,
-            self.map_area.left_top().y + 10.00,
-        );
-        let mut msg = "MIN:".to_string()
-            + self.current.min.components[0].to_string().as_str()
-            + ","
-            + self.current.min.components[1].to_string().as_str();
-        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-        init_pos.y += 15.0;
-        msg = "MAX:".to_string()
-            + self.current.max.components[0].to_string().as_str()
-            + ","
-            + self.current.max.components[1].to_string().as_str();
-        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-        init_pos.y += 15.0;
-        msg = "CUR:(".to_string()
-            + self.current.pos.components[0].to_string().as_str()
-            + ","
-            + self.current.pos.components[1].to_string().as_str()
-            + ")";
-        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-        init_pos.y += 15.0;
-        msg = "DST:".to_string() + self.current.dist.to_string().as_str();
-        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
-        init_pos.y += 15.0;
-        msg = "ZOM:".to_string() + self.zoom.to_string().as_str();
-        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GREEN, msg);
-        init_pos.y += 15.0;
-        msg = "REC:(".to_string()
-            + self.map_area.left_top().x.to_string().as_str()
-            + ","
-            + self.map_area.left_top().y.to_string().as_str()
-            + "),("
-            + self.map_area.right_bottom().x.to_string().as_str()
-            + ","
-            + self.map_area.right_bottom().y.to_string().as_str()
-            + ")";
-        paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+        let p = |v: f32| format!("{v:.2}");
+        let mut rows: Vec<(String, Color32)> = vec![
+            (
+                format!(
+                    "MIN {}, {}",
+                    p(self.current.min.components[0]),
+                    p(self.current.min.components[1])
+                ),
+                Color32::LIGHT_GREEN,
+            ),
+            (
+                format!(
+                    "MAX {}, {}",
+                    p(self.current.max.components[0]),
+                    p(self.current.max.components[1])
+                ),
+                Color32::LIGHT_GREEN,
+            ),
+            (
+                format!(
+                    "CUR {}, {}",
+                    p(self.current.pos.components[0]),
+                    p(self.current.pos.components[1])
+                ),
+                Color32::LIGHT_GREEN,
+            ),
+            (format!("DST {}", p(self.current.dist)), Color32::LIGHT_GREEN),
+            (format!("ZOM {}", self.zoom), Color32::GREEN),
+            (
+                format!(
+                    "REC {}, {} .. {}, {}",
+                    p(self.map_area.left_top().x),
+                    p(self.map_area.left_top().y),
+                    p(self.map_area.right_bottom().x),
+                    p(self.map_area.right_bottom().y)
+                ),
+                Color32::LIGHT_GREEN,
+            ),
+        ];
         if let Some(points) = &self.points {
-            init_pos.y += 15.0;
-            msg = "NUM:".to_string() + points.len().to_string().as_str();
-            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+            rows.push((format!("NUM {}", points.len()), Color32::LIGHT_GREEN));
         }
         if !self.visible_points.is_empty() {
-            init_pos.y += 15.0;
-            msg = "VIS:".to_string() + self.visible_points.len().to_string().as_str();
-            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_GREEN, msg);
+            rows.push((
+                format!("VIS {}", self.visible_points.len()),
+                Color32::LIGHT_GREEN,
+            ));
         }
         if let Some(pointer_pos) = resp.hover_pos() {
-            init_pos.y += 15.0;
-            msg = "HVR:".to_string()
-                + pointer_pos.x.to_string().as_str()
-                + ","
-                + pointer_pos.y.to_string().as_str();
-            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::LIGHT_BLUE, msg);
+            rows.push((
+                format!("HVR {}, {}", p(pointer_pos.x), p(pointer_pos.y)),
+                Color32::LIGHT_BLUE,
+            ));
         }
-        let vec = resp.drag_delta();
-        if vec.length() != 0.0 {
-            init_pos.y += 15.0;
-            msg = "DRG:".to_string()
-                + vec.to_pos2().x.to_string().as_str()
-                + ","
-                + vec.to_pos2().y.to_string().as_str();
-            paint.debug_text(init_pos, Align2::LEFT_TOP, Color32::GOLD, msg);
+        let drag = resp.drag_delta();
+        if drag.length() != 0.0 {
+            rows.push((
+                format!("DRG {}, {}", p(drag.x), p(drag.y)),
+                Color32::GOLD,
+            ));
         }
+
+        // Drawn into a *detached* child `Ui` in the map's own layer.
+        //
+        // `new_child` alone does not call `advance_cursor_after_rect`, so the
+        // overlay never contributes to the parent's `min_rect`. That matters:
+        // the canvas `Frame` sizes itself from its content's `min_rect`, and
+        // letting this grow it would push the frame past the space the widget
+        // was given -- exactly the overflow that used to knock the map
+        // off-centre. Being laid out after the map's painter also means the
+        // toggle wins pointer input over the pan/zoom surface underneath.
+        let overlay_rect = Rect::from_min_max(
+            self.map_area.left_top() + Vec2::new(6.0, 6.0),
+            self.map_area.right_bottom(),
+        );
+        let mut overlay_ui = ui.new_child(
+            UiBuilder::new()
+                .max_rect(overlay_rect)
+                .layout(Layout::top_down(Align::Min)),
+        );
+        // No frame and no header background: the map shows straight through,
+        // so this costs a few dim pixels until someone opens it.
+        CollapsingHeader::new(RichText::new("dbg").monospace().small().weak())
+            .id_salt("egui_map_debug_overlay")
+            .default_open(false)
+            .show_background(false)
+            .show(&mut overlay_ui, |ui| {
+                for (text, color) in rows {
+                    ui.label(RichText::new(text).monospace().small().color(color));
+                }
+            });
     }
 
     fn paint_sub_components(&mut self, ui_obj: &mut Ui, rect: Rect) {

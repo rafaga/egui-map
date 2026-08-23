@@ -100,7 +100,7 @@ See the `NodeTemplate` rustdoc for a complete example with a custom node shape a
 
 ## Crate features
 
-- `debug_overlay`: draws a small text overlay with the widget's internal viewport state (bounds, current position, distance) for debugging.
+- `debug_overlay`: adds a read-out of the widget's internal viewport state (bounds, current position, distance, zoom, node counts, pointer position). It stays out of the way: a dim `dbg` toggle in the map's top-left corner, collapsed by default and with no background of its own, that you click open when you need the numbers. egui remembers the open/closed state per widget, and the overlay never affects the map's layout.
 
 ## Profiling
 
