@@ -26,7 +26,9 @@ fn render(click: Option<egui::Pos2>) -> (Vec<String>, Vec<egui::Rect>) {
     // the collapsing body animates open.
     for pass in 0..40 {
         let mut events = Vec::new();
-        if pass == 1 && let Some(pos) = click {
+        if pass == 1
+            && let Some(pos) = click
+        {
             events.push(Event::PointerMoved(pos));
             for pressed in [true, false] {
                 events.push(Event::PointerButton {
