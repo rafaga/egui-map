@@ -8,7 +8,8 @@ An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D
 - Spatial indexing via kd-tree: only the nodes inside the viewport are painted each frame.
 - Node names with configurable visibility rules (always / on hover / hidden).
 - Connection lines between nodes and free-floating text labels.
-- Pulsing notification effects and blinking markers attached to nodes.
+- Text is sized in **screen pixels** (`MapSettings::node_text_size`, `MapSettings::label_text_size`), so names stay readable at any zoom level instead of shrinking away as you zoom out.
+- Animations attached per node through `map.node(id)`: one-off events that end on their own (`pulse`, `ripple`, `countdown`, `scale_in`, `crosshair`) and lasting state that runs until `clear()` (`halo`, `blink`, `orbit`), each with an optional `color()`. The effects live in `map::animation::Animation` and can be reused from your own `NodeTemplate`.
 - Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits.
 - Built-in light and dark themes, customizable through `MapSettings`.
 
@@ -100,7 +101,25 @@ See the `NodeTemplate` rustdoc for a complete example with a custom node shape a
 
 ## Crate features
 
-- `puffin`: instruments the widget's hot paths with the [`puffin`](https://crates.io/crates/puffin) profiler.
+- `debug_overlay`: adds a read-out of the widget's internal viewport state (bounds, current position, distance, zoom, node counts, pointer position). It stays out of the way: a dim `dbg` toggle in the map's top-left corner, collapsed by default and with no background of its own, that you click open when you need the numbers. egui remembers the open/closed state per widget, and the overlay never affects the map's layout.
+
+## Profiling
+
+The widget's hot paths (rendering, viewport culling, point/line loading) are instrumented with [`tracing`](https://docs.rs/tracing) spans. `tracing` is a normal, unconditional dependency of this crate, and the spans are cheap no-ops unless a subscriber is installed somewhere in your binary -- `egui-map` never installs one itself.
+
+To see these spans in the [Tracy](https://github.com/wolfpld/tracy) profiler, install a `tracing_tracy::TracyLayer` in your own `main`, e.g.:
+
+```rust
+tracing_subscriber::registry()
+    .with(tracing_tracy::TracyLayer::default())
+    .init();
+```
+
+The `profile` feature pulls in `tracing-subscriber` and `tracing-tracy` so `examples/tracy_profile.rs` can demonstrate exactly this. Run it (with a Tracy capture window already listening) with:
+
+```sh
+cargo run --example tracy_profile --features profile
+```
 
 ## License
 

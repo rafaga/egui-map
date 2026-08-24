@@ -1,5 +1,6 @@
 //! Tests de integración para la API pública de `egui-map`.
 
+use egui::Color32;
 use egui_map::map::Map;
 use egui_map::map::objects::{
     MapLabel, MapPoint, MapSegment, MapSettings, RawLine, RawPoint, VisibilitySetting,
@@ -29,7 +30,11 @@ fn map_position_workflow() {
     let mut map = Map::new();
     map.add_points(sample_points());
 
-    map.set_pos_from_nodeid(2);
+    assert!(map.set_pos_from_nodeid(2));
+    assert_eq!(map.get_pos(), [10.0, 10.0]);
+
+    // An id that was never loaded reports failure and leaves the view put.
+    assert!(!map.set_pos_from_nodeid(4321));
     assert_eq!(map.get_pos(), [10.0, 10.0]);
 
     map.set_pos([5.0, -5.0]);
@@ -71,9 +76,27 @@ fn map_notify_and_markers() {
     let mut map = Map::new();
     map.add_points(sample_points());
 
-    map.notify(1, Instant::now());
+    map.node(1).expect("node 1 is loaded").pulse(Instant::now());
+    map.node(2)
+        .expect("node 2 is loaded")
+        .color(Color32::RED)
+        .halo();
+    assert!(
+        map.node(999).is_none(),
+        "an unknown id must not yield a handle"
+    );
+
     map.update_marker(0, 2);
     map.update_marker(1, 3);
+}
+
+/// The deprecated shortcut must stay callable from outside the crate.
+#[test]
+#[allow(deprecated)]
+fn deprecated_notify_is_still_usable_from_outside_crate() {
+    let mut map = Map::new();
+    map.add_points(sample_points());
+    map.notify(1, Instant::now());
 }
 
 // ---------- tipos públicos desde fuera del crate ----------
