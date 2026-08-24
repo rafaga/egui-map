@@ -5,7 +5,7 @@
 //! customization points of the widget: [`MapSettings`], [`MapStyle`],
 //! [`VisibilitySetting`], [`ContextMenuManager`] and [`NodeTemplate`].
 
-use egui::{Align2, Color32, FontFamily, FontId, Pos2, Stroke, Ui};
+use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Stroke, Ui};
 use rstar::AABB;
 use std::convert::{From, Into};
 use std::ops::{Add, Div, DivAssign, Mul, MulAssign, Sub};
@@ -948,6 +948,41 @@ pub enum SteadyAnimation {
     Orbit,
 }
 
+/// A built-in effect that plays once and ends, for a segment.
+///
+/// Anchored to the [`Instant`] an event happened, these are the animations
+/// reached through [`SegmentHandle`](super::SegmentHandle):
+/// `map.segment(id)?.flash(t)`. The widget drops the notification and stops
+/// repainting once the effect finishes. See [`crate::map::animation`] for
+/// what each looks like and how long it runs.
+///
+/// Ignored when a [`SegmentTemplate`] is installed — the template's
+/// `segment_notification_ui` takes over. The effect stays reachable there
+/// through [`Animation`](crate::map::animation::Animation).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SegmentAnimation {
+    /// A brief bright flash on the line that fades back out. The segment
+    /// analogue of [`NodeAnimation::Pulse`] — reads as "something happened on
+    /// this route".
+    #[default]
+    FlashDecay,
+}
+
+/// A built-in effect that runs until it is cleared, for a segment.
+///
+/// Reached through node state set on [`SegmentHandle`](super::SegmentHandle)
+/// (`map.segment(id)?.comet()`). Like [`SteadyAnimation`], these never end,
+/// so the widget keeps requesting repaints for as long as one is active —
+/// fine for a handful of highlighted routes, not for every segment on the
+/// map.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SteadySegmentAnimation {
+    /// A dot travelling from one endpoint to the other and looping. Reads as
+    /// "this is the direction of flow".
+    #[default]
+    Comet,
+}
+
 /// Controls when the name of a node is displayed next to it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum VisibilitySetting {
@@ -1114,6 +1149,128 @@ pub trait NodeTemplate {
     /// (e.g. a blinking light), drive the effect from the system clock and
     /// call [`ui.ctx().request_repaint()`](egui::Context::request_repaint).
     fn marker_ui(&self, ui: &mut Ui, _viewport_position: Pos2, _zoom: f32);
+}
+
+/// Customizes how segments and their visual effects are rendered.
+///
+/// When a template is installed with
+/// [`Map::set_segment_template`](super::Map::set_segment_template), the widget
+/// delegates all segment painting to it instead of using the built-in stroke
+/// and animations.
+///
+/// Unlike [`NodeTemplate`], these methods receive a bare [`&Painter`](Painter)
+/// rather than `&mut Ui`. Segments are visited in bulk, every frame, after the
+/// R-tree viewport culling in `paint_map_lines`; going through `Ui` would cost
+/// a layout pass per segment, on top of what the culling already had to
+/// discard. Use [`Painter::ctx`] to reach the [`egui::Context`] — for example
+/// to call `request_repaint()`.
+///
+/// The positions passed to these methods are in screen coordinates: already
+/// scaled by `zoom` and translated to the viewport origin, same as
+/// [`NodeTemplate`]'s. Multiply every size by `zoom` so your shapes scale
+/// together with the map.
+///
+/// # Examples
+///
+/// A segment drawn as a dashed line, plus a notification that briefly
+/// thickens and brightens it:
+///
+/// ```
+/// use egui_map::map::objects::{MapSegment, SegmentTemplate};
+/// use egui::{Color32, Painter, Pos2, Stroke};
+/// use std::time::Instant;
+///
+/// struct DashedRoutes;
+///
+/// impl SegmentTemplate for DashedRoutes {
+///     fn segment_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, _segment: &MapSegment) {
+///         // A crude dash: short strokes along the segment, spaced in screen
+///         // pixels so they don't stretch as the map zooms.
+///         let dir = b - a;
+///         let len = dir.length();
+///         let step = 10.0 * zoom;
+///         let mut travelled = 0.0;
+///         while travelled < len {
+///             let start = a + dir * (travelled / len);
+///             let end = a + dir * ((travelled + step * 0.6).min(len) / len);
+///             painter.line_segment([start, end], Stroke::new(2.0 * zoom, Color32::GRAY));
+///             travelled += step;
+///         }
+///     }
+///
+///     fn segment_notification_ui(
+///         &self,
+///         painter: &Painter,
+///         a: Pos2,
+///         b: Pos2,
+///         zoom: f32,
+///         initial_time: Instant,
+///         color: Color32,
+///     ) -> bool {
+///         let secs = Instant::now().duration_since(initial_time).as_secs_f32();
+///         let alpha = (1.0 - secs).clamp(0.0, 1.0);
+///         let fading =
+///             Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (255.0 * alpha) as u8);
+///         painter.line_segment([a, b], Stroke::new(5.0 * zoom, fading));
+///         painter.ctx().request_repaint();
+///         secs < 1.0
+///     }
+///
+///     fn segment_state_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, time: f32, color: Color32) {
+///         let t = (time / 1.6).rem_euclid(1.0);
+///         painter.circle_filled(a + (b - a) * t, 4.0 * zoom, color);
+///         painter.ctx().request_repaint();
+///     }
+/// }
+/// ```
+pub trait SegmentTemplate {
+    /// Draws a segment, replacing the default stroked line.
+    ///
+    /// Called every frame for each segment that survives the R-tree viewport
+    /// culling in `paint_map_lines`.
+    fn segment_ui(
+        &self,
+        painter: &Painter,
+        pos_a: Pos2,
+        pos_b: Pos2,
+        zoom: f32,
+        segment: &MapSegment,
+    );
+
+    /// Draws the notification effect of a segment notified through
+    /// [`Map::segment`](super::Map::segment).
+    ///
+    /// Called every frame for each segment carrying an event-driven effect
+    /// (see [`SegmentHandle`](super::SegmentHandle)). Should return `true`
+    /// while the animation is still playing — remember to call
+    /// [`Painter::ctx`]`().request_repaint()` — once it returns `false` the
+    /// notification is discarded.
+    fn segment_notification_ui(
+        &self,
+        painter: &Painter,
+        pos_a: Pos2,
+        pos_b: Pos2,
+        zoom: f32,
+        initial_time: Instant,
+        color: Color32,
+    ) -> bool;
+
+    /// Draws the lasting state effect of a segment (e.g. a travelling dot).
+    ///
+    /// Called every frame for each segment with lasting state set through
+    /// [`Map::segment`](super::Map::segment). `time` is the frame time in
+    /// seconds (`ui.input(|i| i.time)`), so every element animated this frame
+    /// shares one clock. For animated state, remember to call
+    /// [`Painter::ctx`]`().request_repaint()`.
+    fn segment_state_ui(
+        &self,
+        painter: &Painter,
+        pos_a: Pos2,
+        pos_b: Pos2,
+        zoom: f32,
+        time: f32,
+        color: Color32,
+    );
 }
 
 #[cfg(test)]

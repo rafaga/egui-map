@@ -10,7 +10,8 @@ An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D
 - Connection lines between nodes and free-floating text labels.
 - Text is sized in **screen pixels** (`MapSettings::node_text_size`, `MapSettings::label_text_size`), so names stay readable at any zoom level instead of shrinking away as you zoom out.
 - Animations attached per node through `map.node(id)`: one-off events that end on their own (`pulse`, `ripple`, `countdown`, `scale_in`, `crosshair`) and lasting state that runs until `clear()` (`halo`, `blink`, `orbit`), each with an optional `color()`. The effects live in `map::animation::Animation` and can be reused from your own `NodeTemplate`.
-- Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits.
+- The same idiom for segments through `map.segment(id)`: `flash` (one-off) and `comet` (lasting, until `clear()`), also with an optional `color()`.
+- Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits, and custom segment rendering through `SegmentTemplate`.
 - Built-in light and dark themes, customizable through `MapSettings`.
 
 ## Usage
@@ -98,6 +99,39 @@ map.set_node_template(std::rc::Rc::new(MyTemplate));
 ```
 
 See the `NodeTemplate` rustdoc for a complete example with a custom node shape and an animated notification.
+
+### Custom segment rendering and animations
+
+`SegmentTemplate` is the segment counterpart of `NodeTemplate`. Its methods take a bare `&Painter` rather than `&mut Ui`, since segments are visited in bulk after the R-tree viewport culling — use `painter.ctx()` to reach `request_repaint()`:
+
+```rust
+use egui_map::map::objects::{MapSegment, SegmentTemplate};
+use egui::{Color32, Painter, Pos2, Stroke};
+use std::time::Instant;
+
+struct MySegments;
+
+impl SegmentTemplate for MySegments {
+    fn segment_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, _segment: &MapSegment) {
+        painter.line_segment([a, b], Stroke::new(1.5 * zoom, Color32::GRAY));
+    }
+
+    fn segment_notification_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, start: Instant, color: Color32) -> bool {
+        // ... draw a time-driven effect computed from `start.elapsed()` ...
+        painter.ctx().request_repaint(); // keep the animation frames coming
+        start.elapsed().as_secs_f32() < 1.0 // returning false removes the notification
+    }
+
+    fn segment_state_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, time: f32, color: Color32) {
+        // `time` is the frame time (`ui.input(|i| i.time)`), shared by every element animated this frame.
+        painter.ctx().request_repaint();
+    }
+}
+
+map.set_segment_template(std::rc::Rc::new(MySegments));
+```
+
+`examples/animations.rs` shows the built-in node and segment effects end to end, with no custom template at all.
 
 ## Crate features
 

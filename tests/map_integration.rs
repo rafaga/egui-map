@@ -90,6 +90,28 @@ fn map_notify_and_markers() {
     map.update_marker(1, 3);
 }
 
+#[test]
+fn map_segment_effects() {
+    let mut map = Map::new();
+    map.add_points(sample_points());
+    map.add_lines(vec![
+        MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]),
+        MapSegment::new((1, 3), [0.0, 0.0], [-10.0, -10.0]),
+    ]);
+
+    map.segment((1, 2))
+        .expect("segment (1, 2) is loaded")
+        .flash(Instant::now());
+    map.segment((1, 3))
+        .expect("segment (1, 3) is loaded")
+        .color(Color32::RED)
+        .comet();
+    assert!(
+        map.segment((404, 404)).is_none(),
+        "an unknown id must not yield a handle"
+    );
+}
+
 /// The deprecated shortcut must stay callable from outside the crate.
 #[test]
 #[allow(deprecated)]

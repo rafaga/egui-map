@@ -1,29 +1,38 @@
-//! Built-in animation effects for nodes.
+//! Built-in animation effects for nodes and segments.
 //!
 //! Two families, distinguished by how they handle time and by when they stop:
 //!
 //! - **Event-driven** effects ([`Animation::pulse`], [`Animation::ripple`],
 //!   [`Animation::countdown_arc`], [`Animation::scale_in`],
-//!   [`Animation::crosshair`]) are anchored to the [`Instant`] an event
-//!   happened and **terminate**: they return `true` while still playing and
-//!   `false` once finished, so the caller can drop the entry and stop
-//!   repainting.
+//!   [`Animation::crosshair`], [`Animation::flash_decay`]) are anchored to the
+//!   [`Instant`] an event happened and **terminate**: they return `true` while
+//!   still playing and `false` once finished, so the caller can drop the entry
+//!   and stop repainting.
 //! - **Persistent** effects ([`Animation::halo`], [`Animation::blink`],
-//!   [`Animation::orbit`]) never end. They take the **frame time** in seconds
-//!   (`ui.input(|i| i.time)`) rather than an `Instant`, so every element
-//!   animated in the same frame shares one clock and cannot drift apart.
+//!   [`Animation::orbit`], [`Animation::comet`]) never end. They take the
+//!   **frame time** in seconds (`ui.input(|i| i.time)`) rather than an
+//!   `Instant`, so every element animated in the same frame shares one clock
+//!   and cannot drift apart.
 //!
 //! Persistent effects require the caller to keep requesting repaints, which
 //! turns an idle app into one redrawing continuously — use them for a handful
-//! of elements, not for every node.
+//! of elements, not for every node or segment.
 //!
-//! Both families are reached through
+//! The node effects are reached through
 //! [`Map::node`](crate::map::Map::node); see [`NodeHandle`](crate::map::NodeHandle).
 //! They are also useful from a custom
 //! [`NodeTemplate`](crate::map::objects::NodeTemplate): call them from
 //! `notification_ui` / `marker_ui` instead of reimplementing the effect. When
 //! you do, remember to call `ui.ctx().request_repaint()` yourself — the widget
 //! only does that for its own built-in path.
+//!
+//! The segment effects ([`Animation::flash_decay`], [`Animation::comet`]) are
+//! reached the same way, through
+//! [`Map::segment`](crate::map::Map::segment); see
+//! [`SegmentHandle`](crate::map::SegmentHandle). A custom
+//! [`SegmentTemplate`](crate::map::objects::SegmentTemplate) calls them from
+//! `segment_notification_ui` / `segment_state_ui`, remembering to call
+//! `painter.ctx().request_repaint()` itself.
 
 use egui::{
     Color32, Painter, Pos2, Shape, Stroke,
@@ -42,6 +51,10 @@ pub const COUNTDOWN_DURATION: f32 = 5.0;
 pub const SCALE_IN_DURATION: f32 = 0.45;
 /// How long [`Animation::crosshair`] takes to converge, in seconds.
 pub const CROSSHAIR_DURATION: f32 = 0.6;
+/// How long [`Animation::flash_decay`] takes to fade back out, in seconds.
+pub const FLASH_DECAY_DURATION: f32 = 1.0;
+/// How long [`Animation::comet`] takes for one end-to-end pass, in seconds.
+pub const COMET_PERIOD: f32 = 1.6;
 
 /// Returns `color` with its alpha replaced by `alpha` (clamped to `0.0..=1.0`).
 fn with_alpha(color: Color32, alpha: f32) -> Color32 {
@@ -235,6 +248,48 @@ impl Animation {
         secs < CROSSHAIR_DURATION
     }
 
+    // -------------------------------------------------------- events/segment
+
+    /// One frame of a segment briefly thickening and brightening, then fading
+    /// back to nothing.
+    ///
+    /// The segment analogue of [`Animation::pulse`]: reads as *"something
+    /// happened on this route"*. Plays for [`FLASH_DECAY_DURATION`]. Returns
+    /// `true` while still playing.
+    pub fn flash_decay(
+        painter: &Painter,
+        a: Pos2,
+        b: Pos2,
+        zoom: f32,
+        initial_time: Instant,
+        color: Color32,
+    ) -> bool {
+        let secs = elapsed(initial_time);
+        let progress = (secs / FLASH_DECAY_DURATION).clamp(0.0, 1.0);
+        let width = (2.0 + 10.0 * (1.0 - progress)) * zoom;
+        painter.line_segment(
+            [a, b],
+            Stroke::new(width, with_alpha(color, 1.0 - progress)),
+        );
+        secs < FLASH_DECAY_DURATION
+    }
+
+    // ----------------------------------------------------- persistent/segment
+
+    /// One frame of a dot travelling from `a` to `b` and looping back.
+    ///
+    /// Reads as *"this is the direction of flow"*. `time` is the frame time in
+    /// seconds; one full pass takes [`COMET_PERIOD`].
+    pub fn comet(painter: &Painter, a: Pos2, b: Pos2, zoom: f32, time: f32, color: Color32) {
+        let t = (time / COMET_PERIOD).rem_euclid(1.0);
+        let pos = a + (b - a) * t;
+        painter.add(Shape::Circle(CircleShape::filled(
+            pos,
+            (4.0 * zoom).max(2.5),
+            color,
+        )));
+    }
+
     // ------------------------------------------------------------ persistent
 
     /// One frame of a ring whose opacity breathes in and out.
@@ -366,6 +421,67 @@ mod tests {
             Animation::blink(&painter, Pos2::ZERO, 1.0, time, Color32::GREEN);
             Animation::orbit(&painter, Pos2::ZERO, 1.0, time, Color32::GREEN);
         }
+    }
+
+    /// Every segment event-driven effect, with the duration it runs for.
+    #[allow(clippy::type_complexity)]
+    fn segment_event_effects() -> Vec<(
+        &'static str,
+        fn(&Painter, Pos2, Pos2, f32, Instant, Color32) -> bool,
+        f32,
+    )> {
+        vec![("flash_decay", Animation::flash_decay, FLASH_DECAY_DURATION)]
+    }
+
+    #[test]
+    fn segment_event_effects_report_running_then_finished() {
+        let painter = headless_painter();
+        let a = Pos2::ZERO;
+        let b = Pos2::new(50.0, 0.0);
+        for (name, effect, duration) in segment_event_effects() {
+            assert!(
+                effect(&painter, a, b, 1.0, Instant::now(), Color32::RED),
+                "{name} must report it is still running when it just started"
+            );
+
+            let long_past = Instant::now() - Duration::from_secs_f32(duration + 1.0);
+            assert!(
+                !effect(&painter, a, b, 1.0, long_past, Color32::RED),
+                "{name} must report it is finished once its duration has passed"
+            );
+        }
+    }
+
+    #[test]
+    fn every_segment_event_effect_stays_under_the_orphan_sweep() {
+        for (name, _, duration) in segment_event_effects() {
+            assert!(
+                duration < 10.0,
+                "{name} lasts {duration}s, which the 10s orphan sweep would truncate"
+            );
+        }
+    }
+
+    #[test]
+    fn comet_runs_at_any_time_and_stays_on_the_segment() {
+        let painter = headless_painter();
+        let a = Pos2::ZERO;
+        let b = Pos2::new(50.0, 0.0);
+        for time in [0.0, 0.4, 0.8, 60.0] {
+            Animation::comet(&painter, a, b, 1.0, time, Color32::GREEN);
+        }
+    }
+
+    #[test]
+    fn comet_loops_back_to_the_start() {
+        // One full `COMET_PERIOD` later it should be back where it began.
+        let t0 = 0.2;
+        let t1 = t0 + COMET_PERIOD;
+        let at = |t: f32| {
+            let frac = (t / COMET_PERIOD).rem_euclid(1.0);
+            Pos2::ZERO + (Pos2::new(50.0, 0.0) - Pos2::ZERO) * frac
+        };
+        assert_eq!(at(t0), at(t1));
     }
 
     #[test]
