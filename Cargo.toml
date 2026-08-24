@@ -44,7 +44,7 @@ debug_overlay = []
 # without this feature -- it only exists to demonstrate/exercise wiring
 # a subscriber, consumers are free to do the same in their own binary
 # instead of enabling it here.
-tracy = ["dep:tracing-subscriber", "dep:tracing-tracy"]
+profile = ["dep:tracing-subscriber", "dep:tracing-tracy"]
 
 [dependencies]
 egui = { version = "0.36.1", features = ["bytemuck"]}
@@ -60,4 +60,4 @@ egui_extras = { version = "0.36.1", features = ["svg"] }
 
 [[example]]
 name = "tracy_profile"
-required-features = ["tracy"]
+required-features = ["profile"]
