@@ -696,6 +696,15 @@ pub struct MapPoint {
     /// visibility, so a line is drawn whenever its bounding box intersects
     /// the viewport.
     pub connections: Vec<(usize, usize)>,
+    /// Persistent fill color for this node's default circle, in place of
+    /// [`NodeStyle::fill_color`](super::NodeStyle::fill_color). `None`
+    /// (the default) keeps today's behavior of every node sharing the
+    /// same style color.
+    ///
+    /// Only consulted by the built-in circle drawn when no
+    /// [`NodeTemplate`] is installed -- a custom template receives this
+    /// same `MapPoint` and decides for itself whether/how to use `color`.
+    pub color: Option<Color32>,
 }
 
 impl MapPoint {
@@ -706,6 +715,7 @@ impl MapPoint {
             id,
             connections: Vec::new(),
             name: None,
+            color: None,
         }
     }
 

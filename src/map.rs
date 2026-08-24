@@ -1081,7 +1081,7 @@ impl Map {
                     shape_vec.push(Shape::circle_filled(
                         viewport_point.into(),
                         4.00 * self.zoom,
-                        self.current_style().fill_color,
+                        system.color.unwrap_or(self.current_style().fill_color),
                     ));
                 }
             }
