@@ -248,11 +248,17 @@ fn color_modifier_reaches_the_painted_shape() {
             ui.add(&mut map);
         },
     );
+    // `pulse`'s alpha ramps down from the very first fractional millisecond,
+    // and any alpha below 255 sends the colour through `Color32`'s
+    // gamma-aware premultiply, which can shave the red channel from 255 down
+    // to 254. Pin on hue (green/blue stay exactly 0 at any alpha; only red
+    // itself is scaled) rather than on an exact 255, or this flakes under
+    // scheduling jitter between recording `Instant::now()` and the paint call.
     let reds = out
         .shapes
         .iter()
         .filter(|cs| match &cs.shape {
-            Shape::Circle(c) => c.fill.r() == 255 && c.fill.g() == 0 && c.fill.b() == 0,
+            Shape::Circle(c) => c.fill.r() > 0 && c.fill.g() == 0 && c.fill.b() == 0,
             _ => false,
         })
         .count();

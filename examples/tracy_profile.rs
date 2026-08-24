@@ -12,7 +12,7 @@
 //!
 //! Run with a Tracy capture window/GUI already listening, then:
 //!
-//!     cargo run --example tracy_profile --features tracy
+//!     cargo run --example tracy_profile --features profile
 //!
 //! Pan and zoom the map to see `paint_map`, `calculate_visible_points`,
 //! `capture_mouse_events` and friends show up as zones per frame.

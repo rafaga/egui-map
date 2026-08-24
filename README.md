@@ -115,10 +115,10 @@ tracing_subscriber::registry()
     .init();
 ```
 
-The `tracy` feature pulls in `tracing-subscriber` and `tracing-tracy` so `examples/tracy_profile.rs` can demonstrate exactly this. Run it (with a Tracy capture window already listening) with:
+The `profile` feature pulls in `tracing-subscriber` and `tracing-tracy` so `examples/tracy_profile.rs` can demonstrate exactly this. Run it (with a Tracy capture window already listening) with:
 
 ```sh
-cargo run --example tracy_profile --features tracy
+cargo run --example tracy_profile --features profile
 ```
 
 ## License
