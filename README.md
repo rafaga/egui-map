@@ -12,7 +12,7 @@ An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D
 - Animations attached per node through `map.node(id)`: one-off events that end on their own (`pulse`, `ripple`, `countdown`, `scale_in`, `crosshair`) and lasting state that runs until `clear()` (`halo`, `blink`, `orbit`), each with an optional `color()`. The effects live in `map::animation::Animation` and can be reused from your own `NodeTemplate`.
 - The same idiom for segments through `map.segment(id)`: `flash` / `comet_once(at, direction)` / `wipe` (one-off) and `comet` / `dash` / `glow_band` / `chevrons` (lasting, until `clear()`) -- `comet_once` is a single dot pass with the direction you choose (`CometDirection::Forward`/`Reverse`), `wipe` draws the line in from one endpoint to the other, `dash` is a "marching ants" pattern and `chevrons` a row of sliding arrowheads, both painted as a repeating-texture mesh (two triangles per segment, one shared texture), `glow_band` a soft travelling highlight that fades out past each end instead of repeating, also with an optional `color()`.
 - Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits, and custom segment rendering through `SegmentTemplate`.
-- Fourteen built-in color themes, each with a light and a dark variant, or install your own through the `MapTheme` trait.
+- [Fourteen built-in color themes](THEMES.md), each with a light and a dark variant, or install your own through the `MapTheme` trait.
 
 ## Usage
 
