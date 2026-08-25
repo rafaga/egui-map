@@ -102,12 +102,12 @@
 //! you only want to reuse the built-in look.
 
 use crate::map::animation::Animation;
-use crate::map::theme::{Style, Theme as MapTheme};
 use crate::map::objects::{
     CometDirection, ContextMenuManager, MapBounds, MapLabel, MapPoint, MapSegment, MapSettings,
-    MarkerContext, NodeAnimation, NotificationContext, RawLine, RawPoint,
-    SegmentAnimation, SteadyAnimation, SteadySegmentAnimation, TextSettings, VisibilitySetting,
+    MarkerContext, NodeAnimation, NotificationContext, RawLine, RawPoint, SegmentAnimation,
+    SteadyAnimation, SteadySegmentAnimation, TextSettings, VisibilitySetting,
 };
+use crate::map::theme::{ColorMode, MapTheme, Style, Theme};
 use egui::{widgets::*, *};
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
@@ -213,7 +213,8 @@ pub struct Map {
     node_template: Option<Rc<dyn NodeTemplate>>,
     segment_template: Option<Rc<dyn SegmentTemplate>>,
     markers: HashMap<usize, usize>,
-    theme: MapTheme,
+    /// The active color palette. See [`Map::set_theme`].
+    theme: Rc<dyn MapTheme>,
 }
 
 /// A one-off effect attached to a node, with the moment it started.
@@ -671,7 +672,7 @@ impl Map {
             segment_template: None,
             markers: HashMap::new(),
             segments: None,
-            theme: crate::map::theme::Theme::NebulaViolet,
+            theme: Rc::new(Theme::default()),
         }
     }
 
@@ -1044,10 +1045,32 @@ impl Map {
             let _span = tracing::info_span!("asign_visual_style").entered();
 
             self.current_index = style_index;
+            self.apply_theme_colors(style_index);
             let map_style = self.settings.styles.get_mut(style_index).unwrap();
             let visuals = &ui_obj.style().visuals;
             map_style.background_color = visuals.extreme_bg_color;
             map_style.border = Some(visuals.window_stroke);
+        }
+    }
+
+    /// Refreshes `self.settings.styles[index]`'s colors from
+    /// `self.theme.colors(mode)`, where `mode` is `Dark` for index `1` and
+    /// `Light` for any other index -- so `Style` never carries its own copy
+    /// of colors the active `MapTheme` already provides.
+    fn apply_theme_colors(&mut self, index: usize) {
+        let mode = if index == 1 {
+            ColorMode::Dark
+        } else {
+            ColorMode::Light
+        };
+        let colors = self.theme.colors(mode);
+        if let Some(map_style) = self.settings.styles.get_mut(index) {
+            map_style.fill_color = colors.node;
+            map_style.text_color = colors.text;
+            map_style.alert_color = colors.alert;
+            if let Some(line) = map_style.line.as_mut() {
+                line.color = colors.segment;
+            }
         }
     }
 
@@ -1679,6 +1702,21 @@ impl Map {
     /// the [`SegmentTemplate`] examples for a custom line style and animation.
     pub fn set_segment_template(&mut self, template: Rc<dyn SegmentTemplate>) {
         self.segment_template = Some(template);
+    }
+
+    /// Installs the color palette used to paint the map, replacing the
+    /// default [`Theme::default`].
+    ///
+    /// Accepts any [`MapTheme`] implementation, including a built-in
+    /// [`Theme`] variant -- e.g. `map.set_theme(Rc::new(Theme::ArticCyan))` --
+    /// or a custom palette. Both the light and dark [`Style`] entries are
+    /// refreshed immediately, so the new colors show up on the very next
+    /// frame regardless of which mode is currently active.
+    pub fn set_theme(&mut self, new_theme: Rc<dyn MapTheme>) {
+        self.theme = new_theme;
+        for index in 0..self.settings.styles.len().min(2) {
+            self.apply_theme_colors(index);
+        }
     }
 
     /// Adds the marker `id`, or moves it, so it points to the node `node_id`.
@@ -2593,5 +2631,87 @@ mod tests {
         assert_eq!(map.current.min.components, [-20.0, -40.0]);
         assert_eq!(map.current.pos.components, [10.0, 10.0]);
         assert_eq!(map.current.dist, 50.0);
+    }
+
+    // ---------- theme ----------
+
+    #[test]
+    fn set_theme_refreshes_both_style_slots_immediately() {
+        // `assign_visual_style` only refreshes `settings.styles[index]` when
+        // the light/dark mode actually changes, so `set_theme` must apply the
+        // new theme itself -- otherwise a theme swap wouldn't show up until
+        // the app also happened to flip between light and dark mode.
+        let mut map = Map::new();
+        map.set_theme(Rc::new(Theme::ArticCyan));
+
+        let light = Theme::ArticCyan.colors(ColorMode::Light);
+        let dark = Theme::ArticCyan.colors(ColorMode::Dark);
+
+        let light_style = &map.settings.styles[0];
+        assert_eq!(light_style.fill_color, light.node);
+        assert_eq!(light_style.text_color, light.text);
+        assert_eq!(light_style.alert_color, light.alert);
+        assert_eq!(light_style.line.unwrap().color, light.segment);
+
+        let dark_style = &map.settings.styles[1];
+        assert_eq!(dark_style.fill_color, dark.node);
+        assert_eq!(dark_style.text_color, dark.text);
+        assert_eq!(dark_style.alert_color, dark.alert);
+        assert_eq!(dark_style.line.unwrap().color, dark.segment);
+    }
+
+    #[test]
+    fn a_custom_map_theme_reaches_the_painted_node() {
+        // End-to-end: a `MapTheme` installed through `set_theme` must be the
+        // color a plain (un-templated, un-colored) node is actually painted
+        // with, not just a value sitting in `settings.styles`.
+        use crate::map::theme::ThemeColors;
+        use egui::{Context, RawInput, Shape};
+
+        struct FixedPalette;
+        impl MapTheme for FixedPalette {
+            fn colors(&self, _mode: ColorMode) -> ThemeColors {
+                ThemeColors {
+                    node: Color32::from_rgb(1, 2, 3),
+                    segment: Color32::from_rgb(4, 5, 6),
+                    selected: Color32::from_rgb(7, 8, 9),
+                    alert: Color32::from_rgb(10, 11, 12),
+                    text: Color32::from_rgb(13, 14, 15),
+                }
+            }
+        }
+
+        let mut map = Map::new();
+        map.set_theme(Rc::new(FixedPalette));
+        map.add_points(vec![MapPoint::new(1, [0.0, 0.0])]);
+
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0));
+        let ctx = Context::default();
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(screen),
+                ..RawInput::default()
+            },
+            |ui| {
+                ui.add(&mut map);
+            },
+        );
+        // `TexturesDelta` panics on drop if left unhandled.
+        output.textures_delta.clear();
+
+        let fill = output
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                Shape::Circle(circle) => Some(circle.fill),
+                _ => None,
+            })
+            .expect("the node must be painted");
+
+        assert_eq!(
+            fill,
+            Color32::from_rgb(1, 2, 3),
+            "the node fill must come from the installed MapTheme, in either color mode"
+        );
     }
 }

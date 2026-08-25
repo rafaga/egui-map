@@ -2,15 +2,17 @@
 //!
 //! This module contains the geometry primitives ([`RawPoint`], [`RawLine`]),
 //! the map content types ([`MapPoint`], [`MapSegment`], [`MapLabel`]) and the
-//! customization points of the widget: [`MapSettings`], [`MapStyle`],
-//! [`VisibilitySetting`], [`ContextMenuManager`] and [`NodeTemplate`].
+//! customization points of the widget: [`MapSettings`],
+//! [`Style`](super::theme::Style), [`VisibilitySetting`],
+//! [`ContextMenuManager`] and [`NodeTemplate`]. The color palette a `Style`
+//! paints with lives in [`super::theme`], via [`MapTheme`](super::theme::MapTheme).
 
+use crate::map::theme::{ColorMode, Style, Theme};
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Ui};
 use rstar::AABB;
 use std::convert::{From, Into};
 use std::ops::{Add, Div, DivAssign, Mul, MulAssign, Sub};
 use std::time::Instant;
-use crate::map::theme::Style;
 
 /// A point (or vector) in 2D map coordinates.
 ///
@@ -695,8 +697,10 @@ pub struct MapSettings {
     ///
     /// Screen-space, exactly like [`node_text_size`](Self::node_text_size).
     pub label_text_size: f32,
-    /// Per-theme styles; index `0` is used in light mode, index `1` in dark
-    /// mode.
+    /// Per-mode styles; index `0` is used in light mode, index `1` in dark
+    /// mode. Their colors are kept in sync with the active
+    /// [`MapTheme`](super::theme::MapTheme) -- see
+    /// [`Map::set_theme`](super::Map::set_theme) -- rather than set here.
     pub styles: Vec<Style>,
 }
 
@@ -738,6 +742,15 @@ impl Default for MapSettings {
             styles: Vec::new(),
         };
 
+        // The border/background colors below are placeholders, overwritten
+        // by `Map::assign_visual_style` from egui's own visuals on the first
+        // frame. The node/text/alert/line colors instead come from the
+        // default `MapTheme` (see `Map::set_theme`) so they never duplicate
+        // what `Theme::colors` already defines -- `Map::apply_theme_colors`
+        // keeps them in sync with whichever `MapTheme` is installed.
+        let light = Theme::default().colors(ColorMode::Light);
+        let dark = Theme::default().colors(ColorMode::Dark);
+
         // light Theme
         obj.styles.push(Style {
             border: Some(egui::Stroke {
@@ -746,13 +759,13 @@ impl Default for MapSettings {
             }),
             line: Some(egui::Stroke {
                 width: 2.0,
-                color: Color32::DARK_RED,
+                color: light.segment,
             }),
-            fill_color: Color32::from_rgb(216, 142, 58),
-            text_color: Color32::DARK_GREEN,
+            fill_color: light.node,
+            text_color: light.text,
             font: Some(FontId::new(12.00, FontFamily::Proportional)),
             background_color: Color32::WHITE,
-            alert_color: Color32::from_rgb(246, 30, 131),
+            alert_color: light.alert,
         });
 
         // Dark Theme
@@ -763,13 +776,13 @@ impl Default for MapSettings {
             }),
             line: Some(egui::Stroke {
                 width: 2.0,
-                color: Color32::LIGHT_RED,
+                color: dark.segment,
             }),
-            fill_color: Color32::GOLD,
-            text_color: Color32::LIGHT_GREEN,
+            fill_color: dark.node,
+            text_color: dark.text,
             font: Some(FontId::new(12.00, FontFamily::Proportional)),
             background_color: Color32::DARK_GRAY,
-            alert_color: Color32::from_rgb(128, 12, 67),
+            alert_color: dark.alert,
         });
         obj
     }
