@@ -5,11 +5,12 @@
 //! customization points of the widget: [`MapSettings`], [`MapStyle`],
 //! [`VisibilitySetting`], [`ContextMenuManager`] and [`NodeTemplate`].
 
-use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Stroke, Ui};
+use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Ui};
 use rstar::AABB;
 use std::convert::{From, Into};
 use std::ops::{Add, Div, DivAssign, Mul, MulAssign, Sub};
 use std::time::Instant;
+use crate::map::theme::Style;
 
 /// A point (or vector) in 2D map coordinates.
 ///
@@ -447,132 +448,6 @@ impl From<[[i64; 2]; 2]> for RawLine {
     }
 }
 
-/// Visual style used to paint the map under a given theme.
-///
-/// Multiplying or dividing a `MapStyle` by a number scales the stroke widths
-/// and the font size, leaving colors untouched; the widget uses this to scale
-/// the active style with the current zoom factor. Fields that are `None` are
-/// left untouched by those operators.
-#[derive(Clone, Debug)]
-pub struct MapStyle {
-    /// Stroke used for the widget border.
-    pub border: Option<Stroke>,
-    /// Stroke used for the connection lines between nodes.
-    pub line: Option<Stroke>,
-    /// Color used to fill node shapes.
-    pub fill_color: Color32,
-    /// Color used for text.
-    pub text_color: Color32,
-    /// Font used for map labels.
-    pub font: Option<FontId>,
-    /// Background color of the map canvas.
-    pub background_color: Color32,
-    /// Color used for notification pulse animations.
-    pub alert_color: Color32,
-}
-
-impl MapStyle {
-    /// Creates a fully transparent style with no border, line or font.
-    pub fn new() -> Self {
-        MapStyle {
-            border: None,
-            line: None,
-            fill_color: Color32::TRANSPARENT,
-            text_color: Color32::TRANSPARENT,
-            font: None,
-            background_color: Color32::TRANSPARENT,
-            alert_color: Color32::TRANSPARENT,
-        }
-    }
-}
-
-impl Default for MapStyle {
-    fn default() -> Self {
-        MapStyle::new()
-    }
-}
-
-impl MapStyle {
-    /// Returns a copy with the stroke widths and font size scaled by `factor`.
-    /// Fields that are `None` are left untouched.
-    fn scaled(mut self, factor: f32) -> Self {
-        if let Some(border) = self.border.as_mut() {
-            border.width *= factor;
-        }
-        if let Some(line) = self.line.as_mut() {
-            line.width *= factor;
-        }
-        if let Some(font) = self.font.as_mut() {
-            font.size *= factor;
-        }
-        self
-    }
-}
-
-impl Mul<i64> for MapStyle {
-    type Output = Self;
-
-    fn mul(self, rhs: i64) -> Self::Output {
-        self.scaled(rhs as f32)
-    }
-}
-
-impl Mul<i32> for MapStyle {
-    type Output = Self;
-
-    fn mul(self, rhs: i32) -> Self::Output {
-        self.scaled(rhs as f32)
-    }
-}
-
-impl Mul<f32> for MapStyle {
-    type Output = Self;
-
-    fn mul(self, rhs: f32) -> Self::Output {
-        self.scaled(rhs)
-    }
-}
-
-impl Mul<f64> for MapStyle {
-    type Output = Self;
-
-    fn mul(self, rhs: f64) -> Self::Output {
-        self.scaled(rhs as f32)
-    }
-}
-
-impl Div<i64> for MapStyle {
-    type Output = Self;
-
-    fn div(self, rhs: i64) -> Self::Output {
-        self.scaled(1.0 / rhs as f32)
-    }
-}
-
-impl Div<i32> for MapStyle {
-    type Output = Self;
-
-    fn div(self, rhs: i32) -> Self::Output {
-        self.scaled(1.0 / rhs as f32)
-    }
-}
-
-impl Div<f32> for MapStyle {
-    type Output = Self;
-
-    fn div(self, rhs: f32) -> Self::Output {
-        self.scaled(1.0 / rhs)
-    }
-}
-
-impl Div<f64> for MapStyle {
-    type Output = Self;
-
-    fn div(self, rhs: f64) -> Self::Output {
-        self.scaled(1.0 / rhs as f32)
-    }
-}
-
 /// A free-floating text label drawn on the map.
 ///
 /// Labels are installed with [`Map::add_labels`](super::Map::add_labels).
@@ -822,7 +697,7 @@ pub struct MapSettings {
     pub label_text_size: f32,
     /// Per-theme styles; index `0` is used in light mode, index `1` in dark
     /// mode.
-    pub styles: Vec<MapStyle>,
+    pub styles: Vec<Style>,
 }
 
 impl MapSettings {
@@ -841,7 +716,7 @@ impl MapSettings {
             marker_animation: SteadyAnimation::Blink,
             node_text_size: 12.0,
             label_text_size: 24.0,
-            styles: vec![MapStyle::new()],
+            styles: vec![Style::new()],
         }
     }
 }
@@ -864,7 +739,7 @@ impl Default for MapSettings {
         };
 
         // light Theme
-        obj.styles.push(MapStyle {
+        obj.styles.push(Style {
             border: Some(egui::Stroke {
                 width: 2.0,
                 color: Color32::from_rgb(216, 142, 58),
@@ -881,7 +756,7 @@ impl Default for MapSettings {
         });
 
         // Dark Theme
-        obj.styles.push(MapStyle {
+        obj.styles.push(Style {
             border: Some(egui::Stroke {
                 width: 2.0,
                 color: Color32::GOLD,
@@ -1700,10 +1575,10 @@ mod tests {
 
     // ---------- MapStyle ----------
 
-    fn full_style() -> MapStyle {
-        MapStyle {
-            border: Some(Stroke::new(2.0, Color32::RED)),
-            line: Some(Stroke::new(4.0, Color32::BLUE)),
+    fn full_style() -> Style {
+        Style {
+            border: Some(egui::Stroke::new(2.0, Color32::RED)),
+            line: Some(egui::Stroke::new(4.0, Color32::BLUE)),
             fill_color: Color32::GREEN,
             text_color: Color32::WHITE,
             font: Some(FontId::new(10.0, FontFamily::Proportional)),
@@ -1714,7 +1589,7 @@ mod tests {
 
     #[test]
     fn map_style_new() {
-        let s = MapStyle::new();
+        let s = Style::new();
         assert!(s.border.is_none());
         assert!(s.line.is_none());
         assert!(s.font.is_none());
@@ -1726,7 +1601,7 @@ mod tests {
 
     #[test]
     fn map_style_default_equals_new() {
-        let s = MapStyle::default();
+        let s = Style::default();
         assert!(s.border.is_none());
         assert!(s.line.is_none());
         assert!(s.font.is_none());

@@ -102,9 +102,10 @@
 //! you only want to reuse the built-in look.
 
 use crate::map::animation::Animation;
+use crate::map::theme::{Style, Theme as MapTheme};
 use crate::map::objects::{
     CometDirection, ContextMenuManager, MapBounds, MapLabel, MapPoint, MapSegment, MapSettings,
-    MapStyle, MarkerContext, NodeAnimation, NotificationContext, RawLine, RawPoint,
+    MarkerContext, NodeAnimation, NotificationContext, RawLine, RawPoint,
     SegmentAnimation, SteadyAnimation, SteadySegmentAnimation, TextSettings, VisibilitySetting,
 };
 use egui::{widgets::*, *};
@@ -118,6 +119,7 @@ use self::objects::{NodeTemplate, SegmentTemplate};
 
 pub mod animation;
 pub mod objects;
+pub mod theme;
 
 /// How much more opaque a segment effect (`comet`, `dash`, `flash`, ...)
 /// stays than the segment's own zoom-based fade-in, in `paint_map_lines` --
@@ -211,6 +213,7 @@ pub struct Map {
     node_template: Option<Rc<dyn NodeTemplate>>,
     segment_template: Option<Rc<dyn SegmentTemplate>>,
     markers: HashMap<usize, usize>,
+    theme: MapTheme,
 }
 
 /// A one-off effect attached to a node, with the moment it started.
@@ -668,6 +671,7 @@ impl Map {
             segment_template: None,
             markers: HashMap::new(),
             segments: None,
+            theme: crate::map::theme::Theme::NebulaViolet,
         }
     }
 
@@ -1025,7 +1029,7 @@ impl Map {
 
     /// Returns the style for the current theme, falling back to the first
     /// style if the current theme index has no entry.
-    fn current_style(&self) -> &MapStyle {
+    fn current_style(&self) -> &Style {
         self.settings
             .styles
             .get(self.current_index)
