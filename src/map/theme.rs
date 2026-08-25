@@ -1,7 +1,7 @@
 use egui::ecolor::Color32;
 use egui::{Stroke,FontId};
 use std::ops::{Div, Mul};
-use crate::map::theme::{ColorMode::{Dark,Light}, Theme::{ArticCyan, EmberForge, NebulaViolet, SlateOcean, SolarAmber, TerminalGreen}};
+use crate::map::theme::{ColorMode::{Dark,Light}, Theme::*};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Theme {
@@ -12,6 +12,14 @@ pub enum Theme {
     EmberForge,
     SolarAmber,
     ArticCyan,
+    CrimsonSignal,
+    MidnightIndigo,
+    CopperRose,
+    LimeCircuit,
+    CoralReef,
+    GraphiteMono,
+    PlumStatic,
+    SandstoneTrail
 }
 
 impl Theme {
@@ -124,7 +132,158 @@ impl Theme {
                     alert: Color32::from_rgb(0xFF, 0x6B, 0x95), 
                     text: Color32::from_rgb(0xD3, 0xEA, 0xEF)  
                 }
-            }
+            },
+            (CrimsonSignal, Dark) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0xE3, 0x5B, 0x6B),
+                    segment: Color32::from_rgb(0x5C, 0x45, 0x48),
+                    selected: Color32::from_rgb(0x58, 0xA6, 0xFF),
+                    alert: Color32::from_rgb(0xFF, 0xC4, 0x59),
+                    text: Color32::from_rgb(0xE8, 0xD6, 0xD8)
+                }
+            },
+            (CrimsonSignal, Light) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0x7A, 0x1F, 0x2B),
+                    segment: Color32::from_rgb(0xB9, 0xA8, 0xA8),
+                    selected: Color32::from_rgb(0x1F, 0x6F, 0xEB),
+                    alert: Color32::from_rgb(0xE8, 0xA6, 0x28),
+                    text: Color32::from_rgb(0x33, 0x26, 0x28)
+                }
+            },
+
+            (MidnightIndigo, Dark) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0x7B, 0x82, 0xE0),
+                    segment: Color32::from_rgb(0x3A, 0x3D, 0x66),
+                    selected: Color32::from_rgb(0x2D, 0xD4, 0xC8),
+                    alert: Color32::from_rgb(0xFF, 0xD1, 0x66),
+                    text: Color32::from_rgb(0xD8, 0xDA, 0xF0)
+                }
+            },
+            (MidnightIndigo, Light) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0x2B, 0x2F, 0x77),
+                    segment: Color32::from_rgb(0xA6, 0xA9, 0xC9),
+                    selected: Color32::from_rgb(0x00, 0xB8, 0xA9),
+                    alert: Color32::from_rgb(0xE0, 0xA4, 0x00),
+                    text: Color32::from_rgb(0x26, 0x29, 0x40)
+                }
+            },
+
+            (CopperRose, Dark) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0xE0, 0x8B, 0x6F),
+                    segment: Color32::from_rgb(0x5E, 0x45, 0x3D),
+                    selected: Color32::from_rgb(0x4F, 0xC3, 0xAE),
+                    alert: Color32::from_rgb(0xFF, 0xC6, 0x5C),
+                    text: Color32::from_rgb(0xEF, 0xDA, 0xD0)
+                }
+            },
+            (CopperRose, Light) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0x9C, 0x4A, 0x3C),
+                    segment: Color32::from_rgb(0xD9, 0xB8, 0xAE),
+                    selected: Color32::from_rgb(0x2F, 0x7A, 0x6B),
+                    alert: Color32::from_rgb(0xE0, 0xA2, 0x3C),
+                    text: Color32::from_rgb(0x3D, 0x2E, 0x29)
+                }
+            },
+
+            (LimeCircuit, Dark) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0xA8, 0xE0, 0x5F),
+                    segment: Color32::from_rgb(0x44, 0x52, 0x30),
+                    selected: Color32::from_rgb(0xA7, 0x8B, 0xFA),
+                    alert: Color32::from_rgb(0xFF, 0x85, 0x52),
+                    text: Color32::from_rgb(0xDC, 0xEA, 0xC0)
+                }
+            },
+            (LimeCircuit, Light) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0x4D, 0x7A, 0x1F),
+                    segment: Color32::from_rgb(0xB9, 0xC7, 0x9A),
+                    selected: Color32::from_rgb(0x7B, 0x3F, 0xE4),
+                    alert: Color32::from_rgb(0xE8, 0x5D, 0x2E),
+                    text: Color32::from_rgb(0x2E, 0x33, 0x20)
+                }
+            },
+
+            (CoralReef, Dark) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0xFF, 0x8B, 0x73),
+                    segment: Color32::from_rgb(0x38, 0x65, 0x60),
+                    selected: Color32::from_rgb(0x5C, 0xA8, 0xE0),
+                    alert: Color32::from_rgb(0xFF, 0xC1, 0x5E),
+                    text: Color32::from_rgb(0xD6, 0xED, 0xE8)
+                }
+            },
+            (CoralReef, Light) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0xD6, 0x5A, 0x45),
+                    segment: Color32::from_rgb(0xA8, 0xD4, 0xCE),
+                    selected: Color32::from_rgb(0x1D, 0x5C, 0x9E),
+                    alert: Color32::from_rgb(0xF2, 0xA9, 0x3C),
+                    text: Color32::from_rgb(0x33, 0x40, 0x3E)
+                }
+            },
+
+            (GraphiteMono, Dark) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0xD6, 0xD6, 0xD2),
+                    segment: Color32::from_rgb(0x4A, 0x4A, 0x46),
+                    selected: Color32::from_rgb(0x4F, 0xB3, 0xF5),
+                    alert: Color32::from_rgb(0xFF, 0x6B, 0x5C),
+                    text: Color32::from_rgb(0xE8, 0xE8, 0xE4)
+                }
+            },
+            (GraphiteMono, Light) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0x3A, 0x3A, 0x3A),
+                    segment: Color32::from_rgb(0xB8, 0xB8, 0xB4),
+                    selected: Color32::from_rgb(0x1F, 0x8F, 0xE0),
+                    alert: Color32::from_rgb(0xE0, 0x48, 0x3A),
+                    text: Color32::from_rgb(0x23, 0x23, 0x23)
+                }
+            },
+
+            (PlumStatic, Dark) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0xC9, 0x94, 0xBB),
+                    segment: Color32::from_rgb(0x4A, 0x3A, 0x45),
+                    selected: Color32::from_rgb(0x52, 0xC9, 0x9A),
+                    alert: Color32::from_rgb(0xFF, 0xA0, 0x5C),
+                    text: Color32::from_rgb(0xEB, 0xD9, 0xE5)
+                }
+            },
+            (PlumStatic, Light) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0x6B, 0x3B, 0x5E),
+                    segment: Color32::from_rgb(0xC7, 0xAE, 0xC0),
+                    selected: Color32::from_rgb(0x2E, 0x8B, 0x6E),
+                    alert: Color32::from_rgb(0xE0, 0x79, 0x3D),
+                    text: Color32::from_rgb(0x36, 0x2B, 0x33)
+                }
+            },
+
+            (SandstoneTrail, Dark) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0xC9, 0xAD, 0x72),
+                    segment: Color32::from_rgb(0x4E, 0x45, 0x30),
+                    selected: Color32::from_rgb(0x4F, 0xA8, 0xCC),
+                    alert: Color32::from_rgb(0xF0, 0x70, 0x8A),
+                    text: Color32::from_rgb(0xE6, 0xD9, 0xB8)
+                }
+            },
+            (SandstoneTrail, Light) => {
+                ThemeColors {
+                    node: Color32::from_rgb(0x6B, 0x5A, 0x3A),
+                    segment: Color32::from_rgb(0xDC, 0xCB, 0xA0),
+                    selected: Color32::from_rgb(0x2A, 0x6E, 0x8C),
+                    alert: Color32::from_rgb(0xD1, 0x49, 0x5B),
+                    text: Color32::from_rgb(0x3A, 0x31, 0x21)
+                }
+            },
         }
     }
 }
