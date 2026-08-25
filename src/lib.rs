@@ -16,7 +16,9 @@
 //! - Custom node rendering and right-click context menus through the
 //!   [`map::objects::NodeTemplate`] and [`map::objects::ContextMenuManager`]
 //!   traits.
-//! - Independent light and dark themes (see [`map::objects::MapSettings`]).
+//! - Built-in color themes with independent light and dark variants, or a
+//!   custom palette installed through [`map::theme::MapTheme`] (see
+//!   [`map::objects::MapSettings`] for the rest of the visual style).
 //!
 //! ## Quick start
 //!
