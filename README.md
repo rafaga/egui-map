@@ -10,7 +10,7 @@ An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D
 - Connection lines between nodes and free-floating text labels.
 - Text is sized in **screen pixels** (`MapSettings::node_text_size`, `MapSettings::label_text_size`), so names stay readable at any zoom level instead of shrinking away as you zoom out.
 - Animations attached per node through `map.node(id)`: one-off events that end on their own (`pulse`, `ripple`, `countdown`, `scale_in`, `crosshair`) and lasting state that runs until `clear()` (`halo`, `blink`, `orbit`), each with an optional `color()`. The effects live in `map::animation::Animation` and can be reused from your own `NodeTemplate`.
-- The same idiom for segments through `map.segment(id)`: `flash` (one-off) and `comet` (lasting, until `clear()`), also with an optional `color()`.
+- The same idiom for segments through `map.segment(id)`: `flash` / `comet_once(at, direction)` / `wipe` (one-off) and `comet` / `dash` / `glow_band` / `chevrons` (lasting, until `clear()`) -- `comet_once` is a single dot pass with the direction you choose (`CometDirection::Forward`/`Reverse`), `wipe` draws the line in from one endpoint to the other, `dash` is a "marching ants" pattern and `chevrons` a row of sliding arrowheads, both painted as a repeating-texture mesh (two triangles per segment, one shared texture), `glow_band` a soft travelling highlight that fades out past each end instead of repeating, also with an optional `color()`.
 - Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits, and custom segment rendering through `SegmentTemplate`.
 - Built-in light and dark themes, customizable through `MapSettings`.
 
@@ -73,9 +73,8 @@ A line is only drawn while the zoom level is above `MapSettings::line_visible_zo
 Implement `NodeTemplate` to take over how nodes, selection highlights, notifications and markers are drawn — including the name labels, which the widget no longer paints once a template is installed:
 
 ```rust
-use egui_map::map::objects::{MapPoint, NodeTemplate};
+use egui_map::map::objects::{MapPoint, MarkerContext, NodeTemplate, NotificationContext};
 use egui::{Color32, Pos2, Ui};
-use std::time::Instant;
 
 struct MyTemplate;
 
@@ -85,14 +84,19 @@ impl NodeTemplate for MyTemplate {
         ui.painter().circle_filled(position, 6.0 * zoom, Color32::GOLD);
     }
 
-    fn notification_ui(&self, ui: &mut Ui, position: Pos2, zoom: f32, start: Instant, color: Color32) -> bool {
-        // ... draw a time-driven effect computed from `start.elapsed()` ...
+    fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
+        // `ctx.kind` is which built-in event was requested (Pulse, Ripple, ...) and
+        // `ctx.node_id` is which node -- dispatch on either, or reuse
+        // `animation::Animation::*`. Draw a time-driven effect from `ctx.initial_time`.
         ui.ctx().request_repaint(); // keep the animation frames coming
-        start.elapsed().as_secs_f32() < 2.0 // returning false removes the notification
+        ctx.initial_time.elapsed().as_secs_f32() < 2.0 // returning false removes the notification
     }
 
     fn selection_ui(&self, _ui: &mut Ui, _position: Pos2, _zoom: f32) {}
-    fn marker_ui(&self, _ui: &mut Ui, _position: Pos2, _zoom: f32) {}
+    fn marker_ui(&self, _ui: &mut Ui, _ctx: MarkerContext) {
+        // `ctx.kind` is Halo/Blink/Orbit for persistent node state, or the shared
+        // `MapSettings::marker_animation` for a `Map::update_marker` marker.
+    }
 }
 
 map.set_node_template(std::rc::Rc::new(MyTemplate));
@@ -131,7 +135,7 @@ impl SegmentTemplate for MySegments {
 map.set_segment_template(std::rc::Rc::new(MySegments));
 ```
 
-`examples/animations.rs` shows the built-in node and segment effects end to end, with no custom template at all.
+`examples/animations.rs` shows the built-in node and segment effects end to end, with no custom template at all. `examples/node_template_animations.rs` shows the opposite pairing: a custom `NodeTemplate` (its own node shape) that still reuses the built-in `Animation::*` functions from its `notification_ui`/`marker_ui` hooks instead of hand-rolling new ones, dispatching directly on the `kind`/`node_id` those hooks receive.
 
 ## Crate features
 

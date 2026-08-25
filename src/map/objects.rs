@@ -948,6 +948,22 @@ pub enum SteadyAnimation {
     Orbit,
 }
 
+/// Which endpoint a [`SegmentAnimation::Comet`] pass starts from.
+///
+/// A segment's own endpoint order (`a`, `b` as loaded through
+/// [`Map::add_lines`](super::Map::add_lines)) is not usually meaningful to a
+/// caller — naming the two ends [`Self::Forward`]/[`Self::Reverse`] instead
+/// keeps the choice about the animation's direction, not about internal
+/// storage order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CometDirection {
+    /// From the segment's first endpoint to its second.
+    #[default]
+    Forward,
+    /// From the segment's second endpoint to its first.
+    Reverse,
+}
+
 /// A built-in effect that plays once and ends, for a segment.
 ///
 /// Anchored to the [`Instant`] an event happened, these are the animations
@@ -966,21 +982,41 @@ pub enum SegmentAnimation {
     /// this route".
     #[default]
     FlashDecay,
+    /// A single dot pass from one endpoint to the other, then gone — the
+    /// event-driven counterpart to [`SteadySegmentAnimation::Comet`]. Reads
+    /// as "one thing moved along this route just now", direction included,
+    /// rather than "traffic keeps flowing this way".
+    Comet(CometDirection),
+    /// The line drawing itself in from the first endpoint to the second,
+    /// then gone. Reads as "this route was just established" rather than
+    /// "something travelled along it".
+    Wipe,
 }
 
 /// A built-in effect that runs until it is cleared, for a segment.
 ///
 /// Reached through node state set on [`SegmentHandle`](super::SegmentHandle)
-/// (`map.segment(id)?.comet()`). Like [`SteadyAnimation`], these never end,
-/// so the widget keeps requesting repaints for as long as one is active —
-/// fine for a handful of highlighted routes, not for every segment on the
-/// map.
+/// (`map.segment(id)?.comet()` / `.dash()`). Like [`SteadyAnimation`], these
+/// never end, so the widget keeps requesting repaints for as long as one is
+/// active — fine for a handful of highlighted routes, not for every segment
+/// on the map.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SteadySegmentAnimation {
     /// A dot travelling from one endpoint to the other and looping. Reads as
     /// "this is the direction of flow".
     #[default]
     Comet,
+    /// A dashed line whose pattern slides along the segment ("marching
+    /// ants"). Reads as "route", classic for a path someone might follow.
+    Dash,
+    /// A localized band of brightness travelling the length of the segment
+    /// and looping, fading out before it reaches either end rather than
+    /// snapping back. Reads as "flow", softer and less busy than [`Self::Dash`].
+    GlowBand,
+    /// A row of arrow shapes sliding along the segment, pointing the way.
+    /// Reads as "direction of travel", more explicit than [`Self::Comet`]'s
+    /// single dot.
+    Chevrons,
 }
 
 /// Controls when the name of a node is displayed next to it.
@@ -1044,7 +1080,7 @@ pub trait ContextMenuManager {
 /// animation that expands and fades out over two seconds:
 ///
 /// ```
-/// use egui_map::map::objects::{MapPoint, NodeTemplate};
+/// use egui_map::map::objects::{MapPoint, NodeTemplate, NotificationContext, MarkerContext};
 /// use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Ui, Vec2};
 /// use std::time::Instant;
 ///
@@ -1072,24 +1108,21 @@ pub trait ContextMenuManager {
 ///         );
 ///     }
 ///
-///     fn notification_ui(
-///         &self,
-///         ui: &mut Ui,
-///         position: Pos2,
-///         zoom: f32,
-///         initial_time: Instant,
-///         color: Color32,
-///     ) -> bool {
-///         let secs = Instant::now().duration_since(initial_time).as_secs_f32();
+///     fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
+///         let secs = Instant::now().duration_since(ctx.initial_time).as_secs_f32();
 ///         // Expand the stroke and fade the color out over 2 seconds.
 ///         let alpha = (1.0 - secs / 2.0).clamp(0.0, 1.0);
-///         let fading =
-///             Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (255.0 * alpha) as u8);
-///         let rect = Rect::from_center_size(position, Vec2::new(90.0 * zoom, 35.0 * zoom));
+///         let fading = Color32::from_rgba_unmultiplied(
+///             ctx.color.r(),
+///             ctx.color.g(),
+///             ctx.color.b(),
+///             (255.0 * alpha) as u8,
+///         );
+///         let rect = Rect::from_center_size(ctx.position, Vec2::new(90.0 * ctx.zoom, 35.0 * ctx.zoom));
 ///         ui.painter().rect_stroke(
 ///             rect,
-///             CornerRadius::same((10.0 * zoom) as u8),
-///             Stroke::new((4.0 + 25.0 * secs) * zoom, fading),
+///             CornerRadius::same((10.0 * ctx.zoom) as u8),
+///             Stroke::new((4.0 + 25.0 * secs) * ctx.zoom, fading),
 ///             egui::StrokeKind::Middle,
 ///         );
 ///         // Keep the animation frames coming.
@@ -1106,12 +1139,19 @@ pub trait ContextMenuManager {
 ///     #         egui::StrokeKind::Middle,
 ///     #     );
 ///     # }
-///     # fn marker_ui(&self, ui: &mut Ui, point: Pos2, zoom: f32) {
-///     #     ui.painter().circle_stroke(point, 6.0 * zoom, Stroke::new(2.0 * zoom, Color32::LIGHT_GREEN));
+///     # fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext) {
+///     #     ui.painter().circle_stroke(ctx.position, 6.0 * ctx.zoom, Stroke::new(2.0 * ctx.zoom, Color32::LIGHT_GREEN));
 ///     #     ui.ctx().request_repaint();
 ///     # }
 /// }
 /// ```
+///
+/// # Note on `NodeAnimation`/`SteadyAnimation` in the examples above
+///
+/// The hidden (`#`-prefixed) stub methods above still take `Pos2`/`f32`
+/// directly rather than a context struct -- only [`NotificationContext`] and
+/// [`MarkerContext`] exist; `node_ui`/`selection_ui` were not wide enough to
+/// need one.
 pub trait NodeTemplate {
     /// Draws a node, replacing the default filled circle.
     ///
@@ -1126,29 +1166,84 @@ pub trait NodeTemplate {
     /// [`MapSettings::node_text_visibility`] is [`VisibilitySetting::Hover`].
     fn selection_ui(&self, ui: &mut Ui, _viewport_position: Pos2, _zoom: f32);
 
-    /// Draws the notification effect of a node notified at `initial_time`.
+    /// Draws the notification effect of a node notified at
+    /// `ctx.initial_time`.
     ///
     /// Called every frame for each node passed to
-    /// [`Map::notify`](super::Map::notify). Should return `true` while the
-    /// animation is still playing — remember to call
-    /// [`ui.ctx().request_repaint()`](egui::Context::request_repaint) —; once
-    /// it returns `false` the notification is discarded.
-    fn notification_ui(
-        &self,
-        ui: &mut Ui,
-        _viewport_position: Pos2,
-        _zoom: f32,
-        initial_time: Instant,
-        color: Color32,
-    ) -> bool;
+    /// [`Map::notify`](super::Map::notify) or animated through
+    /// [`Map::node`](super::Map::node)'s event methods (`pulse`, `ripple`,
+    /// ...). `ctx.kind` is which of those was requested and `ctx.node_id` is
+    /// the id of the node it belongs to -- use them to dispatch to the
+    /// matching built-in [`Animation`](crate::map::animation::Animation)
+    /// function (or your own effect) instead of reimplementing every
+    /// animation by hand. See [`NotificationContext`] for the rest of the
+    /// fields. Should return `true` while the animation is still playing —
+    /// remember to call
+    /// [`ui.ctx().request_repaint()`](egui::Context::request_repaint) —;
+    /// once it returns `false` the notification is discarded.
+    fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool;
 
     /// Draws a marker over the given node.
     ///
-    /// Called every frame for each marker registered with
-    /// [`Map::update_marker`](super::Map::update_marker). For animated markers
-    /// (e.g. a blinking light), drive the effect from the system clock and
-    /// call [`ui.ctx().request_repaint()`](egui::Context::request_repaint).
-    fn marker_ui(&self, ui: &mut Ui, _viewport_position: Pos2, _zoom: f32);
+    /// Called every frame for two different things -- see [`MarkerContext`]
+    /// for what `ctx.kind`/`ctx.node_id` mean in each case. For animated
+    /// markers (e.g. a blinking light), drive the effect from the system
+    /// clock and call
+    /// [`ui.ctx().request_repaint()`](egui::Context::request_repaint).
+    fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext);
+}
+
+/// The context passed to [`NodeTemplate::notification_ui`].
+///
+/// `#[non_exhaustive]` so a future field can be added here without another
+/// breaking change to [`NodeTemplate`].
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct NotificationContext {
+    /// The node's screen position: already scaled by `zoom` and translated
+    /// to the viewport origin.
+    pub position: Pos2,
+    /// Multiply every size you draw by this so it scales with the map.
+    pub zoom: f32,
+    /// When the notification started -- usually fed into a progress
+    /// computation like `Instant::now().duration_since(initial_time)`.
+    pub initial_time: Instant,
+    /// The color requested for this notification (the node's own color, or
+    /// the current style's `alert_color` if none was set).
+    pub color: Color32,
+    /// Which built-in event effect was requested (`pulse`, `ripple`, ...).
+    /// Match on this to dispatch to the corresponding
+    /// [`Animation`](crate::map::animation::Animation) function instead of
+    /// reimplementing the lookup yourself.
+    pub kind: NodeAnimation,
+    /// The id of the node this notification belongs to.
+    pub node_id: usize,
+}
+
+/// The context passed to [`NodeTemplate::marker_ui`].
+///
+/// `#[non_exhaustive]`, like [`NotificationContext`], so a future field can
+/// be added here without another breaking change.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct MarkerContext {
+    /// The node's screen position: already scaled by `zoom` and translated
+    /// to the viewport origin.
+    pub position: Pos2,
+    /// Multiply every size you draw by this so it scales with the map.
+    pub zoom: f32,
+    /// Which persistent effect to draw. For a node's own lasting state (set
+    /// through [`Map::node`](super::Map::node)'s `halo`/`blink`/`orbit`)
+    /// this is whichever of those was requested; for a plain marker
+    /// (registered with [`Map::update_marker`](super::Map::update_marker))
+    /// it is always [`MapSettings::marker_animation`], since every marker
+    /// shares that one setting. There is no way from inside this hook to
+    /// tell the two *cases* apart -- only which `SteadyAnimation` to draw
+    /// for whichever one it is.
+    pub kind: SteadyAnimation,
+    /// The id of the node the state/marker belongs to (for a marker: the id
+    /// it points at, not the marker's own id).
+    pub node_id: usize,
 }
 
 /// Customizes how segments and their visual effects are rendered.

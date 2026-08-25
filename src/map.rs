@@ -103,9 +103,9 @@
 
 use crate::map::animation::Animation;
 use crate::map::objects::{
-    ContextMenuManager, MapBounds, MapLabel, MapPoint, MapSegment, MapSettings, MapStyle,
-    NodeAnimation, RawLine, RawPoint, SegmentAnimation, SteadyAnimation, SteadySegmentAnimation,
-    TextSettings, VisibilitySetting,
+    CometDirection, ContextMenuManager, MapBounds, MapLabel, MapPoint, MapSegment, MapSettings,
+    MapStyle, MarkerContext, NodeAnimation, NotificationContext, RawLine, RawPoint,
+    SegmentAnimation, SteadyAnimation, SteadySegmentAnimation, TextSettings, VisibilitySetting,
 };
 use egui::{widgets::*, *};
 use kdtree::KdTree;
@@ -118,6 +118,30 @@ use self::objects::{NodeTemplate, SegmentTemplate};
 
 pub mod animation;
 pub mod objects;
+
+/// How much more opaque a segment effect (`comet`, `dash`, `flash`, ...)
+/// stays than the segment's own zoom-based fade-in, in `paint_map_lines` --
+/// see `line_fade`/`effect_fade` there. Effects track the line's fade rather
+/// than ignoring it, but always keep this much of a head start so they read
+/// as at least as visible as the line beneath them instead of fading out in
+/// lockstep and risking disappearing into it.
+const SEGMENT_EFFECT_ALPHA_BOOST: f32 = 0.2;
+
+/// Returns `color` with its alpha multiplied by `factor` (clamped to
+/// `0.0..=1.0`), preserving whatever RGB the caller already set rather than
+/// replacing it outright.
+///
+/// `Color32`'s `r()`/`g()`/`b()` accessors return the *premultiplied*
+/// bytes it stores internally, not the original unmultiplied channels --
+/// feeding those straight back into [`Color32::from_rgba_unmultiplied`]
+/// with a new alpha would premultiply them a second time and darken the
+/// color instead of just fading it. Going through
+/// [`Color32::to_srgba_unmultiplied`] first recovers the true unmultiplied
+/// RGB so only the alpha actually changes.
+fn scale_alpha(color: Color32, factor: f32) -> Color32 {
+    let [r, g, b, a] = color.to_srgba_unmultiplied();
+    Color32::from_rgba_unmultiplied(r, g, b, (a as f32 * factor.clamp(0.0, 1.0)).round() as u8)
+}
 
 /// An interactive 2D map widget.
 ///
@@ -330,10 +354,12 @@ impl NodeHandle<'_> {
 ///
 /// Mirrors [`NodeHandle`], with the same modifier-then-terminal shape:
 ///
-/// - [`flash`](Self::flash) plays once from the [`Instant`] you pass and
-///   stops on its own.
-/// - [`comet`](Self::comet) is lasting state: it runs until
-///   [`clear`](Self::clear), and keeps the app repainting the whole time.
+/// - [`flash`](Self::flash), [`comet_once`](Self::comet_once) and
+///   [`wipe`](Self::wipe) play once from the [`Instant`] you pass and stop on
+///   their own.
+/// - [`comet`](Self::comet), [`dash`](Self::dash), [`glow_band`](Self::glow_band)
+///   and [`chevrons`](Self::chevrons) are lasting state: they run until
+///   [`clear`](Self::clear), and keep the app repainting the whole time.
 ///
 /// A segment can carry one of each at once; the state is drawn underneath the
 /// event, same as node effects.
@@ -365,6 +391,35 @@ impl SegmentHandle<'_> {
         );
     }
 
+    /// Single dot pass from one endpoint to the other, then gone. The
+    /// event-driven counterpart to [`Self::comet`] — reads as "one thing
+    /// moved along this route just now" rather than "traffic keeps flowing
+    /// this way". `direction` picks which endpoint it starts from.
+    pub fn comet_once(self, at: Instant, direction: CometDirection) {
+        self.map.segment_notifications.insert(
+            self.id,
+            SegmentNotification {
+                started: at,
+                animation: SegmentAnimation::Comet(direction),
+                color: self.color,
+            },
+        );
+    }
+
+    /// Line drawing itself in from the first endpoint to the second, then
+    /// gone — reads as "this route was just established" rather than
+    /// "something travelled along it".
+    pub fn wipe(self, at: Instant) {
+        self.map.segment_notifications.insert(
+            self.id,
+            SegmentNotification {
+                started: at,
+                animation: SegmentAnimation::Wipe,
+                color: self.color,
+            },
+        );
+    }
+
     /// Lasting dot travelling along the segment. Runs until
     /// [`Self::clear`].
     pub fn comet(self) {
@@ -372,6 +427,43 @@ impl SegmentHandle<'_> {
             self.id,
             SegmentState {
                 animation: SteadySegmentAnimation::Comet,
+                color: self.color,
+            },
+        );
+    }
+
+    /// Lasting dashed line, its pattern sliding along the segment
+    /// ("marching ants"). Runs until [`Self::clear`].
+    pub fn dash(self) {
+        self.map.segment_states.insert(
+            self.id,
+            SegmentState {
+                animation: SteadySegmentAnimation::Dash,
+                color: self.color,
+            },
+        );
+    }
+
+    /// Lasting band of brightness travelling the length of the segment and
+    /// looping. Reads as "flow", calmer than [`Self::dash`]. Runs until
+    /// [`Self::clear`].
+    pub fn glow_band(self) {
+        self.map.segment_states.insert(
+            self.id,
+            SegmentState {
+                animation: SteadySegmentAnimation::GlowBand,
+                color: self.color,
+            },
+        );
+    }
+
+    /// Lasting row of arrow shapes sliding along the segment, pointing the
+    /// way. Runs until [`Self::clear`].
+    pub fn chevrons(self) {
+        self.map.segment_states.insert(
+            self.id,
+            SegmentState {
+                animation: SteadySegmentAnimation::Chevrons,
                 color: self.color,
             },
         );
@@ -485,7 +577,15 @@ impl Widget for &mut Map {
                     if let Some(point) = self.points.as_ref().unwrap().get(marker.1) {
                         let adjusted_point = RawPoint::from(point.coords) * self.zoom - min_point;
                         if let Some(template) = &self.node_template {
-                            template.marker_ui(ui, adjusted_point.into(), self.zoom);
+                            template.marker_ui(
+                                ui,
+                                MarkerContext {
+                                    position: adjusted_point.into(),
+                                    zoom: self.zoom,
+                                    kind: self.settings.marker_animation,
+                                    node_id: *marker.1,
+                                },
+                            );
                         } else {
                             let color = if ui.visuals().dark_mode {
                                 Color32::LIGHT_GREEN
@@ -1153,9 +1253,19 @@ impl Map {
                     if let Some(template) = &self.node_template {
                         // There is no dedicated template hook for node state:
                         // `marker_ui` is the persistent-visual one, so state and
-                        // markers share it. Adding a hook would break every
-                        // existing `NodeTemplate` implementor.
-                        template.marker_ui(ui_obj, viewport_point.into(), self.zoom);
+                        // markers share it -- `kind` is enough for a template to
+                        // pick the right built-in effect either way, but the
+                        // hook still cannot tell *which* of the two call sites
+                        // (state vs. a `Map::update_marker` marker) it is.
+                        template.marker_ui(
+                            ui_obj,
+                            MarkerContext {
+                                position: viewport_point.into(),
+                                zoom: self.zoom,
+                                kind: state.animation,
+                                node_id: system_id,
+                            },
+                        );
                     } else {
                         let effect = match state.animation {
                             SteadyAnimation::Blink => Animation::blink,
@@ -1178,10 +1288,14 @@ impl Map {
                     if let Some(template) = &self.node_template {
                         template.notification_ui(
                             ui_obj,
-                            viewport_point.into(),
-                            self.zoom,
-                            notification.started,
-                            color,
+                            NotificationContext {
+                                position: viewport_point.into(),
+                                zoom: self.zoom,
+                                initial_time: notification.started,
+                                color,
+                                kind: notification.animation,
+                                node_id: system_id,
+                            },
                         );
                     } else {
                         let effect = match notification.animation {
@@ -1233,25 +1347,32 @@ impl Map {
             return segments_to_remove;
         };
 
+        // How far into its own zoom-based fade-in the *default* line stroke
+        // has ramped: `0.0` right at `line_visible_zoom`, linearly up to
+        // `1.0` once the zoom is 0.80 units past it, then staying there.
+        // Segment effects reuse this below (`effect_fade`) so they fade in
+        // step with the line they sit on instead of ignoring the zoom
+        // entirely.
+        let line_fade = ((self.zoom - self.settings.line_visible_zoom) / 0.80).clamp(0.0, 1.0);
+
         // `style.line == None` only turns off the *default* stroke -- a
         // `SegmentTemplate` or a segment effect installed through
         // `Map::segment` still needs to run, e.g. for a consumer who draws
         // lines entirely on their own and only wants the built-in effects.
-        let default_stroke = self.current_style().line.map(|mut stroke| {
-            let transparency_range = self.zoom - self.settings.line_visible_zoom;
-            if (0.00..0.80).contains(&transparency_range) {
+        let default_stroke = self.current_style().line.map(|stroke| {
+            if line_fade >= 1.0 {
+                stroke
+            } else {
                 let mut tup_stroke = stroke.color.to_tuple();
-                let transparency = (self.zoom - self.settings.line_visible_zoom) / 0.80;
-                tup_stroke.3 = (255.0 * transparency).round() as u8;
+                tup_stroke.3 = (255.0 * line_fade).round() as u8;
                 let color = Color32::from_rgba_unmultiplied(
                     tup_stroke.0,
                     tup_stroke.1,
                     tup_stroke.2,
                     tup_stroke.3,
                 );
-                stroke = Stroke::new(stroke.width, color);
+                Stroke::new(stroke.width, color)
             }
-            stroke
         });
 
         // Broad-phase: query the segment R-tree with the viewport AABB (in
@@ -1265,42 +1386,62 @@ impl Map {
         );
         let query = rstar::AABB::from_corners((center - half).into(), (center + half).into());
 
-        let mut shape_vec = vec![];
+        // Segment effects should always read as at least as visible as the
+        // line they animate, not fade out in lockstep with it and risk
+        // disappearing into it -- so their alpha tracks `line_fade` with a
+        // fixed head start rather than mirroring it exactly.
+        let effect_fade = (line_fade + SEGMENT_EFFECT_ALPHA_BOOST).min(1.0);
+
         for segment in segments.locate_in_envelope_intersecting(query) {
             let raw_line = segment.raw_line();
             let pos_a: Pos2 = (raw_line.points[0] * self.zoom - min_point).into();
             let pos_b: Pos2 = (raw_line.points[1] * self.zoom - min_point).into();
 
+            // The default stroke is painted right away, not batched up and
+            // flushed once after the whole loop -- an opaque line painted
+            // *after* its own effect would completely cover it. That's fine
+            // for nodes (their effects extend beyond the node's own small
+            // circle, so the base shape painted last only covers the
+            // center) but not for segments, where the effect runs along the
+            // exact same path as the line underneath it.
             if let Some(template) = &self.segment_template {
                 template.segment_ui(painter, pos_a, pos_b, self.zoom, segment);
             } else if let Some(stroke) = default_stroke {
-                shape_vec.push(Shape::line_segment([pos_a, pos_b], stroke));
+                painter.add(Shape::line_segment([pos_a, pos_b], stroke));
             }
 
             // Persistent segment state is drawn first so a notification --
             // the *event* -- sits on top of the *state*, same ordering as
             // node effects.
             if let Some(state) = self.segment_states.get(&segment.id) {
-                let color = state.color.unwrap_or(self.current_style().alert_color);
-                let time = painter.ctx().input(|i| i.time) as f32;
-                match state.animation {
-                    SteadySegmentAnimation::Comet => {
-                        if let Some(template) = &self.segment_template {
-                            template
-                                .segment_state_ui(painter, pos_a, pos_b, self.zoom, time, color);
-                        } else {
-                            Animation::comet(painter, pos_a, pos_b, self.zoom, time, color);
-                        }
-                    }
+                let color = scale_alpha(
+                    state.color.unwrap_or(self.current_style().alert_color),
+                    effect_fade,
+                );
+                if let Some(template) = &self.segment_template {
+                    let time = painter.ctx().input(|i| i.time) as f32;
+                    template.segment_state_ui(painter, pos_a, pos_b, self.zoom, time, color);
+                } else {
+                    let effect = match state.animation {
+                        SteadySegmentAnimation::Comet => Animation::comet,
+                        SteadySegmentAnimation::Dash => Animation::dash,
+                        SteadySegmentAnimation::GlowBand => Animation::glow_band,
+                        SteadySegmentAnimation::Chevrons => Animation::chevrons,
+                    };
+                    let time = painter.ctx().input(|i| i.time) as f32;
+                    effect(painter, pos_a, pos_b, self.zoom, time, color);
                 }
                 // Persistent effects never finish on their own.
                 painter.ctx().request_repaint();
             }
 
             if let Some(notification) = self.segment_notifications.get(&segment.id) {
-                let color = notification
-                    .color
-                    .unwrap_or(self.current_style().alert_color);
+                let color = scale_alpha(
+                    notification
+                        .color
+                        .unwrap_or(self.current_style().alert_color),
+                    effect_fade,
+                );
                 let still_playing = if let Some(template) = &self.segment_template {
                     template.segment_notification_ui(
                         painter,
@@ -1320,6 +1461,23 @@ impl Map {
                             notification.started,
                             color,
                         ),
+                        SegmentAnimation::Comet(direction) => Animation::comet_once(
+                            painter,
+                            pos_a,
+                            pos_b,
+                            self.zoom,
+                            notification.started,
+                            color,
+                            direction,
+                        ),
+                        SegmentAnimation::Wipe => Animation::wipe(
+                            painter,
+                            pos_a,
+                            pos_b,
+                            self.zoom,
+                            notification.started,
+                            color,
+                        ),
                     }
                 };
                 if still_playing {
@@ -1329,7 +1487,6 @@ impl Map {
                 }
             }
         }
-        painter.extend(shape_vec);
         segments_to_remove
     }
 
@@ -1658,9 +1815,15 @@ mod tests {
             )),
             ..RawInput::default()
         };
-        let output = ctx.run_ui(input, |ui| {
+        let mut output = ctx.run_ui(input, |ui| {
             ui.add(&mut *map);
         });
+        // `TexturesDelta` panics on drop if it still holds an unhandled
+        // delta (e.g. the font atlas uploaded on the first frame) -- clear
+        // it explicitly instead of letting `output` fall out of scope with
+        // it untouched. Same fix as `render_with` in
+        // `tests/segment_animations.rs`.
+        output.textures_delta.clear();
         output
             .shapes
             .iter()
@@ -1781,7 +1944,7 @@ mod tests {
             ..RawInput::default()
         };
 
-        let output1 = ctx.run_ui(input.clone(), |ui| {
+        let mut output1 = ctx.run_ui(input.clone(), |ui| {
             ui.add(&mut map);
         });
 
@@ -1793,6 +1956,11 @@ mod tests {
                 _ => None,
             })
             .collect();
+        // `TexturesDelta` panics on drop if it still holds an unhandled
+        // delta (e.g. the font atlas uploaded on the first frame) -- clear
+        // it explicitly rather than letting `output1` fall out of scope
+        // with it untouched.
+        output1.textures_delta.clear();
 
         assert!(
             !segments1.is_empty(),
@@ -1818,7 +1986,7 @@ mod tests {
         );
 
         // --- act: 2nd frame (unchanged) — detect duplicate-lines regression ---
-        let output2 = ctx.run_ui(input, |ui| {
+        let mut output2 = ctx.run_ui(input, |ui| {
             ui.add(&mut map);
         });
 
@@ -1830,6 +1998,7 @@ mod tests {
                 _ => None,
             })
             .collect();
+        output2.textures_delta.clear();
 
         assert_eq!(
             segments1.len(),
@@ -2200,16 +2369,124 @@ mod tests {
     }
 
     #[test]
-    fn comet_records_lasting_segment_state() {
+    fn each_event_segment_effect_records_its_own_notification() {
+        for (apply, expected) in [
+            (
+                Box::new(|s: SegmentHandle, at: Instant| s.flash(at))
+                    as Box<dyn FnOnce(SegmentHandle, Instant)>,
+                SegmentAnimation::FlashDecay,
+            ),
+            (
+                Box::new(|s: SegmentHandle, at: Instant| s.comet_once(at, CometDirection::Forward)),
+                SegmentAnimation::Comet(CometDirection::Forward),
+            ),
+            (
+                Box::new(|s: SegmentHandle, at: Instant| s.comet_once(at, CometDirection::Reverse)),
+                SegmentAnimation::Comet(CometDirection::Reverse),
+            ),
+            (
+                Box::new(|s: SegmentHandle, at: Instant| s.wipe(at)),
+                SegmentAnimation::Wipe,
+            ),
+        ] {
+            let mut map = map_with_segments();
+            let now = Instant::now();
+            apply(map.segment((1, 2)).unwrap(), now);
+
+            let recorded = map
+                .segment_notifications
+                .get(&(1, 2))
+                .expect("the effect must be recorded");
+            assert_eq!(recorded.animation, expected);
+            assert_eq!(recorded.started, now);
+            // an event effect must not leave lasting state behind
+            assert!(map.segment_states.is_empty());
+        }
+    }
+
+    #[test]
+    fn each_steady_segment_effect_records_lasting_state() {
+        for (apply, expected) in [
+            (
+                Box::new(|s: SegmentHandle| s.comet()) as Box<dyn FnOnce(SegmentHandle)>,
+                SteadySegmentAnimation::Comet,
+            ),
+            (
+                Box::new(|s: SegmentHandle| s.dash()),
+                SteadySegmentAnimation::Dash,
+            ),
+            (
+                Box::new(|s: SegmentHandle| s.glow_band()),
+                SteadySegmentAnimation::GlowBand,
+            ),
+            (
+                Box::new(|s: SegmentHandle| s.chevrons()),
+                SteadySegmentAnimation::Chevrons,
+            ),
+        ] {
+            let mut map = map_with_segments();
+            apply(map.segment((1, 2)).unwrap());
+            assert_eq!(map.segment_states.get(&(1, 2)).unwrap().animation, expected);
+            // lasting state must not masquerade as a notification
+            assert!(map.segment_notifications.is_empty());
+        }
+    }
+
+    #[test]
+    fn steady_segment_effect_alpha_tracks_the_lines_zoom_fade_with_a_head_start() {
+        // At zoom 0.6 with the default `line_visible_zoom` of 0.2, the line's
+        // own fade (`line_fade`) is exactly half-way through its 0.80-unit
+        // ramp: `(0.6 - 0.2) / 0.80 == 0.5`. `comet` paints `color` on a
+        // `Shape::Circle` with no alpha adjustment of its own, so whatever
+        // alpha lands on screen must be exactly `scale_alpha`'s output --
+        // `effect_fade = (0.5 + SEGMENT_EFFECT_ALPHA_BOOST).min(1.0) = 0.7`.
         let mut map = map_with_segments();
-        map.segment((1, 2)).unwrap().comet();
+        map.set_zoom(0.6);
+        let color = Color32::from_rgba_unmultiplied(10, 20, 30, 200);
+        map.segment((1, 2)).unwrap().color(color).comet();
+
+        // `scale_alpha` goes through `Color32::to_srgba_unmultiplied` before
+        // reconstructing the color, so the expected fill is whatever that
+        // round trip actually produces -- not a hand-derived byte value,
+        // which would be fragile against the gamma-aware LUT egui's
+        // premultiply table uses internally.
+        let expected_fill = scale_alpha(color, 0.7);
+        assert_eq!(
+            expected_fill.a(),
+            140,
+            "sanity-check the hand-derived alpha"
+        );
+
+        let ctx = Context::default();
+        let screen_rect = Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0));
+        let mut out = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(screen_rect),
+                ..RawInput::default()
+            },
+            |ui| {
+                ui.add(&mut map);
+            },
+        );
+        // Font-atlas texture deltas are dropped safely only when explicitly
+        // cleared first -- see the identical pattern in `render_line_segments`
+        // and `tests/segment_animations.rs`'s `render_with`.
+        out.textures_delta.clear();
+
+        let comet_circle = out
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                Shape::Circle(c) => Some(*c),
+                _ => None,
+            })
+            .expect("comet must paint a filled circle");
 
         assert_eq!(
-            map.segment_states.get(&(1, 2)).unwrap().animation,
-            SteadySegmentAnimation::Comet
+            comet_circle.fill, expected_fill,
+            "the comet's fill must be exactly scale_alpha(color, effect_fade) -- the line's \
+             zoom fade with the documented head start applied"
         );
-        // lasting state must not masquerade as a notification
-        assert!(map.segment_notifications.is_empty());
     }
 
     #[test]

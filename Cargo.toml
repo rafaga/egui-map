@@ -1,6 +1,6 @@
 [package]
 name = "egui-map"
-version = "0.4.1"
+version = "0.5.0"
 edition = "2024"
 authors = ["Rafael Amador <rafaga@duck.com"]
 description = "Visual component to draw a map on screen."

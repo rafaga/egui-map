@@ -5,7 +5,9 @@
 
 use eframe::egui::{self, Align2, Color32, Pos2, Stroke, Ui, Vec2};
 use egui_map::map::Map;
-use egui_map::map::objects::{MapPoint, NodeTemplate, VisibilitySetting};
+use egui_map::map::objects::{
+    MapPoint, MarkerContext, NodeTemplate, NotificationContext, VisibilitySetting,
+};
 use std::rc::Rc;
 use std::time::Instant;
 
@@ -37,33 +39,34 @@ impl NodeTemplate for CircleNodes {
     }
 
     /// Animated notification: an expanding ring that fades out over 2 seconds.
-    fn notification_ui(
-        &self,
-        ui: &mut Ui,
-        position: Pos2,
-        zoom: f32,
-        start: Instant,
-        color: Color32,
-    ) -> bool {
-        let secs = start.elapsed().as_secs_f32();
+    /// This example draws the same ring for every `ctx.kind`, so it ignores
+    /// it -- see `examples/node_template_animations.rs` for a template that
+    /// dispatches on `kind` to reuse the built-in effects instead.
+    fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
+        let secs = ctx.initial_time.elapsed().as_secs_f32();
         let alpha = (1.0 - secs / 2.0).clamp(0.0, 1.0);
-        let fading =
-            Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (255.0 * alpha) as u8);
+        let fading = Color32::from_rgba_unmultiplied(
+            ctx.color.r(),
+            ctx.color.g(),
+            ctx.color.b(),
+            (255.0 * alpha) as u8,
+        );
         ui.painter().circle_stroke(
-            position,
-            (8.0 + 30.0 * secs) * zoom,
-            Stroke::new(3.0 * zoom, fading),
+            ctx.position,
+            (8.0 + 30.0 * secs) * ctx.zoom,
+            Stroke::new(3.0 * ctx.zoom, fading),
         );
         ui.ctx().request_repaint(); // keep the animation frames coming
         secs < 2.0 // returning false removes the notification
     }
 
-    /// Static marker ring drawn over the marked node.
-    fn marker_ui(&self, ui: &mut Ui, position: Pos2, zoom: f32) {
+    /// Static marker ring drawn over the marked node, same ring regardless
+    /// of `ctx.kind`/`ctx.node_id`.
+    fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext) {
         ui.painter().circle_stroke(
-            position,
-            14.0 * zoom,
-            Stroke::new(2.0 * zoom, Color32::LIGHT_GREEN),
+            ctx.position,
+            14.0 * ctx.zoom,
+            Stroke::new(2.0 * ctx.zoom, Color32::LIGHT_GREEN),
         );
     }
 }

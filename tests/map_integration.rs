@@ -3,7 +3,8 @@
 use egui::Color32;
 use egui_map::map::Map;
 use egui_map::map::objects::{
-    MapLabel, MapPoint, MapSegment, MapSettings, RawLine, RawPoint, VisibilitySetting,
+    CometDirection, MapLabel, MapPoint, MapSegment, MapSettings, RawLine, RawPoint,
+    VisibilitySetting,
 };
 use std::time::Instant;
 
@@ -12,6 +13,10 @@ fn sample_points() -> Vec<MapPoint> {
     map.push(MapPoint::new(1, [0.0, 0.0]));
     map.push(MapPoint::new(2, [10.0, 10.0]));
     map.push(MapPoint::new(3, [-10.0, -10.0]));
+    map.push(MapPoint::new(4, [10.0, -10.0]));
+    map.push(MapPoint::new(5, [5.0, 0.0]));
+    map.push(MapPoint::new(6, [0.0, 5.0]));
+    map.push(MapPoint::new(7, [-5.0, 0.0]));
     map
 }
 
@@ -97,6 +102,11 @@ fn map_segment_effects() {
     map.add_lines(vec![
         MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]),
         MapSegment::new((1, 3), [0.0, 0.0], [-10.0, -10.0]),
+        MapSegment::new((2, 3), [10.0, 10.0], [-10.0, -10.0]),
+        MapSegment::new((3, 4), [-10.0, -10.0], [10.0, -10.0]),
+        MapSegment::new((4, 5), [10.0, -10.0], [5.0, 0.0]),
+        MapSegment::new((5, 6), [5.0, 0.0], [0.0, 5.0]),
+        MapSegment::new((6, 7), [0.0, 5.0], [-5.0, 0.0]),
     ]);
 
     map.segment((1, 2))
@@ -106,6 +116,21 @@ fn map_segment_effects() {
         .expect("segment (1, 3) is loaded")
         .color(Color32::RED)
         .comet();
+    map.segment((2, 3))
+        .expect("segment (2, 3) is loaded")
+        .dash();
+    map.segment((3, 4))
+        .expect("segment (3, 4) is loaded")
+        .comet_once(Instant::now(), CometDirection::Reverse);
+    map.segment((4, 5))
+        .expect("segment (4, 5) is loaded")
+        .wipe(Instant::now());
+    map.segment((5, 6))
+        .expect("segment (5, 6) is loaded")
+        .glow_band();
+    map.segment((6, 7))
+        .expect("segment (6, 7) is loaded")
+        .chevrons();
     assert!(
         map.segment((404, 404)).is_none(),
         "an unknown id must not yield a handle"
