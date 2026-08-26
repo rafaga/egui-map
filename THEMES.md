@@ -1,6 +1,6 @@
 # egui-map -- built-in themes
 
-`egui-map` ships 14 named color palettes (`map::theme::Theme`), each with a `Light` and a `Dark` variant (`map::theme::ColorMode`). `Theme::colors(mode)` resolves a theme to the five colors the widget actually paints with (`map::theme::ThemeColors`): the node fill, connection lines (`segment`), the selection ring around the nearest node (`selected`), notification/alert animations (`alert`), and node names/labels (`text`).
+`egui-map` ships 14 named color palettes (`map::theme::Theme`), each with a `Light` and a `Dark` variant (`map::theme::ColorMode`, a re-export of `egui::Theme`). `Theme::colors(mode)` resolves a theme to the five colors the widget actually paints with (`map::theme::ThemeColors`): the node fill, connection lines (`segment`), the selection ring around the nearest node (`selected`), notification/alert animations (`alert`), and node names/labels (`text`).
 
 Install a built-in theme, or your own palette, with `Map::set_theme` and the `MapTheme` trait -- see the README's "Custom themes" section and the `MapTheme` rustdoc for the full API.
 

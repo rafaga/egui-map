@@ -73,15 +73,19 @@ A line is only drawn while the zoom level is above `MapSettings::line_visible_zo
 Implement `NodeTemplate` to take over how nodes, selection highlights, notifications and markers are drawn — including the name labels, which the widget no longer paints once a template is installed:
 
 ```rust
-use egui_map::map::objects::{MapPoint, MarkerContext, NodeTemplate, NotificationContext};
-use egui::{Color32, Pos2, Ui};
+use egui_map::map::objects::{
+    MarkerContext, NodeContext, NodeTemplate, NotificationContext, SelectionContext,
+};
+use egui::Ui;
 
 struct MyTemplate;
 
 impl NodeTemplate for MyTemplate {
-    fn node_ui(&self, ui: &mut Ui, position: Pos2, zoom: f32, point: &MapPoint) {
-        // `point` is the node's screen position; scale every size by `zoom`.
-        ui.painter().circle_filled(position, 6.0 * zoom, Color32::GOLD);
+    fn node_ui(&self, ui: &mut Ui, ctx: NodeContext) {
+        // `ctx.position` is the node's screen position; scale every size by `ctx.zoom`.
+        // `ctx.color` is already resolved: the node's own color override, or the
+        // active theme's node color if it doesn't have one.
+        ui.painter().circle_filled(ctx.position, 6.0 * ctx.zoom, ctx.color);
     }
 
     fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
@@ -92,7 +96,10 @@ impl NodeTemplate for MyTemplate {
         ctx.initial_time.elapsed().as_secs_f32() < 2.0 // returning false removes the notification
     }
 
-    fn selection_ui(&self, _ui: &mut Ui, _position: Pos2, _zoom: f32) {}
+    fn selection_ui(&self, _ui: &mut Ui, _ctx: SelectionContext) {
+        // `ctx.point` is which node the highlight belongs to; `ctx.color` is the
+        // active theme's selection color.
+    }
     fn marker_ui(&self, _ui: &mut Ui, _ctx: MarkerContext) {
         // `ctx.kind` is Halo/Blink/Orbit for persistent node state, or the shared
         // `MapSettings::marker_animation` for a `Map::update_marker` marker.
@@ -174,7 +181,7 @@ impl MapTheme for HighContrast {
 map.set_theme(std::rc::Rc::new(HighContrast));
 ```
 
-`ColorMode` follows `egui`'s own light/dark mode, so the same map picks up the right palette automatically when the surrounding app's mode changes. Non-palette visual settings (stroke widths, font, background) stay on `MapSettings::styles` — see the `theme` module rustdoc.
+`ColorMode` is `egui::Theme` re-exported under this crate's name, so the same map picks up the right palette automatically when the surrounding app's mode changes. Non-palette visual settings (stroke width, font, background) stay on `MapSettings::styles` — see the `theme` module rustdoc.
 
 ## Crate features
 

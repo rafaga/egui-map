@@ -46,8 +46,8 @@ use eframe::egui::{self, Align2, Color32, Pos2, Shape, Stroke, Ui, Vec2};
 use egui_map::map::Map;
 use egui_map::map::animation::Animation;
 use egui_map::map::objects::{
-    MapPoint, MapSegment, MarkerContext, NodeAnimation, NodeTemplate, NotificationContext,
-    SteadyAnimation, VisibilitySetting,
+    MapPoint, MapSegment, MarkerContext, NodeAnimation, NodeContext, NodeTemplate,
+    NotificationContext, SelectionContext, SteadyAnimation, VisibilitySetting,
 };
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -72,9 +72,12 @@ const MARKER_COLOR: Color32 = Color32::from_rgb(120, 220, 255);
 struct DiamondNodes;
 
 impl NodeTemplate for DiamondNodes {
-    /// Custom node shape: a filled diamond with the node name above it.
-    fn node_ui(&self, ui: &mut Ui, position: Pos2, zoom: f32, point: &MapPoint) {
-        let size = 9.0 * zoom;
+    /// Custom node shape: a diamond with the node name above it, outlined in
+    /// `ctx.color` -- the node's own color override if it set one, otherwise
+    /// the active theme's node color -- over a fixed dark body.
+    fn node_ui(&self, ui: &mut Ui, ctx: NodeContext) {
+        let size = 9.0 * ctx.zoom;
+        let position = ctx.position;
         let diamond = vec![
             Pos2::new(position.x, position.y - size),
             Pos2::new(position.x + size, position.y),
@@ -85,23 +88,24 @@ impl NodeTemplate for DiamondNodes {
         painter.add(Shape::convex_polygon(
             diamond,
             Color32::from_rgb(60, 70, 90),
-            Stroke::new(1.5 * zoom, Color32::from_rgb(150, 170, 200)),
+            Stroke::new(1.5 * ctx.zoom, ctx.color),
         ));
         painter.text(
-            position + Vec2::new(0.0, -size - 3.0 * zoom),
+            position + Vec2::new(0.0, -size - 3.0 * ctx.zoom),
             Align2::CENTER_BOTTOM,
-            point.get_name(),
-            egui::FontId::proportional(11.0 * zoom),
+            ctx.point.get_name(),
+            egui::FontId::proportional(11.0 * ctx.zoom),
             ui.visuals().text_color(),
         );
     }
 
-    /// Highlight ring over the node closest to the mouse pointer.
-    fn selection_ui(&self, ui: &mut Ui, position: Pos2, zoom: f32) {
+    /// Highlight ring over the node closest to the mouse pointer, outlined in
+    /// `ctx.color` -- the active theme's selection color.
+    fn selection_ui(&self, ui: &mut Ui, ctx: SelectionContext) {
         ui.painter().circle_stroke(
-            position,
-            14.0 * zoom,
-            Stroke::new(2.0 * zoom, Color32::YELLOW),
+            ctx.position,
+            14.0 * ctx.zoom,
+            Stroke::new(2.0 * ctx.zoom, ctx.color),
         );
     }
 
