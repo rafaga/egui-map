@@ -104,10 +104,11 @@
 use crate::map::animation::Animation;
 use crate::map::objects::{
     CometDirection, ContextMenuManager, MapBounds, MapLabel, MapPoint, MapSegment, MapSettings,
-    MarkerContext, NodeAnimation, NotificationContext, RawLine, RawPoint, SegmentAnimation,
-    SteadyAnimation, SteadySegmentAnimation, TextSettings, VisibilitySetting,
+    MarkerContext, NodeAnimation, NodeContext, NotificationContext, RawLine, RawPoint,
+    SegmentAnimation, SelectionContext, SteadyAnimation, SteadySegmentAnimation, TextSettings,
+    VisibilitySetting,
 };
-use crate::map::theme::{ColorMode, MapTheme, Style, Theme};
+use crate::map::theme::{ColorMode, MapTheme, Style, Theme, ThemeColors};
 use egui::{widgets::*, *};
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
@@ -494,7 +495,17 @@ impl Widget for &mut Map {
         let rect = self.calculate_widget_dimensions(ui);
 
         // we define the initial coordinate as the center of such rectangle
-        self.reference.dist = rect.distance();
+        let reference_dist = rect.distance();
+        // `reference.dist` is refreshed here every frame, but `current.dist` --
+        // the value the viewport cull actually queries with -- is only derived
+        // from it inside `adjust_bounds`, which used to run on a zoom change or
+        // a `set_pos` and nothing else. Resizing the window therefore left the
+        // cull radius stale until the next zoom, so the node set was culled
+        // against the *old* widget size (too few nodes after growing the
+        // window, too many after shrinking it). Tracked here so the bounds can
+        // be recomputed below, next to the zoom-change branch.
+        let resized = reference_dist != self.reference.dist;
+        self.reference.dist = reference_dist;
 
         self.assign_visual_style(ui);
 
@@ -616,7 +627,7 @@ impl Widget for &mut Map {
 
                 self.capture_mouse_events(ui, &resp);
 
-                if self.zoom != self.previous_zoom {
+                if self.zoom != self.previous_zoom || resized {
                     let _span = tracing::info_span!("calculating viewport with zoom").entered();
                     self.adjust_bounds();
                     self.calculate_visible_points();
@@ -705,7 +716,18 @@ impl Map {
             && let Some(tree) = &self.tree
         {
             let center = self.current.pos / self.zoom;
-            let radius = self.current.dist.powi(2);
+            // `current.dist` is the *full* diagonal of the visible area
+            // expressed in map units (`reference.dist` is `RawLine::distance()`
+            // over the widget rect, divided by the zoom). A circle centred on
+            // the viewport only has to reach its corners to cover it, so the
+            // radius is the *half* diagonal -- the rect's circumradius.
+            // Querying with the full diagonal doubled the radius, i.e. covered
+            // 4x the area, and with the circle-over-rectangle slack that fed
+            // roughly 6x more nodes to the paint pass than are actually on
+            // screen. Halved here rather than at the `reference.dist`
+            // assignments so `dist` keeps meaning "diagonal" for the debug
+            // overlay and for `adjust_bounds`.
+            let radius = (self.current.dist / 2.0).powi(2);
             let point: [f32; 2] = center.into();
             let vis_pos = tree.within(&point, radius, &squared_euclidean).unwrap();
             self.visible_points.clear();
@@ -1045,33 +1067,25 @@ impl Map {
             let _span = tracing::info_span!("asign_visual_style").entered();
 
             self.current_index = style_index;
-            self.apply_theme_colors(style_index);
             let map_style = self.settings.styles.get_mut(style_index).unwrap();
             let visuals = &ui_obj.style().visuals;
             map_style.background_color = visuals.extreme_bg_color;
-            map_style.border = Some(visuals.window_stroke);
         }
     }
 
-    /// Refreshes `self.settings.styles[index]`'s colors from
-    /// `self.theme.colors(mode)`, where `mode` is `Dark` for index `1` and
-    /// `Light` for any other index -- so `Style` never carries its own copy
-    /// of colors the active `MapTheme` already provides.
-    fn apply_theme_colors(&mut self, index: usize) {
-        let mode = if index == 1 {
-            ColorMode::Dark
-        } else {
-            ColorMode::Light
-        };
-        let colors = self.theme.colors(mode);
-        if let Some(map_style) = self.settings.styles.get_mut(index) {
-            map_style.fill_color = colors.node;
-            map_style.text_color = colors.text;
-            map_style.alert_color = colors.alert;
-            if let Some(line) = map_style.line.as_mut() {
-                line.color = colors.segment;
-            }
-        }
+    /// The [`ColorMode`] the widget is currently painting with -- `Dark`
+    /// when `current_index` selects the dark style slot, `Light` otherwise.
+    fn color_mode(&self) -> ColorMode {
+        ColorMode::from_dark_mode(self.current_index == 1)
+    }
+
+    /// Resolves the color palette the widget paints with right now: the
+    /// active [`MapTheme`]'s colors for the current [`ColorMode`]. This is
+    /// the single, canonical source for every color the widget paints --
+    /// unlike `settings.styles`, it can never drift out of sync with the
+    /// installed theme because nothing caches it.
+    fn theme_colors(&self) -> ThemeColors {
+        self.theme.colors(self.color_mode())
     }
 
     /// Floating debug read-out, compiled in only under the `debug_overlay`
@@ -1210,6 +1224,13 @@ impl Map {
         min_point: &RawPoint,
         resp: &Response,
     ) -> Result<Vec<usize>, ()> {
+        // One span for the whole node pass, rather than one per node inside
+        // the loop below. A per-node span made the *instrumentation* the
+        // dominant cost: measured against this widget, a field-less Tracy zone
+        // came to ~10.6 us per node, so at ~107 visible nodes it burned ~1.1 ms
+        // of every frame while measuring nothing that a single zone around the
+        // loop does not already report.
+        let _span = tracing::info_span!("paint_map_points").entered();
         let mut nearest_id = None;
         let mut nodes_to_remove = Vec::new();
         let mut shape_vec = vec![];
@@ -1252,11 +1273,18 @@ impl Map {
         for temp_point in vec_points {
             let parsed_point = temp_point.cast_unsigned();
             if let Some(system) = hashm.as_ref().unwrap().get(&parsed_point) {
-                let _span = tracing::info_span!("painting_points_m").entered();
                 let viewport_point = RawPoint::from(system.coords) * self.zoom - min_point;
                 if let Some(node_template) = &self.node_template {
                     if nearest_id.unwrap_or(&0usize) == &system.get_id() {
-                        node_template.selection_ui(ui_obj, viewport_point.into(), self.zoom);
+                        node_template.selection_ui(
+                            ui_obj,
+                            SelectionContext {
+                                position: viewport_point.into(),
+                                zoom: self.zoom,
+                                point: system,
+                                color: self.theme_colors().selected,
+                            },
+                        );
                     }
                 } else if self.zoom > self.settings.label_visible_zoom
                     && self.settings.node_text_visibility == VisibilitySetting::Always
@@ -1276,7 +1304,7 @@ impl Map {
                 // Persistent node state is drawn first so a notification --
                 // the *event* -- sits on top of the *state*.
                 if let Some(state) = self.node_states.get(&system_id) {
-                    let color = state.color.unwrap_or(self.current_style().alert_color);
+                    let color = state.color.unwrap_or(self.theme_colors().alert);
                     if let Some(template) = &self.node_template {
                         // There is no dedicated template hook for node state:
                         // `marker_ui` is the persistent-visual one, so state and
@@ -1309,9 +1337,7 @@ impl Map {
                 }
 
                 if let Some(notification) = self.notifications.get(&system_id) {
-                    let color = notification
-                        .color
-                        .unwrap_or(self.current_style().alert_color);
+                    let color = notification.color.unwrap_or(self.theme_colors().alert);
                     if let Some(template) = &self.node_template {
                         template.notification_ui(
                             ui_obj,
@@ -1345,13 +1371,26 @@ impl Map {
                         }
                     }
                 }
+                // The color requested for this node: its own override if it
+                // has one, otherwise the active theme's node color -- the
+                // single fallback both the built-in circle and a
+                // `NodeTemplate` (via `NodeContext::color`) paint with.
+                let node_color = system.color.unwrap_or(self.theme_colors().node);
                 if let Some(node_template) = &self.node_template {
-                    node_template.node_ui(ui_obj, viewport_point.into(), self.zoom, system);
+                    node_template.node_ui(
+                        ui_obj,
+                        NodeContext {
+                            position: viewport_point.into(),
+                            zoom: self.zoom,
+                            point: system,
+                            color: node_color,
+                        },
+                    );
                 } else {
                     shape_vec.push(Shape::circle_filled(
                         viewport_point.into(),
                         4.00 * self.zoom,
-                        system.color.unwrap_or(self.current_style().fill_color),
+                        node_color,
                     ));
                 }
             }
@@ -1382,24 +1421,27 @@ impl Map {
         // entirely.
         let line_fade = ((self.zoom - self.settings.line_visible_zoom) / 0.80).clamp(0.0, 1.0);
 
-        // `style.line == None` only turns off the *default* stroke -- a
+        // `style.line_width == None` only turns off the *default* stroke -- a
         // `SegmentTemplate` or a segment effect installed through
         // `Map::segment` still needs to run, e.g. for a consumer who draws
         // lines entirely on their own and only wants the built-in effects.
-        let default_stroke = self.current_style().line.map(|stroke| {
-            if line_fade >= 1.0 {
-                stroke
+        // The stroke's color always comes live from the active theme, not
+        // from `Style` -- there is no cached copy left to fall out of sync.
+        let default_stroke = self.current_style().line_width.map(|width| {
+            let segment_color = self.theme_colors().segment;
+            let color = if line_fade >= 1.0 {
+                segment_color
             } else {
-                let mut tup_stroke = stroke.color.to_tuple();
+                let mut tup_stroke = segment_color.to_tuple();
                 tup_stroke.3 = (255.0 * line_fade).round() as u8;
-                let color = Color32::from_rgba_unmultiplied(
+                Color32::from_rgba_unmultiplied(
                     tup_stroke.0,
                     tup_stroke.1,
                     tup_stroke.2,
                     tup_stroke.3,
-                );
-                Stroke::new(stroke.width, color)
-            }
+                )
+            };
+            Stroke::new(width, color)
         });
 
         // Broad-phase: query the segment R-tree with the viewport AABB (in
@@ -1442,7 +1484,7 @@ impl Map {
             // node effects.
             if let Some(state) = self.segment_states.get(&segment.id) {
                 let color = scale_alpha(
-                    state.color.unwrap_or(self.current_style().alert_color),
+                    state.color.unwrap_or(self.theme_colors().alert),
                     effect_fade,
                 );
                 if let Some(template) = &self.segment_template {
@@ -1464,9 +1506,7 @@ impl Map {
 
             if let Some(notification) = self.segment_notifications.get(&segment.id) {
                 let color = scale_alpha(
-                    notification
-                        .color
-                        .unwrap_or(self.current_style().alert_color),
+                    notification.color.unwrap_or(self.theme_colors().alert),
                     effect_fade,
                 );
                 let still_playing = if let Some(template) = &self.segment_template {
@@ -1709,14 +1749,12 @@ impl Map {
     ///
     /// Accepts any [`MapTheme`] implementation, including a built-in
     /// [`Theme`] variant -- e.g. `map.set_theme(Rc::new(Theme::ArticCyan))` --
-    /// or a custom palette. Both the light and dark [`Style`] entries are
-    /// refreshed immediately, so the new colors show up on the very next
-    /// frame regardless of which mode is currently active.
+    /// or a custom palette. The new colors are resolved live from
+    /// `new_theme` on the very next frame, in whichever light/dark mode is
+    /// active then -- there is nothing to eagerly refresh, since [`Style`]
+    /// never caches theme colors.
     pub fn set_theme(&mut self, new_theme: Rc<dyn MapTheme>) {
         self.theme = new_theme;
-        for index in 0..self.settings.styles.len().min(2) {
-            self.apply_theme_colors(index);
-        }
     }
 
     /// Adds the marker `id`, or moves it, so it points to the node `node_id`.
@@ -2636,28 +2674,24 @@ mod tests {
     // ---------- theme ----------
 
     #[test]
-    fn set_theme_refreshes_both_style_slots_immediately() {
-        // `assign_visual_style` only refreshes `settings.styles[index]` when
-        // the light/dark mode actually changes, so `set_theme` must apply the
-        // new theme itself -- otherwise a theme swap wouldn't show up until
-        // the app also happened to flip between light and dark mode.
+    fn theme_colors_are_resolved_live_from_the_installed_theme() {
+        // `Style` no longer caches any color (see `theme.rs`), so there is
+        // nothing for `set_theme` to eagerly refresh -- `theme_colors()`
+        // must reflect the newly installed theme immediately, in whichever
+        // light/dark mode is active, without waiting for a mode flip.
         let mut map = Map::new();
         map.set_theme(Rc::new(Theme::ArticCyan));
 
         let light = Theme::ArticCyan.colors(ColorMode::Light);
         let dark = Theme::ArticCyan.colors(ColorMode::Dark);
 
-        let light_style = &map.settings.styles[0];
-        assert_eq!(light_style.fill_color, light.node);
-        assert_eq!(light_style.text_color, light.text);
-        assert_eq!(light_style.alert_color, light.alert);
-        assert_eq!(light_style.line.unwrap().color, light.segment);
+        assert_eq!(map.current_index, 0, "Map::new starts in light mode");
+        assert_eq!(map.theme_colors(), light);
 
-        let dark_style = &map.settings.styles[1];
-        assert_eq!(dark_style.fill_color, dark.node);
-        assert_eq!(dark_style.text_color, dark.text);
-        assert_eq!(dark_style.alert_color, dark.alert);
-        assert_eq!(dark_style.line.unwrap().color, dark.segment);
+        // Simulate the app flipping to dark mode: still the very same
+        // installed theme, resolved for the other `ColorMode`.
+        map.current_index = 1;
+        assert_eq!(map.theme_colors(), dark);
     }
 
     #[test]
@@ -2712,6 +2746,92 @@ mod tests {
             fill,
             Color32::from_rgb(1, 2, 3),
             "the node fill must come from the installed MapTheme, in either color mode"
+        );
+    }
+
+    #[test]
+    fn a_custom_map_theme_reaches_the_selection_highlight() {
+        // End-to-end: `SelectionContext::color` must be the installed
+        // `MapTheme`'s `selected` color -- previously defined on every
+        // `ThemeColors` but never actually consumed anywhere in painting --
+        // and `SelectionContext::point` must be the node the widget
+        // actually computed as nearest to the pointer.
+        use crate::map::theme::ThemeColors;
+        use egui::{Context, Event, RawInput};
+        use std::cell::RefCell;
+
+        struct FixedPalette;
+        impl MapTheme for FixedPalette {
+            fn colors(&self, _mode: ColorMode) -> ThemeColors {
+                ThemeColors {
+                    node: Color32::from_rgb(1, 2, 3),
+                    segment: Color32::from_rgb(4, 5, 6),
+                    selected: Color32::from_rgb(7, 8, 9),
+                    alert: Color32::from_rgb(10, 11, 12),
+                    text: Color32::from_rgb(13, 14, 15),
+                }
+            }
+        }
+
+        #[derive(Default)]
+        struct RecordingTemplate {
+            seen: RefCell<Option<(usize, Color32)>>,
+        }
+        impl NodeTemplate for RecordingTemplate {
+            fn node_ui(&self, _ui: &mut Ui, _ctx: NodeContext) {}
+            fn selection_ui(&self, _ui: &mut Ui, ctx: SelectionContext) {
+                *self.seen.borrow_mut() = Some((ctx.point.get_id(), ctx.color));
+            }
+            fn notification_ui(&self, _ui: &mut Ui, _ctx: NotificationContext) -> bool {
+                false
+            }
+            fn marker_ui(&self, _ui: &mut Ui, _ctx: MarkerContext) {}
+        }
+
+        let mut map = Map::new();
+        map.set_theme(Rc::new(FixedPalette));
+        map.settings.node_text_visibility = VisibilitySetting::Hover;
+        map.add_points(vec![MapPoint::new(9, [0.0, 0.0])]);
+        let template = Rc::new(RecordingTemplate::default());
+        map.set_node_template(template.clone());
+
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0));
+        let ctx = Context::default();
+        // Two passes: egui needs a frame to lay the widget out before its
+        // `Response::hovered()` reflects a pointer position landed in the
+        // same frame (same reasoning as `tests/debug_overlay.rs`).
+        for pass in 0..2 {
+            let events = if pass == 1 {
+                vec![Event::PointerMoved(screen.center())]
+            } else {
+                Vec::new()
+            };
+            let mut output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..RawInput::default()
+                },
+                |ui| {
+                    ui.add(&mut map);
+                },
+            );
+            // `TexturesDelta` panics on drop if left unhandled.
+            output.textures_delta.clear();
+        }
+
+        let (id, color) = template
+            .seen
+            .borrow()
+            .expect("selection_ui must be called while the pointer hovers the map");
+        assert_eq!(
+            id, 9,
+            "the highlighted node must be the one under the pointer"
+        );
+        assert_eq!(
+            color,
+            Color32::from_rgb(7, 8, 9),
+            "the highlight color must come from the installed MapTheme's `selected`"
         );
     }
 }

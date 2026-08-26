@@ -7,15 +7,17 @@
 //! of one of the built-ins, the same way [`NodeTemplate`](super::objects::NodeTemplate)
 //! and [`SegmentTemplate`](super::objects::SegmentTemplate) let you replace
 //! the built-in node/segment rendering. [`Style`] is the non-palette visual
-//! configuration (stroke widths, font, background) that the active
-//! [`MapTheme`] colors are combined with when the widget paints.
+//! configuration (stroke widths, font, background) the widget paints with; it
+//! holds no color of its own -- every color comes live from the active
+//! [`MapTheme`], resolved fresh each frame, so nothing in `Style` can drift
+//! out of sync with the installed theme.
 
 use crate::map::theme::{
     ColorMode::{Dark, Light},
     Theme::*,
 };
+use egui::FontId;
 use egui::ecolor::Color32;
-use egui::{FontId, Stroke};
 use std::ops::{Div, Mul};
 
 /// A built-in, named color palette, in both a light and a dark variant.
@@ -287,13 +289,14 @@ pub struct ThemeColors {
 }
 
 /// Which of a theme's two color variants to use.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum ColorMode {
-    /// The light variant.
-    Light,
-    /// The dark variant.
-    Dark,
-}
+///
+/// A re-export of [`egui::Theme`] under this crate's existing name -- egui
+/// already models exactly this dark/light distinction (down to a
+/// [`ColorMode::from_dark_mode`] conversion from `ui.visuals().dark_mode`),
+/// so a second, identical `Light`/`Dark` enum here would just be another
+/// copy of the same two variants to keep in sync. Not to be confused with
+/// this crate's own [`Theme`], a named color palette.
+pub use egui::Theme as ColorMode;
 
 /// Customization point for the color palette used to paint the map.
 ///
@@ -347,47 +350,40 @@ impl MapTheme for Theme {
 
 /// Visual style used to paint the map under a given theme.
 ///
-/// Holds the non-palette visual configuration -- stroke widths, font,
+/// Holds the non-palette visual configuration -- stroke width, font,
 /// background -- that combines with the active [`MapTheme`]'s
-/// [`ThemeColors`] when the widget paints; the widget refreshes
-/// [`fill_color`](Self::fill_color), [`alert_color`](Self::alert_color), the
-/// [`line`](Self::line) color and [`text_color`](Self::text_color) from the
-/// installed theme whenever the color mode changes, so a `Style` never needs
-/// its own copy of those colors.
+/// [`ThemeColors`] when the widget paints. `Style` itself carries no color:
+/// every color the widget paints with (node fill, connection lines, alerts,
+/// selection, text) is resolved live from the installed [`MapTheme`] for the
+/// current [`ColorMode`] -- see [`Map::set_theme`](super::Map::set_theme) --
+/// instead of living here as a copy that would need to be kept in sync.
 ///
-/// Multiplying or dividing a `Style` by a number scales the stroke widths
-/// and the font size, leaving colors untouched; the widget uses this to scale
-/// the active style with the current zoom factor. Fields that are `None` are
-/// left untouched by those operators.
+/// Multiplying or dividing a `Style` by a number scales
+/// [`line_width`](Self::line_width) and the font size; the widget uses this
+/// to scale the active style with the current zoom factor. Fields that are
+/// `None` are left untouched by those operators.
 #[derive(Clone, Debug)]
 pub struct Style {
-    /// Stroke used for the widget border.
-    pub border: Option<Stroke>,
-    /// Stroke used for the connection lines between nodes.
-    pub line: Option<Stroke>,
-    /// Color used to fill node shapes.
-    pub fill_color: Color32,
-    /// Color used for text.
-    pub text_color: Color32,
+    /// Width of the connection lines between nodes; their color comes from
+    /// the active [`MapTheme`]'s [`ThemeColors::segment`]. `None` disables
+    /// the default stroke -- a
+    /// [`SegmentTemplate`](super::objects::SegmentTemplate) or a segment
+    /// effect installed through [`Map::segment`](super::Map::segment) still
+    /// runs either way.
+    pub line_width: Option<f32>,
     /// Font used for map labels.
     pub font: Option<FontId>,
     /// Background color of the map canvas.
     pub background_color: Color32,
-    /// Color used for notification pulse animations.
-    pub alert_color: Color32,
 }
 
 impl Style {
-    /// Creates a fully transparent style with no border, line or font.
+    /// Creates a fully transparent style with no line or font.
     pub fn new() -> Self {
         Style {
-            border: None,
-            line: None,
-            fill_color: Color32::TRANSPARENT,
-            text_color: Color32::TRANSPARENT,
+            line_width: None,
             font: None,
             background_color: Color32::TRANSPARENT,
-            alert_color: Color32::TRANSPARENT,
         }
     }
 }
@@ -402,11 +398,8 @@ impl Style {
     /// Returns a copy with the stroke widths and font size scaled by `factor`.
     /// Fields that are `None` are left untouched.
     fn scaled(mut self, factor: f32) -> Self {
-        if let Some(border) = self.border.as_mut() {
-            border.width *= factor;
-        }
-        if let Some(line) = self.line.as_mut() {
-            line.width *= factor;
+        if let Some(width) = self.line_width.as_mut() {
+            *width *= factor;
         }
         if let Some(font) = self.font.as_mut() {
             font.size *= factor;

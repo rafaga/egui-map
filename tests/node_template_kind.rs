@@ -6,10 +6,11 @@
 //! resorting to a workaround like matching on `color` (as earlier,
 //! pre-0.5.0 versions of `examples/node_template_animations.rs` had to).
 
-use egui::{Context, Pos2, RawInput, Ui};
+use egui::{Context, RawInput, Ui};
 use egui_map::map::Map;
 use egui_map::map::objects::{
-    MapPoint, MarkerContext, NodeAnimation, NodeTemplate, NotificationContext, SteadyAnimation,
+    MapPoint, MarkerContext, NodeAnimation, NodeContext, NodeTemplate, NotificationContext,
+    SelectionContext, SteadyAnimation,
 };
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -24,8 +25,8 @@ struct RecordingTemplate {
 }
 
 impl NodeTemplate for RecordingTemplate {
-    fn node_ui(&self, _ui: &mut Ui, _position: Pos2, _zoom: f32, _point: &MapPoint) {}
-    fn selection_ui(&self, _ui: &mut Ui, _position: Pos2, _zoom: f32) {}
+    fn node_ui(&self, _ui: &mut Ui, _ctx: NodeContext) {}
+    fn selection_ui(&self, _ui: &mut Ui, _ctx: SelectionContext) {}
 
     fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
         self.notifications

@@ -7,7 +7,7 @@
 //! [`ContextMenuManager`] and [`NodeTemplate`]. The color palette a `Style`
 //! paints with lives in [`super::theme`], via [`MapTheme`](super::theme::MapTheme).
 
-use crate::map::theme::{ColorMode, Style, Theme};
+use crate::map::theme::Style;
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Ui};
 use rstar::AABB;
 use std::convert::{From, Into};
@@ -742,47 +742,25 @@ impl Default for MapSettings {
             styles: Vec::new(),
         };
 
-        // The border/background colors below are placeholders, overwritten
-        // by `Map::assign_visual_style` from egui's own visuals on the first
-        // frame. The node/text/alert/line colors instead come from the
-        // default `MapTheme` (see `Map::set_theme`) so they never duplicate
-        // what `Theme::colors` already defines -- `Map::apply_theme_colors`
-        // keeps them in sync with whichever `MapTheme` is installed.
-        let light = Theme::default().colors(ColorMode::Light);
-        let dark = Theme::default().colors(ColorMode::Dark);
+        // The background color below is a placeholder, overwritten by
+        // `Map::assign_visual_style` from egui's own visuals on the first
+        // frame. `Style` carries no color of its own -- every color the
+        // widget paints with comes live from the default `MapTheme` (see
+        // `Map::set_theme`/`Map::theme_colors`), so there is nothing here to
+        // keep in sync with a `Theme`.
 
-        // light Theme
+        // light style
         obj.styles.push(Style {
-            border: Some(egui::Stroke {
-                width: 2.0,
-                color: Color32::from_rgb(216, 142, 58),
-            }),
-            line: Some(egui::Stroke {
-                width: 2.0,
-                color: light.segment,
-            }),
-            fill_color: light.node,
-            text_color: light.text,
+            line_width: Some(2.0),
             font: Some(FontId::new(12.00, FontFamily::Proportional)),
             background_color: Color32::WHITE,
-            alert_color: light.alert,
         });
 
-        // Dark Theme
+        // dark style
         obj.styles.push(Style {
-            border: Some(egui::Stroke {
-                width: 2.0,
-                color: Color32::GOLD,
-            }),
-            line: Some(egui::Stroke {
-                width: 2.0,
-                color: dark.segment,
-            }),
-            fill_color: dark.node,
-            text_color: dark.text,
+            line_width: Some(2.0),
             font: Some(FontId::new(12.00, FontFamily::Proportional)),
             background_color: Color32::DARK_GRAY,
-            alert_color: dark.alert,
         });
         obj
     }
@@ -968,30 +946,32 @@ pub trait ContextMenuManager {
 /// animation that expands and fades out over two seconds:
 ///
 /// ```
-/// use egui_map::map::objects::{MapPoint, NodeTemplate, NotificationContext, MarkerContext};
+/// use egui_map::map::objects::{MapPoint, NodeContext, NodeTemplate, NotificationContext, MarkerContext, SelectionContext};
 /// use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Ui, Vec2};
 /// use std::time::Instant;
 ///
 /// struct BoxedNodes;
 ///
 /// impl NodeTemplate for BoxedNodes {
-///     fn node_ui(&self, ui: &mut Ui, position: Pos2, zoom: f32, point: &MapPoint) {
-///         // Multiply every size by `zoom` so the node scales with the map.
-///         let rect = Rect::from_center_size(position, Vec2::new(90.0 * zoom, 35.0 * zoom));
-///         let rounding = CornerRadius::same((10.0 * zoom) as u8);
+///     fn node_ui(&self, ui: &mut Ui, ctx: NodeContext) {
+///         // Multiply every size by `ctx.zoom` so the node scales with the map.
+///         let rect = Rect::from_center_size(ctx.position, Vec2::new(90.0 * ctx.zoom, 35.0 * ctx.zoom));
+///         let rounding = CornerRadius::same((10.0 * ctx.zoom) as u8);
 ///         let painter = ui.painter();
-///         painter.rect_filled(rect, rounding, ui.visuals().extreme_bg_color);
+///         // `ctx.color` is already resolved: `ctx.point.color` if the node has
+///         // its own override, otherwise the active theme's node color.
+///         painter.rect_filled(rect, rounding, ctx.color);
 ///         painter.rect_stroke(
 ///             rect,
 ///             rounding,
-///             Stroke::new(4.0 * zoom, Color32::WHITE),
+///             Stroke::new(4.0 * ctx.zoom, Color32::WHITE),
 ///             egui::StrokeKind::Middle,
 ///         );
 ///         painter.text(
-///             position,
+///             ctx.position,
 ///             Align2::CENTER_CENTER,
-///             point.get_name(),
-///             FontId::proportional(12.0 * zoom),
+///             ctx.point.get_name(),
+///             FontId::proportional(12.0 * ctx.zoom),
 ///             Color32::WHITE,
 ///         );
 ///     }
@@ -1018,12 +998,12 @@ pub trait ContextMenuManager {
 ///         // Returning `false` removes the notification.
 ///         secs < 2.0
 ///     }
-///     # fn selection_ui(&self, ui: &mut Ui, point: Pos2, zoom: f32) {
-///     #     let rect = Rect::from_center_size(point, Vec2::new(94.0 * zoom, 39.0 * zoom));
+///     # fn selection_ui(&self, ui: &mut Ui, ctx: SelectionContext) {
+///     #     let rect = Rect::from_center_size(ctx.position, Vec2::new(94.0 * ctx.zoom, 39.0 * ctx.zoom));
 ///     #     ui.painter().rect_stroke(
 ///     #         rect,
-///     #         CornerRadius::same((10.0 * zoom) as u8),
-///     #         Stroke::new(3.0 * zoom, Color32::YELLOW),
+///     #         CornerRadius::same((10.0 * ctx.zoom) as u8),
+///     #         Stroke::new(3.0 * ctx.zoom, ctx.color),
 ///     #         egui::StrokeKind::Middle,
 ///     #     );
 ///     # }
@@ -1036,23 +1016,30 @@ pub trait ContextMenuManager {
 ///
 /// # Note on `NodeAnimation`/`SteadyAnimation` in the examples above
 ///
-/// The hidden (`#`-prefixed) stub methods above still take `Pos2`/`f32`
-/// directly rather than a context struct -- only [`NotificationContext`] and
-/// [`MarkerContext`] exist; `node_ui`/`selection_ui` were not wide enough to
-/// need one.
+/// Every method here takes a context struct -- [`NodeContext`],
+/// [`SelectionContext`], [`NotificationContext`] or [`MarkerContext`] -- each
+/// `#[non_exhaustive]` so a future field can be added without another
+/// breaking change to `NodeTemplate` itself.
 pub trait NodeTemplate {
     /// Draws a node, replacing the default filled circle.
     ///
     /// Called every frame for each visible node. The widget no longer draws
     /// the node name once a template is installed, so render it here (e.g.
-    /// with [`Painter::text`](egui::Painter::text)) if you need it.
-    fn node_ui(&self, ui: &mut Ui, _viewport_position: Pos2, _zoom: f32, _point: &MapPoint);
+    /// with [`Painter::text`](egui::Painter::text)) if you need it. See
+    /// [`NodeContext`] for the fields available, in particular `ctx.color`
+    /// -- the color already resolved for this node, so you don't have to
+    /// repeat the `point.color.unwrap_or(...)` fallback (or reach for the
+    /// active theme yourself) to honor a per-node color override.
+    fn node_ui(&self, ui: &mut Ui, ctx: NodeContext);
 
     /// Draws the highlight over the node closest to the mouse pointer.
     ///
     /// The nearest node is only computed while the pointer is over the map and
     /// [`MapSettings::node_text_visibility`] is [`VisibilitySetting::Hover`].
-    fn selection_ui(&self, ui: &mut Ui, _viewport_position: Pos2, _zoom: f32);
+    /// See [`SelectionContext`] for the fields available, in particular
+    /// `ctx.point` (which node is being highlighted) and `ctx.color` (the
+    /// active theme's selection color, resolved for you).
+    fn selection_ui(&self, ui: &mut Ui, ctx: SelectionContext);
 
     /// Draws the notification effect of a node notified at
     /// `ctx.initial_time`.
@@ -1079,6 +1066,53 @@ pub trait NodeTemplate {
     /// clock and call
     /// [`ui.ctx().request_repaint()`](egui::Context::request_repaint).
     fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext);
+}
+
+/// The context passed to [`NodeTemplate::node_ui`].
+///
+/// `#[non_exhaustive]`, like [`NotificationContext`]/[`MarkerContext`], so a
+/// future field can be added here without another breaking change.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct NodeContext<'a> {
+    /// The node's screen position: already scaled by `zoom` and translated
+    /// to the viewport origin.
+    pub position: Pos2,
+    /// Multiply every size you draw by this so it scales with the map.
+    pub zoom: f32,
+    /// The node being painted -- its id, name, coordinates and connections.
+    pub point: &'a MapPoint,
+    /// The color requested for this node: [`point.color`](MapPoint::color)
+    /// if the node has its own override, otherwise the active
+    /// [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::node`](super::theme::ThemeColors::node) for the
+    /// current color mode -- the same fallback the built-in circle uses when
+    /// no template is installed, resolved once here so every `NodeTemplate`
+    /// doesn't need to repeat it.
+    pub color: Color32,
+}
+
+/// The context passed to [`NodeTemplate::selection_ui`].
+///
+/// `#[non_exhaustive]`, like [`NodeContext`]/[`NotificationContext`]/
+/// [`MarkerContext`], so a future field can be added here without another
+/// breaking change.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct SelectionContext<'a> {
+    /// The node's screen position: already scaled by `zoom` and translated
+    /// to the viewport origin.
+    pub position: Pos2,
+    /// Multiply every size you draw by this so it scales with the map.
+    pub zoom: f32,
+    /// The node the highlight belongs to -- the one closest to the mouse
+    /// pointer. Its id, name, coordinates and connections.
+    pub point: &'a MapPoint,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::selected`](super::theme::ThemeColors::selected) for
+    /// the current color mode -- resolved once here so every `NodeTemplate`
+    /// doesn't need to reach for the theme itself.
+    pub color: Color32,
 }
 
 /// The context passed to [`NodeTemplate::notification_ui`].
@@ -1590,97 +1624,80 @@ mod tests {
 
     fn full_style() -> Style {
         Style {
-            border: Some(egui::Stroke::new(2.0, Color32::RED)),
-            line: Some(egui::Stroke::new(4.0, Color32::BLUE)),
-            fill_color: Color32::GREEN,
-            text_color: Color32::WHITE,
+            line_width: Some(4.0),
             font: Some(FontId::new(10.0, FontFamily::Proportional)),
             background_color: Color32::BLACK,
-            alert_color: Color32::YELLOW,
         }
     }
 
     #[test]
     fn map_style_new() {
         let s = Style::new();
-        assert!(s.border.is_none());
-        assert!(s.line.is_none());
+        assert!(s.line_width.is_none());
         assert!(s.font.is_none());
-        assert_eq!(s.fill_color, Color32::TRANSPARENT);
-        assert_eq!(s.text_color, Color32::TRANSPARENT);
         assert_eq!(s.background_color, Color32::TRANSPARENT);
-        assert_eq!(s.alert_color, Color32::TRANSPARENT);
     }
 
     #[test]
     fn map_style_default_equals_new() {
         let s = Style::default();
-        assert!(s.border.is_none());
-        assert!(s.line.is_none());
+        assert!(s.line_width.is_none());
         assert!(s.font.is_none());
     }
 
     #[test]
     fn map_style_mul_i64() {
         let s = full_style() * 2i64;
-        assert_eq!(s.border.unwrap().width, 4.0);
-        assert_eq!(s.line.unwrap().width, 8.0);
+        assert_eq!(s.line_width.unwrap(), 8.0);
         assert_eq!(s.font.unwrap().size, 20.0);
     }
 
     #[test]
     fn map_style_mul_i32() {
         let s = full_style() * 2i32;
-        assert_eq!(s.border.unwrap().width, 4.0);
-        assert_eq!(s.line.unwrap().width, 8.0);
+        assert_eq!(s.line_width.unwrap(), 8.0);
         assert_eq!(s.font.unwrap().size, 20.0);
     }
 
     #[test]
     fn map_style_mul_f32() {
         let s = full_style() * 0.5f32;
-        assert_eq!(s.border.unwrap().width, 1.0);
-        assert_eq!(s.line.unwrap().width, 2.0);
+        assert_eq!(s.line_width.unwrap(), 2.0);
         assert_eq!(s.font.unwrap().size, 5.0);
     }
 
     #[test]
     fn map_style_mul_f64() {
         let s = full_style() * 0.5f64;
-        assert_eq!(s.border.unwrap().width, 1.0);
-        assert_eq!(s.line.unwrap().width, 2.0);
+        assert_eq!(s.line_width.unwrap(), 2.0);
         assert_eq!(s.font.unwrap().size, 5.0);
     }
 
     #[test]
     fn map_style_div_i64() {
         let s = full_style() / 2i64;
-        assert_eq!(s.border.unwrap().width, 1.0);
-        assert_eq!(s.line.unwrap().width, 2.0);
+        assert_eq!(s.line_width.unwrap(), 2.0);
         assert_eq!(s.font.unwrap().size, 5.0);
     }
 
     #[test]
     fn map_style_div_i32() {
         let s = full_style() / 2i32;
-        assert_eq!(s.border.unwrap().width, 1.0);
-        assert_eq!(s.line.unwrap().width, 2.0);
+        assert_eq!(s.line_width.unwrap(), 2.0);
         assert_eq!(s.font.unwrap().size, 5.0);
     }
 
     #[test]
     fn map_style_div_f32() {
         let s = full_style() / 0.5f32;
-        assert_eq!(s.border.unwrap().width, 4.0);
-        assert_eq!(s.line.unwrap().width, 8.0);
+        assert_eq!(s.line_width.unwrap(), 8.0);
         assert_eq!(s.font.unwrap().size, 20.0);
     }
 
     #[test]
     fn map_style_div_f64() {
         let s = full_style() / 0.5f64;
-        assert_eq!(s.border.unwrap().width, 4.0);
-        assert_eq!(s.line.unwrap().width, 8.0);
+        assert_eq!(s.line_width.unwrap(), 8.0);
         assert_eq!(s.font.unwrap().size, 20.0);
     }
 
@@ -1787,13 +1804,11 @@ mod tests {
         assert_eq!(s.styles.len(), 2);
         // light theme
         assert_eq!(s.styles[0].background_color, Color32::WHITE);
-        assert!(s.styles[0].border.is_some());
-        assert!(s.styles[0].line.is_some());
+        assert!(s.styles[0].line_width.is_some());
         assert!(s.styles[0].font.is_some());
         // dark theme
         assert_eq!(s.styles[1].background_color, Color32::DARK_GRAY);
-        assert!(s.styles[1].border.is_some());
-        assert!(s.styles[1].line.is_some());
+        assert!(s.styles[1].line_width.is_some());
         assert!(s.styles[1].font.is_some());
     }
 

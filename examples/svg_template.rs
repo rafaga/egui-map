@@ -4,10 +4,11 @@
 //!
 //! Run with: cargo run --example svg_template
 
-use eframe::egui::{self, Align2, Color32, Pos2, Stroke, Ui, Vec2};
+use eframe::egui::{self, Align2, Color32, Stroke, Ui, Vec2};
 use egui_map::map::Map;
 use egui_map::map::objects::{
-    MapPoint, MapSegment, MarkerContext, NodeTemplate, NotificationContext, VisibilitySetting,
+    MapPoint, MapSegment, MarkerContext, NodeContext, NodeTemplate, NotificationContext,
+    SelectionContext, VisibilitySetting,
 };
 use std::rc::Rc;
 use std::time::Instant;
@@ -15,35 +16,37 @@ use std::time::Instant;
 struct SvgNodes;
 
 impl NodeTemplate for SvgNodes {
-    /// Custom node shape: an SVG icon with the node name below it.
-    /// `position` is the node's screen position; scale every size by `zoom`.
-    fn node_ui(&self, ui: &mut Ui, position: Pos2, zoom: f32, point: &MapPoint) {
-        let size = 24.0 * zoom;
-        let source = match point.get_id() {
+    /// Custom node shape: an SVG icon with the node name below it. The icon
+    /// has its own fixed colors, so this template has no use for `ctx.color`
+    /// -- see `custom_template.rs` for one that paints with it.
+    fn node_ui(&self, ui: &mut Ui, ctx: NodeContext) {
+        let size = 24.0 * ctx.zoom;
+        let source = match ctx.point.get_id() {
             1 => egui::include_image!("router_pool.svg"),
             2 => egui::include_image!("switch_pool.svg"),
             _ => egui::include_image!("server_mango.svg"),
         };
-        let rect = egui::Rect::from_center_size(position, Vec2::splat(size));
+        let rect = egui::Rect::from_center_size(ctx.position, Vec2::splat(size));
         ui.put(
             rect,
             egui::Image::new(source).fit_to_exact_size(Vec2::splat(size)),
         );
         ui.painter().text(
-            position + Vec2::new(0.0, size / 2.0),
+            ctx.position + Vec2::new(0.0, size / 2.0),
             Align2::CENTER_TOP,
-            point.get_name(),
-            egui::FontId::proportional(11.0 * zoom),
+            ctx.point.get_name(),
+            egui::FontId::proportional(11.0 * ctx.zoom),
             ui.visuals().text_color(),
         );
     }
 
-    /// Highlight ring over the node closest to the mouse pointer.
-    fn selection_ui(&self, ui: &mut Ui, position: Pos2, zoom: f32) {
+    /// Highlight ring over the node closest to the mouse pointer, outlined in
+    /// `ctx.color` -- the active theme's selection color.
+    fn selection_ui(&self, ui: &mut Ui, ctx: SelectionContext) {
         ui.painter().circle_stroke(
-            position,
-            16.0 * zoom,
-            Stroke::new(2.0 * zoom, Color32::YELLOW),
+            ctx.position,
+            16.0 * ctx.zoom,
+            Stroke::new(2.0 * ctx.zoom, ctx.color),
         );
     }
 
