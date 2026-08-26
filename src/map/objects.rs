@@ -3,7 +3,7 @@
 //! This module contains the geometry primitives ([`RawPoint`], [`RawLine`]),
 //! the map content types ([`MapPoint`], [`MapSegment`], [`MapLabel`]) and the
 //! customization points of the widget: [`MapSettings`],
-//! [`Style`](super::theme::Style), [`VisibilitySetting`],
+//! [`Style`], [`VisibilitySetting`],
 //! [`ContextMenuManager`] and [`NodeTemplate`]. The color palette a `Style`
 //! paints with lives in [`super::theme`], via [`MapTheme`](super::theme::MapTheme).
 
@@ -548,7 +548,8 @@ impl rstar::RTreeObject for MapSegment {
 ///   for a bare coordinate with no entity behind it (e.g. a bounding-box
 ///   corner); every `MapPoint` loaded into the widget represents a real,
 ///   placed node whose id is used directly as the point-set `HashMap` key
-///   and the kd-tree payload (see [`Map::add_hashmap_points`]), so an
+///   and the kd-tree payload (see
+///   [`Map::add_hashmap_points`](super::Map::add_hashmap_points)), so an
 ///   optional id would just push an `.unwrap()` (or a silently dropped
 ///   node) into those call sites with no caller ever passing `None`.
 ///
@@ -573,14 +574,16 @@ pub struct MapPoint {
     /// visibility, so a line is drawn whenever its bounding box intersects
     /// the viewport.
     pub connections: Vec<(usize, usize)>,
-    /// Persistent fill color for this node's default circle, in place of
-    /// [`NodeStyle::fill_color`](super::NodeStyle::fill_color). `None`
-    /// (the default) keeps today's behavior of every node sharing the
-    /// same style color.
+    /// Persistent color override for this node's default circle. `None`
+    /// (the default) falls back to the active
+    /// [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::node`](super::theme::ThemeColors::node) for the
+    /// current color mode -- see [`Map::set_theme`](super::Map::set_theme).
     ///
     /// Only consulted by the built-in circle drawn when no
     /// [`NodeTemplate`] is installed -- a custom template receives this
-    /// same `MapPoint` and decides for itself whether/how to use `color`.
+    /// same `MapPoint` via [`NodeContext::point`], with
+    /// [`NodeContext::color`] already carrying the resolved fallback.
     pub color: Option<Color32>,
 }
 

@@ -9,15 +9,15 @@ use egui_map::map::objects::{
 use std::time::Instant;
 
 fn sample_points() -> Vec<MapPoint> {
-    let mut map = Vec::new();
-    map.push(MapPoint::new(1, [0.0, 0.0]));
-    map.push(MapPoint::new(2, [10.0, 10.0]));
-    map.push(MapPoint::new(3, [-10.0, -10.0]));
-    map.push(MapPoint::new(4, [10.0, -10.0]));
-    map.push(MapPoint::new(5, [5.0, 0.0]));
-    map.push(MapPoint::new(6, [0.0, 5.0]));
-    map.push(MapPoint::new(7, [-5.0, 0.0]));
-    map
+    vec![
+        MapPoint::new(1, [0.0, 0.0]),
+        MapPoint::new(2, [10.0, 10.0]),
+        MapPoint::new(3, [-10.0, -10.0]),
+        MapPoint::new(4, [10.0, -10.0]),
+        MapPoint::new(5, [5.0, 0.0]),
+        MapPoint::new(6, [0.0, 5.0]),
+        MapPoint::new(7, [-5.0, 0.0]),
+    ]
 }
 
 // ---------- flujo completo de Map (API pública) ----------
@@ -71,8 +71,7 @@ fn map_add_labels_and_lines() {
         center: egui::Pos2::new(3.0, 4.0),
     }]);
 
-    let mut lines = Vec::new();
-    lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]));
+    let lines = vec![MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0])];
     map.add_lines(lines);
 }
 

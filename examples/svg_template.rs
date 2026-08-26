@@ -100,13 +100,11 @@ fn main() -> eframe::Result<()> {
     }
     let mut vec_segmnents = Vec::new();
     let ids = vec![[1, 2], [2, 3]];
-    let mut cont = 0;
-    for id in ids {
+    for (cont, id) in ids.into_iter().enumerate() {
         let point1 = points.get(id[0]).unwrap();
         let point2 = points.get(id[1]).unwrap();
         let line = MapSegment::new((cont, cont + 1), point1.coords, point2.coords);
         vec_segmnents.push(line);
-        cont += 1;
     }
     let mut map = Map::new();
     map.add_points(points);

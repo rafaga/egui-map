@@ -1787,11 +1787,11 @@ mod tests {
     use std::time::Duration;
 
     fn sample_points() -> Vec<MapPoint> {
-        let mut map = Vec::new();
-        map.push(MapPoint::new(1, [0.0, 0.0]));
-        map.push(MapPoint::new(2, [10.0, 10.0]));
-        map.push(MapPoint::new(3, [-10.0, -10.0]));
-        map
+        vec![
+            MapPoint::new(1, [0.0, 0.0]),
+            MapPoint::new(2, [10.0, 10.0]),
+            MapPoint::new(3, [-10.0, -10.0]),
+        ]
     }
 
     // ---------- construcción ----------
@@ -1922,8 +1922,7 @@ mod tests {
         // needed at all.
         let mut map = Map::new();
         map.set_zoom(1.0);
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((1, 2), [-4000.0, -1.0], [4000.0, 1.0]));
+        let lines = vec![MapSegment::new((1, 2), [-4000.0, -1.0], [4000.0, 1.0])];
         map.add_lines(lines);
         map.set_pos([0.0, 0.0]);
 
@@ -1935,12 +1934,11 @@ mod tests {
     fn segment_outside_viewport_is_not_painted() {
         let mut map = Map::new();
         map.set_zoom(1.0);
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new(
+        let lines = vec![MapSegment::new(
             (1, 2),
             [10_000.0, 10_000.0],
             [10_100.0, 10_100.0],
-        ));
+        )];
         map.add_lines(lines);
         map.set_pos([0.0, 0.0]);
 
@@ -1951,8 +1949,7 @@ mod tests {
     fn add_lines_builds_segment_tree() {
         let mut map = Map::new();
         map.add_points(sample_points());
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]));
+        let lines = vec![MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0])];
         map.add_lines(lines);
 
         let tree = map
@@ -2004,12 +2001,9 @@ mod tests {
         let mut point_b = MapPoint::new(1, [50.0, 50.0]);
         point_b.connections.push((0, 1));
 
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((0, 1), point_a.coords, point_b.coords));
+        let lines = vec![MapSegment::new((0, 1), point_a.coords, point_b.coords)];
 
-        let mut points = Vec::new();
-        points.push(point_a);
-        points.push(point_b);
+        let points = vec![point_a, point_b];
         // Load points before lines — the natural order shown in the examples.
         map.add_points(points);
         map.add_lines(lines);
@@ -2199,8 +2193,7 @@ mod tests {
     #[test]
     fn add_lines_stores_lines() {
         let mut map = Map::new();
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [1.0, 1.0]));
+        let lines = vec![MapSegment::new((1, 2), [0.0, 0.0], [1.0, 1.0])];
         map.add_lines(lines);
         let tree = map.segments.as_ref().unwrap();
         assert_eq!(tree.size(), 1);
@@ -2222,9 +2215,10 @@ mod tests {
     fn line_at_returns_closest_line_within_tolerance() {
         let mut map = Map::new();
         map.add_points(sample_points());
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 0.0]));
-        lines.push(MapSegment::new((3, 4), [20.0, -5.0], [20.0, 5.0]));
+        let lines = vec![
+            MapSegment::new((1, 2), [0.0, 0.0], [10.0, 0.0]),
+            MapSegment::new((3, 4), [20.0, -5.0], [20.0, 5.0]),
+        ];
         map.add_lines(lines);
 
         // 1.5 units above the horizontal segment.
@@ -2240,8 +2234,7 @@ mod tests {
     fn line_at_returns_none_beyond_tolerance() {
         let mut map = Map::new();
         map.add_points(sample_points());
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]));
+        let lines = vec![MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0])];
         map.add_lines(lines);
 
         // Distance from (5,4) to the diagonal segment (0,0)-(10,10) is
@@ -2261,8 +2254,7 @@ mod tests {
     fn line_at_negative_tolerance_behaves_like_zero() {
         let mut map = Map::new();
         map.add_points(sample_points());
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]));
+        let lines = vec![MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0])];
         map.add_lines(lines);
 
         // Exact point on the segment is hit even with tolerance clamped to 0.
