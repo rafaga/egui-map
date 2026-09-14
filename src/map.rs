@@ -537,6 +537,16 @@ impl Widget for &mut Map {
                     let new_pos = self.reference.pos - (coords / self.zoom);
                     self.set_pos(new_pos.into());
                 }
+                // Centre on the rect we actually paint into. Now that the
+                // painter is sized to the frame's content area this is exactly
+                // `map_area.center()`, but deriving it from `resp.rect` keeps
+                // projection, hover hit-testing and the frame in agreement if
+                // the frame's margins ever change. Computed *before* the labels
+                // below so they can reuse the same map -> screen projection as
+                // the nodes/markers instead of being pinned to a screen pixel.
+                let rect_midpoint = RawPoint::from(resp.rect.center());
+                let min_point = self.current.pos - rect_midpoint;
+
                 if self.zoom < self.settings.line_visible_zoom {
                     // filling text settings
                     let mut text_settings = TextSettings {
@@ -552,18 +562,17 @@ impl Widget for &mut Map {
                     };
                     for label in &self.labels {
                         text_settings.text.clone_from(&label.text);
-                        text_settings.position = RawPoint::from(label.center);
+                        // `MapLabel::center` is in map coordinates, so project
+                        // it exactly like the nodes do (`coords * zoom -
+                        // min_point`). Using it verbatim (as this used to)
+                        // pinned every label to a fixed screen pixel that
+                        // ignored pan and zoom entirely.
+                        text_settings.position =
+                            RawPoint::from(label.center) * self.zoom - min_point;
                         self.paint_label(&paint, &text_settings);
                     }
                 }
 
-                // Centre on the rect we actually paint into. Now that the
-                // painter is sized to the frame's content area this is exactly
-                // `map_area.center()`, but deriving it from `resp.rect` keeps
-                // projection, hover hit-testing and the frame in agreement if
-                // the frame's margins ever change.
-                let rect_midpoint = RawPoint::from(resp.rect.center());
-                let min_point = self.current.pos - rect_midpoint;
                 let vec_points = &self.visible_points;
                 let hashm = &self.points;
 

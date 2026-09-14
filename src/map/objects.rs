@@ -457,7 +457,11 @@ impl From<[[i64; 2]; 2]> for RawLine {
 pub struct MapLabel {
     /// The text to display.
     pub text: String,
-    /// The position of the label's center.
+    /// The center of the label, in **map coordinates** -- the same space as
+    /// [`MapPoint::coords`]. It is projected to the screen with the map's own
+    /// pan/zoom (`coords * zoom - min_point`), so it tracks a place on the map
+    /// instead of a fixed pixel. Only the label's *font size* stays in screen
+    /// pixels.
     pub center: Pos2,
 }
 
