@@ -103,6 +103,7 @@ impl NodeTemplate for MyTemplate {
     fn marker_ui(&self, _ui: &mut Ui, _ctx: MarkerContext) {
         // `ctx.kind` is Halo/Blink/Orbit for persistent node state, or the shared
         // `MapSettings::marker_animation` for a `Map::update_marker` marker.
+        // `ctx.color` is the color the built-in effect would paint with.
     }
 }
 
@@ -113,28 +114,40 @@ See the `NodeTemplate` rustdoc for a complete example with a custom node shape a
 
 ### Custom segment rendering and animations
 
-`SegmentTemplate` is the segment counterpart of `NodeTemplate`. Its methods take a bare `&Painter` rather than `&mut Ui`, since segments are visited in bulk after the R-tree viewport culling — use `painter.ctx()` to reach `request_repaint()`:
+`SegmentTemplate` is the segment counterpart of `NodeTemplate`. Its methods take a bare `&Painter` rather than `&mut Ui`, since segments are visited in bulk after the R-tree viewport culling — use `painter.ctx()` to reach `request_repaint()`. Like `NodeTemplate`, every method takes a `#[non_exhaustive]` context struct — `SegmentContext`, `SegmentNotificationContext`, `SegmentStateContext` — each carrying the segment's endpoints (`pos_a`/`pos_b`), `zoom`, the `segment` itself (id and coordinates) and a resolved `color`; the two effect contexts also carry `kind`, so you can match it and dispatch straight to the built-in `Animation::*` function instead of reimplementing the effect:
 
 ```rust
-use egui_map::map::objects::{MapSegment, SegmentTemplate};
-use egui::{Color32, Painter, Pos2, Stroke};
-use std::time::Instant;
+use egui_map::map::animation::Animation;
+use egui_map::map::objects::{
+    SegmentContext, SegmentNotificationContext, SegmentStateContext, SegmentTemplate,
+    SteadySegmentAnimation,
+};
+use egui::{Color32, Painter, Stroke};
 
 struct MySegments;
 
 impl SegmentTemplate for MySegments {
-    fn segment_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, _segment: &MapSegment) {
-        painter.line_segment([a, b], Stroke::new(1.5 * zoom, Color32::GRAY));
+    fn segment_ui(&self, painter: &Painter, ctx: SegmentContext) {
+        painter.line_segment([ctx.pos_a, ctx.pos_b], Stroke::new(1.5 * ctx.zoom, Color32::GRAY));
     }
 
-    fn segment_notification_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, start: Instant, color: Color32) -> bool {
-        // ... draw a time-driven effect computed from `start.elapsed()` ...
+    fn segment_notification_ui(&self, painter: &Painter, ctx: SegmentNotificationContext) -> bool {
+        // `ctx.kind` is which of flash/comet_once/wipe was requested -- dispatch
+        // on it, or draw a time-driven effect computed from `ctx.initial_time.elapsed()`.
         painter.ctx().request_repaint(); // keep the animation frames coming
-        start.elapsed().as_secs_f32() < 1.0 // returning false removes the notification
+        ctx.initial_time.elapsed().as_secs_f32() < 1.0 // returning false removes the notification
     }
 
-    fn segment_state_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, time: f32, color: Color32) {
-        // `time` is the frame time (`ui.input(|i| i.time)`), shared by every element animated this frame.
+    fn segment_state_ui(&self, painter: &Painter, ctx: SegmentStateContext) {
+        // `ctx.kind` is which persistent effect was requested -- reuse the
+        // matching built-in one instead of reimplementing it:
+        let effect = match ctx.kind {
+            SteadySegmentAnimation::Comet => Animation::comet,
+            SteadySegmentAnimation::Dash => Animation::dash,
+            SteadySegmentAnimation::GlowBand => Animation::glow_band,
+            SteadySegmentAnimation::Chevrons => Animation::chevrons,
+        };
+        effect(painter, ctx.pos_a, ctx.pos_b, ctx.zoom, ctx.time, ctx.color);
         painter.ctx().request_repaint();
     }
 }

@@ -105,8 +105,8 @@ use crate::map::animation::Animation;
 use crate::map::objects::{
     CometDirection, ContextMenuManager, MapBounds, MapLabel, MapPoint, MapSegment, MapSettings,
     MarkerContext, NodeAnimation, NodeContext, NotificationContext, RawLine, RawPoint,
-    SegmentAnimation, SelectionContext, SteadyAnimation, SteadySegmentAnimation, TextSettings,
-    VisibilitySetting,
+    SegmentAnimation, SegmentContext, SegmentNotificationContext, SegmentStateContext,
+    SelectionContext, SteadyAnimation, SteadySegmentAnimation, TextSettings, VisibilitySetting,
 };
 use crate::map::theme::{ColorMode, MapTheme, Style, Theme, ThemeColors};
 use egui::{widgets::*, *};
@@ -600,6 +600,17 @@ impl Widget for &mut Map {
                 for marker in &self.markers {
                     if let Some(point) = self.points.as_ref().unwrap().get(marker.1) {
                         let adjusted_point = RawPoint::from(point.coords) * self.zoom - min_point;
+                        // Plain markers have no color setting of their own to
+                        // override, unlike a node's lasting state (see the
+                        // `node_states` branch below) -- this fixed green is
+                        // the same value the built-in effect always painted
+                        // with, now also handed to the template via
+                        // `MarkerContext::color`.
+                        let color = if ui.visuals().dark_mode {
+                            Color32::LIGHT_GREEN
+                        } else {
+                            Color32::GREEN
+                        };
                         if let Some(template) = &self.node_template {
                             template.marker_ui(
                                 ui,
@@ -608,14 +619,10 @@ impl Widget for &mut Map {
                                     zoom: self.zoom,
                                     kind: self.settings.marker_animation,
                                     node_id: *marker.1,
+                                    color,
                                 },
                             );
                         } else {
-                            let color = if ui.visuals().dark_mode {
-                                Color32::LIGHT_GREEN
-                            } else {
-                                Color32::GREEN
-                            };
                             // Frame time, so every marker in this frame shares
                             // one clock instead of each sampling the wall clock
                             // at a slightly different moment.
@@ -1328,6 +1335,7 @@ impl Map {
                                 zoom: self.zoom,
                                 kind: state.animation,
                                 node_id: system_id,
+                                color,
                             },
                         );
                     } else {
@@ -1383,7 +1391,10 @@ impl Map {
                 // The color requested for this node: its own override if it
                 // has one, otherwise the active theme's node color -- the
                 // single fallback both the built-in circle and a
-                // `NodeTemplate` (via `NodeContext::color`) paint with.
+                // `NodeTemplate` (via `NodeContext::color`) paint with. The
+                // active theme's own node color is handed over separately
+                // (`NodeContext::theme_color`) so a template can tell the
+                // two apart.
                 let node_color = system.color.unwrap_or(self.theme_colors().node);
                 if let Some(node_template) = &self.node_template {
                     node_template.node_ui(
@@ -1393,6 +1404,7 @@ impl Map {
                             zoom: self.zoom,
                             point: system,
                             color: node_color,
+                            theme_color: self.theme_colors().node,
                         },
                     );
                 } else {
@@ -1430,34 +1442,24 @@ impl Map {
         // entirely.
         let line_fade = ((self.zoom - self.settings.line_visible_zoom) / 0.80).clamp(0.0, 1.0);
 
+        // The color the active theme paints segment lines with -- and the
+        // value handed to a `SegmentTemplate` as `SegmentContext::theme_color`,
+        // so a custom template can match the built-in look (or its zoom fade)
+        // without re-deriving it. Comes live from the active theme, not from
+        // `Style` -- there is no cached copy left to fall out of sync.
+        let segment_theme_color = scale_alpha(self.theme_colors().segment, line_fade);
+
         // `style.line_width == None` only turns off the *default* stroke -- a
         // `SegmentTemplate` or a segment effect installed through
         // `Map::segment` still needs to run, e.g. for a consumer who draws
         // lines entirely on their own and only wants the built-in effects.
-        // The stroke's color always comes live from the active theme, not
-        // from `Style` -- there is no cached copy left to fall out of sync.
-        let default_stroke = self.current_style().line_width.map(|width| {
-            let segment_color = self.theme_colors().segment;
-            let color = if line_fade >= 1.0 {
-                segment_color
-            } else {
-                let mut tup_stroke = segment_color.to_tuple();
-                tup_stroke.3 = (255.0 * line_fade).round() as u8;
-                Color32::from_rgba_unmultiplied(
-                    tup_stroke.0,
-                    tup_stroke.1,
-                    tup_stroke.2,
-                    tup_stroke.3,
-                )
-            };
-            Stroke::new(width, color)
-        });
+        let line_width = self.current_style().line_width;
 
         // Broad-phase: query the segment R-tree with the viewport AABB (in
         // map coordinates), padded by the stroke width -- when there is one
         // -- so lines at the very edge are not clipped prematurely.
         let center = self.current.pos / self.zoom;
-        let padding = default_stroke.map(|s| s.width).unwrap_or(0.0) / self.zoom;
+        let padding = line_width.unwrap_or(0.0) / self.zoom;
         let half = RawPoint::new(
             self.map_area.width() / 2.0 / self.zoom + padding,
             self.map_area.height() / 2.0 / self.zoom + padding,
@@ -1482,10 +1484,32 @@ impl Map {
             // circle, so the base shape painted last only covers the
             // center) but not for segments, where the effect runs along the
             // exact same path as the line underneath it.
+            // The color resolved per segment: its own override if it has
+            // one, otherwise the active theme's segment color -- the same
+            // value handed to a `SegmentTemplate` as `SegmentContext::color`,
+            // and the one the default stroke paints with, so an override
+            // actually shows up.
+            let segment_color = scale_alpha(
+                segment.color.unwrap_or(self.theme_colors().segment),
+                line_fade,
+            );
             if let Some(template) = &self.segment_template {
-                template.segment_ui(painter, pos_a, pos_b, self.zoom, segment);
-            } else if let Some(stroke) = default_stroke {
-                painter.add(Shape::line_segment([pos_a, pos_b], stroke));
+                template.segment_ui(
+                    painter,
+                    SegmentContext {
+                        pos_a,
+                        pos_b,
+                        zoom: self.zoom,
+                        segment,
+                        color: segment_color,
+                        theme_color: segment_theme_color,
+                    },
+                );
+            } else if let Some(width) = line_width {
+                painter.add(Shape::line_segment(
+                    [pos_a, pos_b],
+                    Stroke::new(width, segment_color),
+                ));
             }
 
             // Persistent segment state is drawn first so a notification --
@@ -1496,9 +1520,21 @@ impl Map {
                     state.color.unwrap_or(self.theme_colors().alert),
                     effect_fade,
                 );
+                let time = painter.ctx().input(|i| i.time) as f32;
                 if let Some(template) = &self.segment_template {
-                    let time = painter.ctx().input(|i| i.time) as f32;
-                    template.segment_state_ui(painter, pos_a, pos_b, self.zoom, time, color);
+                    template.segment_state_ui(
+                        painter,
+                        SegmentStateContext {
+                            pos_a,
+                            pos_b,
+                            zoom: self.zoom,
+                            segment,
+                            time,
+                            color,
+                            theme_color: scale_alpha(self.theme_colors().alert, effect_fade),
+                            kind: state.animation,
+                        },
+                    );
                 } else {
                     let effect = match state.animation {
                         SteadySegmentAnimation::Comet => Animation::comet,
@@ -1506,7 +1542,6 @@ impl Map {
                         SteadySegmentAnimation::GlowBand => Animation::glow_band,
                         SteadySegmentAnimation::Chevrons => Animation::chevrons,
                     };
-                    let time = painter.ctx().input(|i| i.time) as f32;
                     effect(painter, pos_a, pos_b, self.zoom, time, color);
                 }
                 // Persistent effects never finish on their own.
@@ -1521,11 +1556,16 @@ impl Map {
                 let still_playing = if let Some(template) = &self.segment_template {
                     template.segment_notification_ui(
                         painter,
-                        pos_a,
-                        pos_b,
-                        self.zoom,
-                        notification.started,
-                        color,
+                        SegmentNotificationContext {
+                            pos_a,
+                            pos_b,
+                            zoom: self.zoom,
+                            segment,
+                            initial_time: notification.started,
+                            color,
+                            theme_color: scale_alpha(self.theme_colors().alert, effect_fade),
+                            kind: notification.animation,
+                        },
                     )
                 } else {
                     match notification.animation {

@@ -505,12 +505,33 @@ pub struct MapSegment {
     pub point1: [f32; 2],
     /// The other endpoint of the segment, in map coordinates.
     pub point2: [f32; 2],
+    /// Persistent color override for this segment's default line. `None`
+    /// (the default) falls back to the active
+    /// [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::segment`](super::theme::ThemeColors::segment) for the
+    /// current color mode -- see [`Map::set_theme`](super::Map::set_theme).
+    ///
+    /// Only consulted by the built-in stroke drawn when no
+    /// [`SegmentTemplate`] is installed -- a custom template receives this
+    /// same `MapSegment` via [`SegmentContext::segment`], with
+    /// [`SegmentContext::color`] already carrying the resolved fallback.
+    pub color: Option<Color32>,
 }
 
 impl MapSegment {
     /// Creates a segment for `id` between `point1` and `point2`.
     pub fn new(id: (usize, usize), point1: [f32; 2], point2: [f32; 2]) -> Self {
-        Self { id, point1, point2 }
+        Self {
+            id,
+            point1,
+            point2,
+            color: None,
+        }
+    }
+
+    /// Sets this segment's persistent color override (see [`Self::color`]).
+    pub fn set_color(&mut self, color: Color32) {
+        self.color = Some(color);
     }
 
     /// The segment geometry as a [`RawLine`], for the distance/midpoint math
@@ -1097,6 +1118,14 @@ pub struct NodeContext<'a> {
     /// no template is installed, resolved once here so every `NodeTemplate`
     /// doesn't need to repeat it.
     pub color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::node`](super::theme::ThemeColors::node) for the current
+    /// color mode -- the base color the theme paints nodes with, before any
+    /// per-node [`point.color`](MapPoint::color) override is applied. This is
+    /// what `color` falls back to when the node has no override, so it lets a
+    /// `NodeTemplate` tell the theme's own color apart from a node's computed
+    /// (overridden) one.
+    pub theme_color: Color32,
 }
 
 /// The context passed to [`NodeTemplate::selection_ui`].
@@ -1137,8 +1166,9 @@ pub struct NotificationContext {
     /// When the notification started -- usually fed into a progress
     /// computation like `Instant::now().duration_since(initial_time)`.
     pub initial_time: Instant,
-    /// The color requested for this notification (the node's own color, or
-    /// the current style's `alert_color` if none was set).
+    /// The color requested for this notification: the node's own override
+    /// if it was given one when triggered, otherwise the active theme's
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert).
     pub color: Color32,
     /// Which built-in event effect was requested (`pulse`, `ripple`, ...).
     /// Match on this to dispatch to the corresponding
@@ -1173,6 +1203,13 @@ pub struct MarkerContext {
     /// The id of the node the state/marker belongs to (for a marker: the id
     /// it points at, not the marker's own id).
     pub node_id: usize,
+    /// The color the built-in effect would draw with: the node's own
+    /// override for its lasting state (falling back to the active theme's
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert)), or a fixed
+    /// green for a plain [`Map::update_marker`](super::Map::update_marker)
+    /// marker (light or dark depending on the surrounding UI's theme) --
+    /// plain markers don't have their own color setting to override.
+    pub color: Color32,
 }
 
 /// Customizes how segments and their visual effects are rendered.
@@ -1189,60 +1226,78 @@ pub struct MarkerContext {
 /// discard. Use [`Painter::ctx`] to reach the [`egui::Context`] — for example
 /// to call `request_repaint()`.
 ///
-/// The positions passed to these methods are in screen coordinates: already
-/// scaled by `zoom` and translated to the viewport origin, same as
-/// [`NodeTemplate`]'s. Multiply every size by `zoom` so your shapes scale
-/// together with the map.
+/// Every method takes a context struct -- [`SegmentContext`],
+/// [`SegmentNotificationContext`] or [`SegmentStateContext`] -- the same
+/// pattern [`NodeTemplate`] uses ([`NodeContext`], [`NotificationContext`],
+/// [`MarkerContext`]): each `#[non_exhaustive]` so a future field can be
+/// added without another breaking change, each carrying `pos_a`/`pos_b`
+/// (already scaled by `zoom` and translated to the viewport origin -- same
+/// convention as [`NodeTemplate`]'s `position`, just two points instead of
+/// one), `zoom`, `segment` (its id and endpoint coordinates) and a resolved
+/// `color` so you never have to reach for the active theme or reimplement a
+/// fallback yourself. The two effect contexts also carry `kind` -- match on
+/// it to dispatch straight to the matching built-in
+/// [`Animation`](crate::map::animation::Animation) function, exactly like
+/// [`NotificationContext::kind`]/[`MarkerContext::kind`] already let you do
+/// for nodes.
 ///
 /// # Examples
 ///
-/// A segment drawn as a dashed line, plus a notification that briefly
-/// thickens and brightens it:
+/// A segment drawn as a dashed line, a notification that briefly thickens
+/// and brightens it, and lasting state that reuses a built-in effect via
+/// `kind` instead of reimplementing it:
 ///
 /// ```
-/// use egui_map::map::objects::{MapSegment, SegmentTemplate};
-/// use egui::{Color32, Painter, Pos2, Stroke};
+/// use egui_map::map::animation::Animation;
+/// use egui_map::map::objects::{
+///     SegmentContext, SegmentNotificationContext, SegmentStateContext, SegmentTemplate,
+///     SteadySegmentAnimation,
+/// };
+/// use egui::{Color32, Painter, Stroke};
 /// use std::time::Instant;
 ///
 /// struct DashedRoutes;
 ///
 /// impl SegmentTemplate for DashedRoutes {
-///     fn segment_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, _segment: &MapSegment) {
+///     fn segment_ui(&self, painter: &Painter, ctx: SegmentContext) {
 ///         // A crude dash: short strokes along the segment, spaced in screen
 ///         // pixels so they don't stretch as the map zooms.
-///         let dir = b - a;
+///         let dir = ctx.pos_b - ctx.pos_a;
 ///         let len = dir.length();
-///         let step = 10.0 * zoom;
+///         let step = 10.0 * ctx.zoom;
 ///         let mut travelled = 0.0;
 ///         while travelled < len {
-///             let start = a + dir * (travelled / len);
-///             let end = a + dir * ((travelled + step * 0.6).min(len) / len);
-///             painter.line_segment([start, end], Stroke::new(2.0 * zoom, Color32::GRAY));
+///             let start = ctx.pos_a + dir * (travelled / len);
+///             let end = ctx.pos_a + dir * ((travelled + step * 0.6).min(len) / len);
+///             painter.line_segment([start, end], Stroke::new(2.0 * ctx.zoom, Color32::GRAY));
 ///             travelled += step;
 ///         }
 ///     }
 ///
-///     fn segment_notification_ui(
-///         &self,
-///         painter: &Painter,
-///         a: Pos2,
-///         b: Pos2,
-///         zoom: f32,
-///         initial_time: Instant,
-///         color: Color32,
-///     ) -> bool {
-///         let secs = Instant::now().duration_since(initial_time).as_secs_f32();
+///     fn segment_notification_ui(&self, painter: &Painter, ctx: SegmentNotificationContext) -> bool {
+///         let secs = Instant::now().duration_since(ctx.initial_time).as_secs_f32();
 ///         let alpha = (1.0 - secs).clamp(0.0, 1.0);
-///         let fading =
-///             Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (255.0 * alpha) as u8);
-///         painter.line_segment([a, b], Stroke::new(5.0 * zoom, fading));
+///         let fading = Color32::from_rgba_unmultiplied(
+///             ctx.color.r(),
+///             ctx.color.g(),
+///             ctx.color.b(),
+///             (255.0 * alpha) as u8,
+///         );
+///         painter.line_segment([ctx.pos_a, ctx.pos_b], Stroke::new(5.0 * ctx.zoom, fading));
 ///         painter.ctx().request_repaint();
 ///         secs < 1.0
 ///     }
 ///
-///     fn segment_state_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, time: f32, color: Color32) {
-///         let t = (time / 1.6).rem_euclid(1.0);
-///         painter.circle_filled(a + (b - a) * t, 4.0 * zoom, color);
+///     fn segment_state_ui(&self, painter: &Painter, ctx: SegmentStateContext) {
+///         // `ctx.kind` is which persistent effect this segment requested --
+///         // dispatch straight to it instead of reimplementing the math.
+///         let effect = match ctx.kind {
+///             SteadySegmentAnimation::Comet => Animation::comet,
+///             SteadySegmentAnimation::Dash => Animation::dash,
+///             SteadySegmentAnimation::GlowBand => Animation::glow_band,
+///             SteadySegmentAnimation::Chevrons => Animation::chevrons,
+///         };
+///         effect(painter, ctx.pos_a, ctx.pos_b, ctx.zoom, ctx.time, ctx.color);
 ///         painter.ctx().request_repaint();
 ///     }
 /// }
@@ -1251,50 +1306,151 @@ pub trait SegmentTemplate {
     /// Draws a segment, replacing the default stroked line.
     ///
     /// Called every frame for each segment that survives the R-tree viewport
-    /// culling in `paint_map_lines`.
-    fn segment_ui(
-        &self,
-        painter: &Painter,
-        pos_a: Pos2,
-        pos_b: Pos2,
-        zoom: f32,
-        segment: &MapSegment,
-    );
+    /// culling in `paint_map_lines`. See [`SegmentContext`] for the fields
+    /// available, in particular `ctx.color` -- the color the default stroke
+    /// would use, already resolved from the active theme.
+    fn segment_ui(&self, painter: &Painter, ctx: SegmentContext);
 
     /// Draws the notification effect of a segment notified through
     /// [`Map::segment`](super::Map::segment).
     ///
     /// Called every frame for each segment carrying an event-driven effect
-    /// (see [`SegmentHandle`](super::SegmentHandle)). Should return `true`
-    /// while the animation is still playing — remember to call
+    /// (see [`SegmentHandle`](super::SegmentHandle)). `ctx.kind` is which of
+    /// `flash`/`comet_once`/`wipe` was requested -- match on it to dispatch
+    /// to the corresponding [`Animation`](crate::map::animation::Animation)
+    /// function instead of reimplementing every effect by hand. See
+    /// [`SegmentNotificationContext`] for the rest of the fields. Should
+    /// return `true` while the animation is still playing — remember to call
     /// [`Painter::ctx`]`().request_repaint()` — once it returns `false` the
     /// notification is discarded.
-    fn segment_notification_ui(
-        &self,
-        painter: &Painter,
-        pos_a: Pos2,
-        pos_b: Pos2,
-        zoom: f32,
-        initial_time: Instant,
-        color: Color32,
-    ) -> bool;
+    fn segment_notification_ui(&self, painter: &Painter, ctx: SegmentNotificationContext) -> bool;
 
     /// Draws the lasting state effect of a segment (e.g. a travelling dot).
     ///
     /// Called every frame for each segment with lasting state set through
-    /// [`Map::segment`](super::Map::segment). `time` is the frame time in
-    /// seconds (`ui.input(|i| i.time)`), so every element animated this frame
-    /// shares one clock. For animated state, remember to call
+    /// [`Map::segment`](super::Map::segment). `ctx.kind` is which of
+    /// `comet`/`dash`/`glow_band`/`chevrons` was requested. `ctx.time` is the
+    /// frame time in seconds (`ui.input(|i| i.time)`), so every element
+    /// animated this frame shares one clock. See [`SegmentStateContext`] for
+    /// the rest of the fields. For animated state, remember to call
     /// [`Painter::ctx`]`().request_repaint()`.
-    fn segment_state_ui(
-        &self,
-        painter: &Painter,
-        pos_a: Pos2,
-        pos_b: Pos2,
-        zoom: f32,
-        time: f32,
-        color: Color32,
-    );
+    fn segment_state_ui(&self, painter: &Painter, ctx: SegmentStateContext);
+}
+
+/// The context passed to [`SegmentTemplate::segment_ui`].
+///
+/// `#[non_exhaustive]`, like [`SegmentNotificationContext`]/
+/// [`SegmentStateContext`], so a future field can be added here without
+/// another breaking change.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct SegmentContext<'a> {
+    /// The first endpoint's screen position: already scaled by `zoom` and
+    /// translated to the viewport origin.
+    pub pos_a: Pos2,
+    /// The second endpoint's screen position, same convention as `pos_a`.
+    pub pos_b: Pos2,
+    /// Multiply every size you draw by this so it scales with the map.
+    pub zoom: f32,
+    /// The segment being painted -- its id, endpoint coordinates and optional
+    /// color override.
+    pub segment: &'a MapSegment,
+    /// The color the default stroke would use: the segment's own
+    /// [`segment.color`](MapSegment::color) override if it has one, otherwise
+    /// the active [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::segment`](super::theme::ThemeColors::segment) for the
+    /// current color mode -- already faded in with the zoom (see
+    /// [`MapSettings::line_visible_zoom`]) the same way the built-in line is
+    /// -- resolved once here so every `SegmentTemplate` doesn't need to
+    /// repeat it.
+    pub color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::segment`](super::theme::ThemeColors::segment) for the
+    /// current color mode -- the base color the theme paints segments with,
+    /// before any per-segment [`segment.color`](MapSegment::color) override
+    /// is applied, faded in with the zoom the same way `color` is. This is
+    /// what `color` falls back to when the segment has no override, so it
+    /// lets a `SegmentTemplate` tell the theme's own color apart from a
+    /// segment's computed (overridden) one.
+    pub theme_color: Color32,
+}
+
+/// The context passed to [`SegmentTemplate::segment_notification_ui`].
+///
+/// `#[non_exhaustive]`, like [`SegmentContext`]/[`SegmentStateContext`], so a
+/// future field can be added here without another breaking change.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct SegmentNotificationContext<'a> {
+    /// The first endpoint's screen position: already scaled by `zoom` and
+    /// translated to the viewport origin.
+    pub pos_a: Pos2,
+    /// The second endpoint's screen position, same convention as `pos_a`.
+    pub pos_b: Pos2,
+    /// Multiply every size you draw by this so it scales with the map.
+    pub zoom: f32,
+    /// The segment this notification belongs to -- its id and endpoint
+    /// coordinates.
+    pub segment: &'a MapSegment,
+    /// When the notification started -- usually fed into a progress
+    /// computation like `Instant::now().duration_since(initial_time)`.
+    pub initial_time: Instant,
+    /// The color requested for this notification: the segment's own
+    /// override if it was given one when triggered, otherwise the active
+    /// theme's [`ThemeColors::alert`](super::theme::ThemeColors::alert).
+    pub color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert) for the
+    /// current color mode -- the base color the theme paints alert effects
+    /// with, before any override is applied (faded with the zoom the same
+    /// way `color` is). This is what `color` falls back to when the
+    /// notification has no override, so it lets a `SegmentTemplate` tell the
+    /// theme's own color apart from a computed (overridden) one.
+    pub theme_color: Color32,
+    /// Which built-in event effect was requested (`flash`, `comet_once`,
+    /// `wipe`). Match on this to dispatch to the corresponding
+    /// [`Animation`](crate::map::animation::Animation) function instead of
+    /// reimplementing the lookup yourself.
+    pub kind: SegmentAnimation,
+}
+
+/// The context passed to [`SegmentTemplate::segment_state_ui`].
+///
+/// `#[non_exhaustive]`, like [`SegmentContext`]/[`SegmentNotificationContext`],
+/// so a future field can be added here without another breaking change.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct SegmentStateContext<'a> {
+    /// The first endpoint's screen position: already scaled by `zoom` and
+    /// translated to the viewport origin.
+    pub pos_a: Pos2,
+    /// The second endpoint's screen position, same convention as `pos_a`.
+    pub pos_b: Pos2,
+    /// Multiply every size you draw by this so it scales with the map.
+    pub zoom: f32,
+    /// The segment this lasting state belongs to -- its id and endpoint
+    /// coordinates.
+    pub segment: &'a MapSegment,
+    /// The frame time in seconds (`ui.input(|i| i.time)`), shared by every
+    /// element animated this frame.
+    pub time: f32,
+    /// The color requested for this state: the segment's own override if it
+    /// was given one, otherwise the active theme's
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert).
+    pub color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert) for the
+    /// current color mode -- the base color the theme paints alert effects
+    /// with, before any override is applied (faded with the zoom the same
+    /// way `color` is). This is what `color` falls back to when the state has
+    /// no override, so it lets a `SegmentTemplate` tell the theme's own
+    /// color apart from a computed (overridden) one.
+    pub theme_color: Color32,
+    /// Which built-in persistent effect was requested (`comet`, `dash`,
+    /// `glow_band`, `chevrons`). Match on this to dispatch to the
+    /// corresponding [`Animation`](crate::map::animation::Animation)
+    /// function instead of reimplementing the lookup yourself.
+    pub kind: SteadySegmentAnimation,
 }
 
 #[cfg(test)]
