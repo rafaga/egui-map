@@ -27,7 +27,7 @@ impl NodeTemplate for CircleNodes {
             Align2::CENTER_BOTTOM,
             ctx.point.get_name(),
             egui::FontId::proportional(11.0 * ctx.zoom),
-            ui.visuals().text_color(),
+            ctx.theme.text,
         );
     }
 

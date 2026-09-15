@@ -36,7 +36,7 @@ impl NodeTemplate for SvgNodes {
             Align2::CENTER_TOP,
             ctx.point.get_name(),
             egui::FontId::proportional(11.0 * ctx.zoom),
-            ui.visuals().text_color(),
+            ctx.theme.text,
         );
     }
 

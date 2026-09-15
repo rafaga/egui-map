@@ -726,9 +726,13 @@ pub struct MapSettings {
     /// Screen-space, exactly like [`node_text_size`](Self::node_text_size).
     pub label_text_size: f32,
     /// Per-mode styles; index `0` is used in light mode, index `1` in dark
-    /// mode. Their colors are kept in sync with the active
+    /// mode. Their palette colors (node fill, connection lines, alerts,
+    /// selection, text) are kept in sync with the active
     /// [`MapTheme`](super::theme::MapTheme) -- see
     /// [`Map::set_theme`](super::Map::set_theme) -- rather than set here.
+    /// Their one color field, [`Style::background_color`], is the
+    /// exception: it follows the host application's own visuals instead,
+    /// see its own doc.
     pub styles: Vec<Style>,
 }
 
@@ -772,10 +776,13 @@ impl Default for MapSettings {
 
         // The background color below is a placeholder, overwritten by
         // `Map::assign_visual_style` from egui's own visuals on the first
-        // frame. `Style` carries no color of its own -- every color the
-        // widget paints with comes live from the default `MapTheme` (see
-        // `Map::set_theme`/`Map::theme_colors`), so there is nothing here to
-        // keep in sync with a `Theme`.
+        // frame -- it intentionally follows the host application, not the
+        // installed `MapTheme` (see `Style::background_color`'s own doc).
+        // Every *palette* color the widget paints with (node fill,
+        // connection lines, alerts, selection, text) comes live from the
+        // default `MapTheme` instead (see `Map::set_theme`/
+        // `Map::theme_colors`), so there is nothing here to keep in sync
+        // with a `Theme`.
 
         // light style
         obj.styles.push(Style {
@@ -1118,12 +1125,12 @@ pub struct NodeContext<'a> {
     /// no template is installed, resolved once here so every `NodeTemplate`
     /// doesn't need to repeat it.
     pub color: Color32,
-    /// The surrounding UI's text color (egui's active visuals), so a
-    /// `NodeTemplate` can paint labels that match the rest of the
-    /// interface without reaching into egui's context itself.
-    pub text_color: Color32,
     /// The surrounding UI's faint background color (egui's active
-    /// visuals), for chips/panels drawn behind a node's own label.
+    /// visuals, not the installed [`MapTheme`](super::theme::MapTheme) --
+    /// the map's canvas and this chip background intentionally follow the
+    /// host application's own light/dark visuals instead, see
+    /// [`Style::background_color`](super::theme::Style::background_color)),
+    /// for chips/panels drawn behind a node's own label.
     pub background_color: Color32,
     /// The active [`MapTheme`](super::theme::MapTheme)'s
     /// [`ThemeColors::node`](super::theme::ThemeColors::node) for the current
@@ -1131,7 +1138,10 @@ pub struct NodeContext<'a> {
     /// per-node [`point.color`](MapPoint::color) override is applied. This is
     /// what `color` falls back to when the node has no override, so it lets a
     /// `NodeTemplate` tell the theme's own color apart from a node's computed
-    /// (overridden) one.
+    /// (overridden) one. Use
+    /// [`theme.text`](super::theme::ThemeColors::text) to paint a node's
+    /// label in the theme's text color -- the same color the built-in label
+    /// painting uses when no template is installed.
     pub theme: ThemeColors,
 }
 
@@ -1225,19 +1235,17 @@ pub struct MarkerContext {
     /// it points at, not the marker's own id).
     pub node_id: usize,
     /// The color the built-in effect would draw with: the node's own
-    /// override for its lasting state (falling back to the active theme's
-    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert)), or a fixed
-    /// green for a plain [`Map::update_marker`](super::Map::update_marker)
-    /// marker (light or dark depending on the surrounding UI's theme) --
-    /// plain markers don't have their own color setting to override.
+    /// override for its lasting state, or -- for either a state with no
+    /// override or a plain [`Map::update_marker`](super::Map::update_marker)
+    /// marker, which has no color setting of its own at all -- the active
+    /// theme's [`ThemeColors::alert`](super::theme::ThemeColors::alert).
     pub color: Color32,
     /// The active [`MapTheme`](super::theme::MapTheme)'s full
-    /// [`ThemeColors`] palette for the current color mode -- for a node's
-    /// lasting state, [`ThemeColors::alert`](super::theme::ThemeColors::alert)
-    /// is what `color` falls back to; plain markers use the fixed green in
-    /// `color` instead. The whole palette is handed over so a
-    /// `NodeTemplate` can use any theme role without reaching for the
-    /// theme itself.
+    /// [`ThemeColors`] palette for the current color mode --
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert) is what
+    /// `color` falls back to in every case, node state or plain marker
+    /// alike. The whole palette is handed over so a `NodeTemplate` can use
+    /// any other theme role without reaching for the theme itself.
     pub theme: ThemeColors,
 }
 

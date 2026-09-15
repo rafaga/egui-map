@@ -223,7 +223,7 @@ pub struct Map {
 struct Notification {
     started: Instant,
     animation: NodeAnimation,
-    /// `None` falls back to the current style's `alert_color`.
+    /// `None` falls back to the active theme's `ThemeColors::alert`.
     color: Option<Color32>,
 }
 
@@ -231,7 +231,7 @@ struct Notification {
 #[derive(Clone, Copy, Debug)]
 struct NodeState {
     animation: SteadyAnimation,
-    /// `None` falls back to the current style's `alert_color`.
+    /// `None` falls back to the active theme's `ThemeColors::alert`.
     color: Option<Color32>,
 }
 
@@ -240,7 +240,7 @@ struct NodeState {
 struct SegmentNotification {
     started: Instant,
     animation: SegmentAnimation,
-    /// `None` falls back to the current style's `alert_color`.
+    /// `None` falls back to the active theme's `ThemeColors::alert`.
     color: Option<Color32>,
 }
 
@@ -248,7 +248,7 @@ struct SegmentNotification {
 #[derive(Clone, Copy, Debug)]
 struct SegmentState {
     animation: SteadySegmentAnimation,
-    /// `None` falls back to the current style's `alert_color`.
+    /// `None` falls back to the active theme's `ThemeColors::alert`.
     color: Option<Color32>,
 }
 
@@ -558,7 +558,12 @@ impl Widget for &mut Map {
                         family: FontFamily::Proportional,
                         text: String::new(),
                         position: RawPoint::default(),
-                        text_color: ui.visuals().text_color(),
+                        // The active theme's own text color, not egui's
+                        // surrounding-UI text color -- so labels stay
+                        // legible against a custom `MapTheme`'s palette
+                        // instead of silently following the host app's
+                        // light/dark mode.
+                        text_color: self.theme_colors().text,
                     };
                     for label in &self.labels {
                         text_settings.text.clone_from(&label.text);
@@ -602,15 +607,11 @@ impl Widget for &mut Map {
                         let adjusted_point = RawPoint::from(point.coords) * self.zoom - min_point;
                         // Plain markers have no color setting of their own to
                         // override, unlike a node's lasting state (see the
-                        // `node_states` branch below) -- this fixed green is
-                        // the same value the built-in effect always painted
-                        // with, now also handed to the template via
-                        // `MarkerContext::color`.
-                        let color = if ui.visuals().dark_mode {
-                            Color32::LIGHT_GREEN
-                        } else {
-                            Color32::GREEN
-                        };
+                        // `node_states` branch below) -- they fall back to
+                        // the active theme's alert color instead, the same
+                        // fallback every other event/state effect uses, so a
+                        // custom `MapTheme` reaches plain markers too.
+                        let color = self.theme_colors().alert;
                         if let Some(template) = &self.node_template {
                             template.marker_ui(
                                 ui,
@@ -1283,7 +1284,9 @@ impl Map {
             family: FontFamily::Proportional,
             text: String::new(),
             position: RawPoint::default(),
-            text_color: ui_obj.visuals().text_color(),
+            // Same reasoning as the free-floating label above: the active
+            // theme's text color, so node names honor a custom `MapTheme`.
+            text_color: self.theme_colors().text,
         };
 
         // Drawing Points
@@ -1408,10 +1411,6 @@ impl Map {
                             zoom: self.zoom,
                             point: system,
                             color: node_color,
-                            text_color: match ui_obj.ctx().theme() {
-                                egui::Theme::Dark => egui::Color32::WHITE,
-                                egui::Theme::Light => egui::Color32::BLACK,
-                            },
                             background_color: ui_obj.ctx().theme().default_visuals().faint_bg_color,
                             theme: self.theme_colors(),
                         },

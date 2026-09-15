@@ -7,10 +7,14 @@
 //! of one of the built-ins, the same way [`NodeTemplate`](super::objects::NodeTemplate)
 //! and [`SegmentTemplate`](super::objects::SegmentTemplate) let you replace
 //! the built-in node/segment rendering. [`Style`] is the non-palette visual
-//! configuration (stroke widths, font, background) the widget paints with; it
-//! holds no color of its own -- every color comes live from the active
-//! [`MapTheme`], resolved fresh each frame, so nothing in `Style` can drift
-//! out of sync with the installed theme.
+//! configuration (stroke widths, font) the widget paints with; it holds no
+//! *palette* color of its own -- every node/segment/selection/alert/text
+//! color comes live from the active [`MapTheme`], resolved fresh each frame,
+//! so nothing in `Style` can drift out of sync with the installed theme. The
+//! one exception is [`Style::background_color`]: the map's canvas
+//! intentionally follows the host application's own light/dark visuals
+//! instead of the installed `MapTheme`, so it blends into the surrounding
+//! UI the same way a plain egui panel would.
 
 use crate::map::theme::{
     ColorMode::{Dark, Light},
@@ -352,11 +356,14 @@ impl MapTheme for Theme {
 ///
 /// Holds the non-palette visual configuration -- stroke width, font,
 /// background -- that combines with the active [`MapTheme`]'s
-/// [`ThemeColors`] when the widget paints. `Style` itself carries no color:
-/// every color the widget paints with (node fill, connection lines, alerts,
-/// selection, text) is resolved live from the installed [`MapTheme`] for the
+/// [`ThemeColors`] when the widget paints. `Style` itself carries no
+/// *palette* color: every node/segment/selection/alert/text color the widget
+/// paints with is resolved live from the installed [`MapTheme`] for the
 /// current [`ColorMode`] -- see [`Map::set_theme`](super::Map::set_theme) --
-/// instead of living here as a copy that would need to be kept in sync.
+/// instead of living here as a copy that would need to be kept in sync. The
+/// one exception is [`background_color`](Self::background_color), which
+/// intentionally follows the host application's own visuals rather than the
+/// installed theme -- see its own doc.
 ///
 /// Multiplying or dividing a `Style` by a number scales
 /// [`line_width`](Self::line_width) and the font size; the widget uses this
@@ -374,6 +381,15 @@ pub struct Style {
     /// Font used for map labels.
     pub font: Option<FontId>,
     /// Background color of the map canvas.
+    ///
+    /// Unlike every other color the widget paints with, this one does not
+    /// come from the installed [`MapTheme`] -- there is no background role
+    /// in [`ThemeColors`]. It is instead assigned every frame from the
+    /// surrounding egui [`Visuals`](egui::Visuals) (light or dark), so the
+    /// map's canvas blends into the host application's own UI rather than
+    /// carrying a color of its own. See
+    /// [`Map::set_theme`](super::Map::set_theme) for the colors that *do*
+    /// come from the theme.
     pub background_color: Color32,
 }
 

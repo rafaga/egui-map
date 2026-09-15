@@ -36,7 +36,7 @@ impl MapTheme for FixedPalette {
 #[derive(Default)]
 struct RecordingTemplate {
     nodes: RefCell<Vec<(usize, Color32, ThemeColors)>>,
-    markers: RefCell<Vec<(usize, ThemeColors)>>,
+    markers: RefCell<Vec<(usize, Color32, ThemeColors)>>,
     notifications: RefCell<Vec<(usize, ThemeColors)>>,
 }
 
@@ -57,7 +57,9 @@ impl NodeTemplate for RecordingTemplate {
     }
 
     fn marker_ui(&self, _ui: &mut Ui, ctx: MarkerContext) {
-        self.markers.borrow_mut().push((ctx.node_id, ctx.theme));
+        self.markers
+            .borrow_mut()
+            .push((ctx.node_id, ctx.color, ctx.theme));
     }
 }
 
@@ -165,7 +167,13 @@ fn notification_and_marker_hooks_see_the_full_theme_palette() {
     assert_eq!(markers.len(), 1);
     assert_eq!(markers[0].0, 2);
     assert_eq!(
-        markers[0].1.segment,
+        markers[0].1,
+        Color32::from_rgb(10, 11, 12),
+        "a plain marker has no color setting of its own -- MarkerContext::color \
+         must fall back to the active theme's ThemeColors::alert, not a fixed color"
+    );
+    assert_eq!(
+        markers[0].2.segment,
         Color32::from_rgb(4, 5, 6),
         "MarkerContext::theme must be the active theme's palette"
     );
