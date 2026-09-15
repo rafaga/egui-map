@@ -2,7 +2,7 @@
 
 `egui-map` ships 15 named color palettes (`map::theme::Theme`), each with a `Light` and a `Dark` variant (`map::theme::ColorMode`, a re-export of `egui::Theme`). `Theme::colors(mode)` resolves a theme to the six colors the widget actually paints with (`map::theme::ThemeColors`): the node fill, connection lines (`segment`), the selection ring around the nearest node (`selected`), one-off notification/alert animations (`alert`), a lasting "this is marked" indicator -- a node's persistent state or a plain `update_marker` marker (`marker`) -- and node names/labels (`text`).
 
-`EguiDefault` is the odd one out and the default theme: instead of a hand-picked palette, it carries over egui's own default `Visuals` colors (`hyperlink_color`, the separator-line color, `selection.stroke`, `warn_fg_color`, `error_fg_color`, and the normal text color), so a map with no theme installed looks like plain egui rather than an arbitrary house style.
+`EguiDefault` is the odd one out and the default theme: instead of a hand-picked palette, it carries over egui's own default `Visuals` colors (`hyperlink_color`, the separator-line color, `selection.stroke`, `warn_fg_color`, `error_fg_color`, and the active-widget text color, `strong_text_color()`), so a map with no theme installed looks like plain egui rather than an arbitrary house style.
 
 Install a built-in theme, or your own palette, with `Map::set_theme` and the `MapTheme` trait -- see the README's "Custom themes" section and the `MapTheme` rustdoc for the full API.
 
@@ -20,8 +20,8 @@ map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::EguiDefault));
 
 | Mode | node | segment | selected | alert | marker | text |
 |---|---|---|---|---|---|---|
-| Light | `#009BFF` | `#BEBEBE` | `#00537D` | `#FF6400` | `#FF0000` | `#505050` |
-| Dark | `#5AAAFF` | `#3C3C3C` | `#C0DEFF` | `#FF8F00` | `#FF0000` | `#8C8C8C` |
+| Light | `#009BFF` | `#BEBEBE` | `#00537D` | `#FF6400` | `#FF0000` | `#000000` |
+| Dark | `#5AAAFF` | `#3C3C3C` | `#C0DEFF` | `#FF8F00` | `#FF0000` | `#FFFFFF` |
 
 ## `SlateOcean`
 
@@ -207,4 +207,4 @@ map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::SandstoneTrail));
 
 ---
 
-`EguiDefault` is the default theme (`Theme::default()`). The gallery image and tables above are generated together, straight from `src/map/theme.rs`, by `scripts/generate_theme_gallery.py` -- if the palettes there ever change, rerun it (`python3 scripts/generate_theme_gallery.py`) rather than hand-editing this file or the PNG.
+`EguiDefault` is the default theme (`Theme::default()`). The gallery image and the tables above are generated together, straight from `src/map/theme.rs`, by `scripts/generate_theme_gallery` (a standalone Rust tool -- run it with `cargo run --manifest-path scripts/generate_theme_gallery/Cargo.toml` from the repo root) -- if the palettes there ever change, rerun it rather than hand-editing this file or the PNG.

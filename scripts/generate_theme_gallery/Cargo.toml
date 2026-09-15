@@ -1,0 +1,15 @@
+[package]
+name = "generate_theme_gallery"
+version = "0.1.0"
+edition = "2021"
+publish = false
+# Standalone dev tool, deliberately its own crate outside the egui-map
+# workspace/dependency graph: `scripts/` is excluded from the published
+# `egui-map` package (see the top-level Cargo.toml `exclude`), so pulling in
+# image/font/regex crates here never affects egui-map's own dependency tree.
+
+[dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }
+imageproc = "0.25"
+ab_glyph = "0.2"
+regex = "1"

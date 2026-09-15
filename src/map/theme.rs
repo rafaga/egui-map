@@ -317,7 +317,7 @@ impl Theme {
                 selected: Color32::from_rgb(0xC0, 0xDE, 0xFF),
                 alert: Color32::from_rgb(0xFF, 0x8F, 0x00),
                 marker: Color32::from_rgb(0xFF, 0x00, 0x00),
-                text: Color32::from_rgb(0x8C, 0x8C, 0x8C),
+                text: Color32::from_rgb(0xFF, 0xFF, 0xFF),
             },
             (EguiDefault, Light) => ThemeColors {
                 node: Color32::from_rgb(0x00, 0x9B, 0xFF),
@@ -325,7 +325,7 @@ impl Theme {
                 selected: Color32::from_rgb(0x00, 0x53, 0x7D),
                 alert: Color32::from_rgb(0xFF, 0x64, 0x00),
                 marker: Color32::from_rgb(0xFF, 0x00, 0x00),
-                text: Color32::from_rgb(0x50, 0x50, 0x50),
+                text: Color32::from_rgb(0x00, 0x00, 0x00),
             },
         }
     }
