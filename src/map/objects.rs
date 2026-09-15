@@ -727,7 +727,7 @@ pub struct MapSettings {
     pub label_text_size: f32,
     /// Per-mode styles; index `0` is used in light mode, index `1` in dark
     /// mode. Their palette colors (node fill, connection lines, alerts,
-    /// selection, text) are kept in sync with the active
+    /// selection, markers, text) are kept in sync with the active
     /// [`MapTheme`](super::theme::MapTheme) -- see
     /// [`Map::set_theme`](super::Map::set_theme) -- rather than set here.
     /// Their one color field, [`Style::background_color`], is the
@@ -779,7 +779,7 @@ impl Default for MapSettings {
         // frame -- it intentionally follows the host application, not the
         // installed `MapTheme` (see `Style::background_color`'s own doc).
         // Every *palette* color the widget paints with (node fill,
-        // connection lines, alerts, selection, text) comes live from the
+        // connection lines, alerts, selection, markers, text) comes live from the
         // default `MapTheme` instead (see `Map::set_theme`/
         // `Map::theme_colors`), so there is nothing here to keep in sync
         // with a `Theme`.
@@ -1306,7 +1306,7 @@ pub struct MarkerContext {
 ///         while travelled < len {
 ///             let start = ctx.pos_a + dir * (travelled / len);
 ///             let end = ctx.pos_a + dir * ((travelled + step * 0.6).min(len) / len);
-///             painter.line_segment([start, end], Stroke::new(2.0 * ctx.zoom, Color32::GRAY));
+///             painter.line_segment([start, end], Stroke::new(2.0 * ctx.zoom, ctx.theme.segment));
 ///             travelled += step;
 ///         }
 ///     }

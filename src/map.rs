@@ -231,7 +231,9 @@ struct Notification {
 #[derive(Clone, Copy, Debug)]
 struct NodeState {
     animation: SteadyAnimation,
-    /// `None` falls back to the active theme's `ThemeColors::alert`.
+    /// `None` falls back to the active theme's `ThemeColors::marker` -- this
+    /// is the persistent "flagged" state `marker_ui` paints, not a one-off
+    /// event, so it uses `marker` rather than `alert`.
     color: Option<Color32>,
 }
 
@@ -280,7 +282,10 @@ pub struct NodeHandle<'a> {
 impl NodeHandle<'_> {
     /// Overrides the colour of the effect about to be attached.
     ///
-    /// Without this the effect uses the current style's `alert_color`.
+    /// Without this, the effect falls back to the active theme's
+    /// `ThemeColors::alert` for a one-off event (`pulse`, `ripple`, ...) or
+    /// `ThemeColors::marker` for lasting state (`halo`, `blink`, `orbit`) --
+    /// whichever terminal method is called after this one.
     pub fn color(mut self, color: Color32) -> Self {
         self.color = Some(color);
         self
@@ -377,7 +382,10 @@ pub struct SegmentHandle<'a> {
 impl SegmentHandle<'_> {
     /// Overrides the colour of the effect about to be attached.
     ///
-    /// Without this the effect uses the current style's `alert_color`.
+    /// Without this, the effect falls back to the active theme's
+    /// `ThemeColors::alert`, for either a one-off notification or lasting
+    /// state -- segments don't have a `marker` role like a node's lasting
+    /// state does.
     pub fn color(mut self, color: Color32) -> Self {
         self.color = Some(color);
         self
@@ -606,12 +614,12 @@ impl Widget for &mut Map {
                     if let Some(point) = self.points.as_ref().unwrap().get(marker.1) {
                         let adjusted_point = RawPoint::from(point.coords) * self.zoom - min_point;
                         // Plain markers have no color setting of their own to
-                        // override, unlike a node's lasting state (see the
-                        // `node_states` branch below) -- they fall back to
-                        // the active theme's alert color instead, the same
-                        // fallback every other event/state effect uses, so a
-                        // custom `MapTheme` reaches plain markers too.
-                        let color = self.theme_colors().alert;
+                        // override, unlike a node's lasting state -- both
+                        // fall back to the active theme's `marker` color,
+                        // the same persistent "this is flagged" role the
+                        // `node_states` branch below uses, distinct from the
+                        // one-off `alert` color transient notifications use.
+                        let color = self.theme_colors().marker;
                         if let Some(template) = &self.node_template {
                             template.marker_ui(
                                 ui,
@@ -1325,7 +1333,7 @@ impl Map {
                 // Persistent node state is drawn first so a notification --
                 // the *event* -- sits on top of the *state*.
                 if let Some(state) = self.node_states.get(&system_id) {
-                    let color = state.color.unwrap_or(self.theme_colors().alert);
+                    let color = state.color.unwrap_or(self.theme_colors().marker);
                     if let Some(template) = &self.node_template {
                         // There is no dedicated template hook for node state:
                         // `marker_ui` is the persistent-visual one, so state and
@@ -1411,7 +1419,11 @@ impl Map {
                             zoom: self.zoom,
                             point: system,
                             color: node_color,
-                            background_color: ui_obj.ctx().theme().default_visuals().extreme_bg_color,
+                            background_color: ui_obj
+                                .ctx()
+                                .theme()
+                                .default_visuals()
+                                .extreme_bg_color,
                             theme: self.theme_colors(),
                         },
                     );
@@ -2752,6 +2764,7 @@ mod tests {
                     segment: Color32::from_rgb(4, 5, 6),
                     selected: Color32::from_rgb(7, 8, 9),
                     alert: Color32::from_rgb(10, 11, 12),
+                    marker: Color32::from_rgb(16, 17, 18),
                     text: Color32::from_rgb(13, 14, 15),
                 }
             }
@@ -2810,6 +2823,7 @@ mod tests {
                     segment: Color32::from_rgb(4, 5, 6),
                     selected: Color32::from_rgb(7, 8, 9),
                     alert: Color32::from_rgb(10, 11, 12),
+                    marker: Color32::from_rgb(16, 17, 18),
                     text: Color32::from_rgb(13, 14, 15),
                 }
             }

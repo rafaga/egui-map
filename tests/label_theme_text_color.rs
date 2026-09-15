@@ -22,6 +22,7 @@ impl MapTheme for FixedPalette {
             segment: Color32::from_rgb(4, 5, 6),
             selected: Color32::from_rgb(7, 8, 9),
             alert: Color32::from_rgb(10, 11, 12),
+            marker: Color32::from_rgb(16, 17, 18),
             text: THEME_TEXT,
         }
     }

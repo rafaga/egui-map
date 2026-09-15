@@ -26,6 +26,7 @@ impl MapTheme for FixedPalette {
             segment: Color32::from_rgb(4, 5, 6),
             selected: Color32::from_rgb(7, 8, 9),
             alert: Color32::from_rgb(10, 11, 12),
+            marker: Color32::from_rgb(16, 17, 18),
             text: Color32::from_rgb(13, 14, 15),
         }
     }
@@ -168,9 +169,9 @@ fn notification_and_marker_hooks_see_the_full_theme_palette() {
     assert_eq!(markers[0].0, 2);
     assert_eq!(
         markers[0].1,
-        Color32::from_rgb(10, 11, 12),
+        Color32::from_rgb(16, 17, 18),
         "a plain marker has no color setting of its own -- MarkerContext::color \
-         must fall back to the active theme's ThemeColors::alert, not a fixed color"
+         must fall back to the active theme's ThemeColors::marker, not a fixed color"
     );
     assert_eq!(
         markers[0].2.segment,

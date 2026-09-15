@@ -12,7 +12,7 @@ An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D
 - Animations attached per node through `map.node(id)`: one-off events that end on their own (`pulse`, `ripple`, `countdown`, `scale_in`, `crosshair`) and lasting state that runs until `clear()` (`halo`, `blink`, `orbit`), each with an optional `color()`. The effects live in `map::animation::Animation` and can be reused from your own `NodeTemplate`.
 - The same idiom for segments through `map.segment(id)`: `flash` / `comet_once(at, direction)` / `wipe` (one-off) and `comet` / `dash` / `glow_band` / `chevrons` (lasting, until `clear()`) -- `comet_once` is a single dot pass with the direction you choose (`CometDirection::Forward`/`Reverse`), `wipe` draws the line in from one endpoint to the other, `dash` is a "marching ants" pattern and `chevrons` a row of sliding arrowheads, both painted as a repeating-texture mesh (two triangles per segment, one shared texture), `glow_band` a soft travelling highlight that fades out past each end instead of repeating, also with an optional `color()`.
 - Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits, and custom segment rendering through `SegmentTemplate`.
-- [Fourteen built-in color themes](THEMES.md), each with a light and a dark variant, or install your own through the `MapTheme` trait.
+- [Fifteen built-in color themes](THEMES.md), each with a light and a dark variant -- `EguiDefault`, matching plain egui's own colors, is the default -- or install your own through the `MapTheme` trait.
 
 ## Usage
 
@@ -103,7 +103,10 @@ impl NodeTemplate for MyTemplate {
     fn marker_ui(&self, _ui: &mut Ui, _ctx: MarkerContext) {
         // `ctx.kind` is Halo/Blink/Orbit for persistent node state, or the shared
         // `MapSettings::marker_animation` for a `Map::update_marker` marker.
-        // `ctx.color` is the color the built-in effect would paint with.
+        // `ctx.color` is the color the built-in effect would paint with: the
+        // node's own override, or the active theme's `marker` color -- its own
+        // role, distinct from `selected`/`alert`, for "this is flagged"
+        // indefinitely rather than a one-off event.
     }
 }
 
@@ -159,7 +162,7 @@ map.set_segment_template(std::rc::Rc::new(MySegments));
 
 ### Custom themes
 
-The widget ships fourteen named [`Theme`](https://docs.rs/egui-map/latest/egui_map/map/theme/enum.Theme.html) palettes — `NebulaViolet` is the default — each with a light and a dark variant; see the `Theme` rustdoc for the full list. Switch between them, or install your own palette, with `Map::set_theme` and the `MapTheme` trait:
+The widget ships fifteen named [`Theme`](https://docs.rs/egui-map/latest/egui_map/map/theme/enum.Theme.html) palettes — `EguiDefault`, which carries over egui's own default colors so an unthemed map looks like plain egui, is the default — each with a light and a dark variant; see the `Theme` rustdoc for the full list. Switch between them, or install your own palette, with `Map::set_theme` and the `MapTheme` trait:
 
 ```rust
 use egui_map::map::theme::{ColorMode, MapTheme, Theme, ThemeColors};
@@ -178,6 +181,7 @@ impl MapTheme for HighContrast {
                 segment: egui::Color32::DARK_GRAY,
                 selected: egui::Color32::RED,
                 alert: egui::Color32::RED,
+                marker: egui::Color32::BLUE,
                 text: egui::Color32::BLACK,
             },
             ColorMode::Dark => ThemeColors {
@@ -185,6 +189,7 @@ impl MapTheme for HighContrast {
                 segment: egui::Color32::LIGHT_GRAY,
                 selected: egui::Color32::YELLOW,
                 alert: egui::Color32::YELLOW,
+                marker: egui::Color32::LIGHT_BLUE,
                 text: egui::Color32::WHITE,
             },
         }
