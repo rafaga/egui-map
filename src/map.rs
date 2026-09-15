@@ -620,6 +620,7 @@ impl Widget for &mut Map {
                                     kind: self.settings.marker_animation,
                                     node_id: *marker.1,
                                     color,
+                                    theme: self.theme_colors(),
                                 },
                             );
                         } else {
@@ -1299,6 +1300,7 @@ impl Map {
                                 zoom: self.zoom,
                                 point: system,
                                 color: self.theme_colors().selected,
+                                theme: self.theme_colors(),
                             },
                         );
                     }
@@ -1336,6 +1338,7 @@ impl Map {
                                 kind: state.animation,
                                 node_id: system_id,
                                 color,
+                                theme: self.theme_colors(),
                             },
                         );
                     } else {
@@ -1365,6 +1368,7 @@ impl Map {
                                 color,
                                 kind: notification.animation,
                                 node_id: system_id,
+                                theme: self.theme_colors(),
                             },
                         );
                     } else {
@@ -1392,8 +1396,8 @@ impl Map {
                 // has one, otherwise the active theme's node color -- the
                 // single fallback both the built-in circle and a
                 // `NodeTemplate` (via `NodeContext::color`) paint with. The
-                // active theme's own node color is handed over separately
-                // (`NodeContext::theme_color`) so a template can tell the
+                // active theme's full palette is handed over separately
+                // (`NodeContext::theme`) so a template can tell the
                 // two apart.
                 let node_color = system.color.unwrap_or(self.theme_colors().node);
                 if let Some(node_template) = &self.node_template {
@@ -1404,7 +1408,9 @@ impl Map {
                             zoom: self.zoom,
                             point: system,
                             color: node_color,
-                            theme_color: self.theme_colors().node,
+                            text_color: ui_obj.ctx().theme().default_visuals().text_color(),
+                            background_color: ui_obj.ctx().theme().default_visuals().faint_bg_color,
+                            theme: self.theme_colors(),
                         },
                     );
                 } else {
@@ -1441,13 +1447,6 @@ impl Map {
         // step with the line they sit on instead of ignoring the zoom
         // entirely.
         let line_fade = ((self.zoom - self.settings.line_visible_zoom) / 0.80).clamp(0.0, 1.0);
-
-        // The color the active theme paints segment lines with -- and the
-        // value handed to a `SegmentTemplate` as `SegmentContext::theme_color`,
-        // so a custom template can match the built-in look (or its zoom fade)
-        // without re-deriving it. Comes live from the active theme, not from
-        // `Style` -- there is no cached copy left to fall out of sync.
-        let segment_theme_color = scale_alpha(self.theme_colors().segment, line_fade);
 
         // `style.line_width == None` only turns off the *default* stroke -- a
         // `SegmentTemplate` or a segment effect installed through
@@ -1502,7 +1501,7 @@ impl Map {
                         zoom: self.zoom,
                         segment,
                         color: segment_color,
-                        theme_color: segment_theme_color,
+                        theme: self.theme_colors(),
                     },
                 );
             } else if let Some(width) = line_width {
@@ -1531,7 +1530,7 @@ impl Map {
                             segment,
                             time,
                             color,
-                            theme_color: scale_alpha(self.theme_colors().alert, effect_fade),
+                            theme: self.theme_colors(),
                             kind: state.animation,
                         },
                     );
@@ -1563,7 +1562,7 @@ impl Map {
                             segment,
                             initial_time: notification.started,
                             color,
-                            theme_color: scale_alpha(self.theme_colors().alert, effect_fade),
+                            theme: self.theme_colors(),
                             kind: notification.animation,
                         },
                     )

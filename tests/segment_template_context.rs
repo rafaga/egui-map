@@ -3,9 +3,9 @@
 //! structs with the fields they document -- in particular that `kind`
 //! reaches `segment_notification_ui`/`segment_state_ui` so a template can
 //! dispatch straight to the matching built-in `Animation::*` function, and
-//! that every hook sees both the active theme's color (`theme_color`) and
-//! the resolved/computed one (`color`). Mirrors `tests/node_template_kind.rs`
-//! for the node side.
+//! that every hook sees both the active theme's full palette (`theme`)
+//! and the resolved/computed one (`color`). Mirrors
+//! `tests/node_context_colors.rs` for the node side.
 
 use egui::{Context, Painter, RawInput};
 use egui_map::map::Map;
@@ -40,14 +40,14 @@ impl MapTheme for FixedPalette {
 /// reached each hook rather than on what got painted.
 #[derive(Default)]
 struct RecordingSegmentTemplate {
-    draws: RefCell<Vec<(SegmentId, egui::Color32, egui::Color32)>>,
-    notifications: RefCell<Vec<(SegmentId, SegmentAnimation, egui::Color32, egui::Color32)>>,
+    draws: RefCell<Vec<(SegmentId, egui::Color32, ThemeColors)>>,
+    notifications: RefCell<Vec<(SegmentId, SegmentAnimation, egui::Color32, ThemeColors)>>,
     states: RefCell<
         Vec<(
             SegmentId,
             SteadySegmentAnimation,
             egui::Color32,
-            egui::Color32,
+            ThemeColors,
         )>,
     >,
 }
@@ -56,16 +56,13 @@ impl SegmentTemplate for RecordingSegmentTemplate {
     fn segment_ui(&self, _painter: &Painter, ctx: SegmentContext) {
         self.draws
             .borrow_mut()
-            .push((ctx.segment.id, ctx.color, ctx.theme_color));
+            .push((ctx.segment.id, ctx.color, ctx.theme));
     }
 
     fn segment_notification_ui(&self, painter: &Painter, ctx: SegmentNotificationContext) -> bool {
-        self.notifications.borrow_mut().push((
-            ctx.segment.id,
-            ctx.kind,
-            ctx.color,
-            ctx.theme_color,
-        ));
+        self.notifications
+            .borrow_mut()
+            .push((ctx.segment.id, ctx.kind, ctx.color, ctx.theme));
         painter.ctx().request_repaint();
         true
     }
@@ -73,7 +70,7 @@ impl SegmentTemplate for RecordingSegmentTemplate {
     fn segment_state_ui(&self, painter: &Painter, ctx: SegmentStateContext) {
         self.states
             .borrow_mut()
-            .push((ctx.segment.id, ctx.kind, ctx.color, ctx.theme_color));
+            .push((ctx.segment.id, ctx.kind, ctx.color, ctx.theme));
         painter.ctx().request_repaint();
     }
 }
@@ -119,7 +116,7 @@ fn segment_ui_receives_the_segment_id_and_resolved_color() {
 }
 
 #[test]
-fn segment_ui_sees_theme_color_and_computed_color_separately() {
+fn segment_ui_sees_theme_palette_and_computed_color_separately() {
     let template = Rc::new(RecordingSegmentTemplate::default());
     let mut map = map_with_one_segment();
     map.set_theme(Rc::new(FixedPalette));
@@ -128,24 +125,29 @@ fn segment_ui_sees_theme_color_and_computed_color_separately() {
     render_once(&mut map);
 
     let draws = template.draws.borrow();
-    let (_, color, theme_color) = draws[0];
+    let (_, color, theme) = draws[0];
     // With no per-segment override the computed color falls back to the
-    // theme's own segment color -- but the template still receives both
-    // values explicitly, so it can tell them apart.
+    // theme's own segment color -- but the template still receives the
+    // full palette alongside it, so it can tell them apart.
     assert_eq!(
         color,
         egui::Color32::from_rgb(4, 5, 6),
         "SegmentContext::color must be the resolved segment color"
     );
     assert_eq!(
-        theme_color,
+        theme.segment,
         egui::Color32::from_rgb(4, 5, 6),
-        "SegmentContext::theme_color must be the active theme's segment color"
+        "SegmentContext::theme must carry the active theme's segment color"
+    );
+    assert_eq!(
+        theme.node,
+        egui::Color32::from_rgb(1, 2, 3),
+        "SegmentContext::theme must carry every role, not just segment"
     );
 }
 
 #[test]
-fn segment_override_reaches_the_computed_color_but_not_theme_color() {
+fn segment_override_reaches_the_computed_color_but_not_theme() {
     let template = Rc::new(RecordingSegmentTemplate::default());
     let mut map = Map::new();
     map.set_theme(Rc::new(FixedPalette));
@@ -157,16 +159,16 @@ fn segment_override_reaches_the_computed_color_but_not_theme_color() {
     render_once(&mut map);
 
     let draws = template.draws.borrow();
-    let (_, color, theme_color) = draws[0];
+    let (_, color, theme) = draws[0];
     assert_eq!(
         color,
         egui::Color32::from_rgb(200, 100, 50),
         "SegmentContext::color must honor the segment's override"
     );
     assert_eq!(
-        theme_color,
+        theme.segment,
         egui::Color32::from_rgb(4, 5, 6),
-        "SegmentContext::theme_color must stay the theme's color, unaffected by the override"
+        "SegmentContext::theme must stay the theme's palette, unaffected by the override"
     );
 }
 
@@ -190,7 +192,7 @@ fn segment_notification_ui_receives_the_requested_kind() {
 }
 
 #[test]
-fn segment_notification_ui_sees_theme_color_and_computed_color() {
+fn segment_notification_ui_sees_theme_palette_and_computed_color() {
     let template = Rc::new(RecordingSegmentTemplate::default());
     let mut map = map_with_one_segment();
     map.set_theme(Rc::new(FixedPalette));
@@ -200,16 +202,21 @@ fn segment_notification_ui_sees_theme_color_and_computed_color() {
     render_once(&mut map);
 
     let notifications = template.notifications.borrow();
-    let (_, _, color, theme_color) = notifications[0];
+    let (_, _, color, theme) = notifications[0];
     assert_eq!(
         color,
         egui::Color32::from_rgb(10, 11, 12),
         "SegmentNotificationContext::color must fall back to the theme's alert color"
     );
     assert_eq!(
-        theme_color,
+        theme.alert,
         egui::Color32::from_rgb(10, 11, 12),
-        "SegmentNotificationContext::theme_color must be the theme's alert color"
+        "SegmentNotificationContext::theme must carry the theme's alert color"
+    );
+    assert_eq!(
+        theme.segment,
+        egui::Color32::from_rgb(4, 5, 6),
+        "SegmentNotificationContext::theme must carry every role, not just alert"
     );
 }
 
@@ -233,7 +240,7 @@ fn segment_state_ui_receives_the_requested_kind() {
 }
 
 #[test]
-fn segment_state_ui_sees_theme_color_and_computed_color() {
+fn segment_state_ui_sees_theme_palette_and_computed_color() {
     let template = Rc::new(RecordingSegmentTemplate::default());
     let mut map = map_with_one_segment();
     map.set_theme(Rc::new(FixedPalette));
@@ -243,15 +250,20 @@ fn segment_state_ui_sees_theme_color_and_computed_color() {
     render_once(&mut map);
 
     let states = template.states.borrow();
-    let (_, _, color, theme_color) = states[0];
+    let (_, _, color, theme) = states[0];
     assert_eq!(
         color,
         egui::Color32::from_rgb(10, 11, 12),
         "SegmentStateContext::color must fall back to the theme's alert color"
     );
     assert_eq!(
-        theme_color,
+        theme.alert,
         egui::Color32::from_rgb(10, 11, 12),
-        "SegmentStateContext::theme_color must be the theme's alert color"
+        "SegmentStateContext::theme must carry the theme's alert color"
+    );
+    assert_eq!(
+        theme.selected,
+        egui::Color32::from_rgb(7, 8, 9),
+        "SegmentStateContext::theme must carry every role, not just alert"
     );
 }

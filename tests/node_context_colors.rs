@@ -1,8 +1,10 @@
-//! Verifies that `NodeTemplate::node_ui` receives both the active theme's
-//! node color (`NodeContext::theme_color`) and the resolved/computed one
-//! (`NodeContext::color`) -- with the computed one honoring a per-node
-//! `MapPoint::color` override while `theme_color` stays the theme's own base
-//! color. Mirrors `tests/segment_template_context.rs` for the segment side.
+//! Verifies that `NodeTemplate`'s hooks receive the active theme's full
+//! palette (`NodeContext::theme`/`NotificationContext::theme`/
+//! `MarkerContext::theme`) alongside the resolved/computed color
+//! (`*::color`) -- with the computed one honoring a per-node
+//! `MapPoint::color` override while `theme` stays the theme's own
+//! palette. Mirrors `tests/segment_template_context.rs` for the segment
+//! side.
 
 use egui::{Color32, Context, RawInput, Ui};
 use egui_map::map::Map;
@@ -29,27 +31,34 @@ impl MapTheme for FixedPalette {
     }
 }
 
-/// Records every `node_ui` call it receives, so tests can assert on exactly
+/// Records every call it receives, so tests can assert on exactly
 /// what reached the hook rather than on what got painted.
 #[derive(Default)]
 struct RecordingTemplate {
-    nodes: RefCell<Vec<(usize, Color32, Color32)>>,
+    nodes: RefCell<Vec<(usize, Color32, ThemeColors)>>,
+    markers: RefCell<Vec<(usize, ThemeColors)>>,
+    notifications: RefCell<Vec<(usize, ThemeColors)>>,
 }
 
 impl NodeTemplate for RecordingTemplate {
     fn node_ui(&self, _ui: &mut Ui, ctx: NodeContext) {
         self.nodes
             .borrow_mut()
-            .push((ctx.point.id, ctx.color, ctx.theme_color));
+            .push((ctx.point.id, ctx.color, ctx.theme));
     }
 
     fn selection_ui(&self, _ui: &mut Ui, _ctx: SelectionContext) {}
 
-    fn notification_ui(&self, _ui: &mut Ui, _ctx: NotificationContext) -> bool {
+    fn notification_ui(&self, _ui: &mut Ui, ctx: NotificationContext) -> bool {
+        self.notifications
+            .borrow_mut()
+            .push((ctx.node_id, ctx.theme));
         false
     }
 
-    fn marker_ui(&self, _ui: &mut Ui, _ctx: MarkerContext) {}
+    fn marker_ui(&self, _ui: &mut Ui, ctx: MarkerContext) {
+        self.markers.borrow_mut().push((ctx.node_id, ctx.theme));
+    }
 }
 
 fn map_with_two_nodes() -> Map {
@@ -79,7 +88,7 @@ fn render_once(map: &mut Map) {
 }
 
 #[test]
-fn node_ui_sees_theme_color_and_computed_color_without_override() {
+fn node_ui_sees_theme_palette_and_computed_color_without_override() {
     let template = Rc::new(RecordingTemplate::default());
     let mut map = map_with_two_nodes();
     map.set_theme(Rc::new(FixedPalette));
@@ -89,17 +98,19 @@ fn node_ui_sees_theme_color_and_computed_color_without_override() {
 
     let nodes = template.nodes.borrow();
     assert_eq!(nodes.len(), 2);
-    for (_, color, theme_color) in nodes.iter() {
+    for (_, color, theme) in nodes.iter() {
         // With no per-node override the computed color falls back to the
-        // theme's own node color -- but the template still receives both
-        // values explicitly.
+        // theme's own node color -- but the template still receives the
+        // full palette alongside it, every role at its fixed value.
         assert_eq!(*color, Color32::from_rgb(1, 2, 3));
-        assert_eq!(*theme_color, Color32::from_rgb(1, 2, 3));
+        assert_eq!(theme.node, Color32::from_rgb(1, 2, 3));
+        assert_eq!(theme.segment, Color32::from_rgb(4, 5, 6));
+        assert_eq!(theme.alert, Color32::from_rgb(10, 11, 12));
     }
 }
 
 #[test]
-fn node_override_reaches_the_computed_color_but_not_theme_color() {
+fn node_override_reaches_the_computed_color_but_not_theme() {
     let template = Rc::new(RecordingTemplate::default());
     let mut map = Map::new();
     map.set_theme(Rc::new(FixedPalette));
@@ -111,7 +122,7 @@ fn node_override_reaches_the_computed_color_but_not_theme_color() {
     render_once(&mut map);
 
     let nodes = template.nodes.borrow();
-    let (id, color, theme_color) = nodes[0];
+    let (id, color, theme) = nodes[0];
     assert_eq!(id, 1);
     assert_eq!(
         color,
@@ -119,8 +130,43 @@ fn node_override_reaches_the_computed_color_but_not_theme_color() {
         "NodeContext::color must honor the node's override"
     );
     assert_eq!(
-        theme_color,
+        theme.node,
         Color32::from_rgb(1, 2, 3),
-        "NodeContext::theme_color must stay the theme's color, unaffected by the override"
+        "NodeContext::theme must stay the theme's palette, unaffected by the override"
+    );
+}
+
+#[test]
+fn notification_and_marker_hooks_see_the_full_theme_palette() {
+    let template = Rc::new(RecordingTemplate::default());
+    let mut map = map_with_two_nodes();
+    map.set_theme(Rc::new(FixedPalette));
+    map.node(1).unwrap().pulse(std::time::Instant::now());
+    map.update_marker(42, 2);
+    map.set_node_template(template.clone());
+
+    render_once(&mut map);
+
+    let notifications = template.notifications.borrow();
+    assert_eq!(notifications.len(), 1);
+    assert_eq!(notifications[0].0, 1);
+    assert_eq!(
+        notifications[0].1.alert,
+        Color32::from_rgb(10, 11, 12),
+        "NotificationContext::theme must be the active theme's palette"
+    );
+    assert_eq!(
+        notifications[0].1.node,
+        Color32::from_rgb(1, 2, 3),
+        "NotificationContext::theme must carry every role, not just alert"
+    );
+
+    let markers = template.markers.borrow();
+    assert_eq!(markers.len(), 1);
+    assert_eq!(markers[0].0, 2);
+    assert_eq!(
+        markers[0].1.segment,
+        Color32::from_rgb(4, 5, 6),
+        "MarkerContext::theme must be the active theme's palette"
     );
 }

@@ -7,7 +7,7 @@
 //! [`ContextMenuManager`] and [`NodeTemplate`]. The color palette a `Style`
 //! paints with lives in [`super::theme`], via [`MapTheme`](super::theme::MapTheme).
 
-use crate::map::theme::Style;
+use crate::map::theme::{Style, ThemeColors};
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Ui};
 use rstar::AABB;
 use std::convert::{From, Into};
@@ -1118,6 +1118,13 @@ pub struct NodeContext<'a> {
     /// no template is installed, resolved once here so every `NodeTemplate`
     /// doesn't need to repeat it.
     pub color: Color32,
+    /// The surrounding UI's text color (egui's active visuals), so a
+    /// `NodeTemplate` can paint labels that match the rest of the
+    /// interface without reaching into egui's context itself.
+    pub text_color: Color32,
+    /// The surrounding UI's faint background color (egui's active
+    /// visuals), for chips/panels drawn behind a node's own label.
+    pub background_color: Color32,
     /// The active [`MapTheme`](super::theme::MapTheme)'s
     /// [`ThemeColors::node`](super::theme::ThemeColors::node) for the current
     /// color mode -- the base color the theme paints nodes with, before any
@@ -1125,7 +1132,7 @@ pub struct NodeContext<'a> {
     /// what `color` falls back to when the node has no override, so it lets a
     /// `NodeTemplate` tell the theme's own color apart from a node's computed
     /// (overridden) one.
-    pub theme_color: Color32,
+    pub theme: ThemeColors,
 }
 
 /// The context passed to [`NodeTemplate::selection_ui`].
@@ -1149,6 +1156,13 @@ pub struct SelectionContext<'a> {
     /// the current color mode -- resolved once here so every `NodeTemplate`
     /// doesn't need to reach for the theme itself.
     pub color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode --
+    /// [`ThemeColors::selected`](super::theme::ThemeColors::selected) is
+    /// what `color` resolves from. The whole palette is handed over so a
+    /// `NodeTemplate` can use any other theme role (`node`, `alert`, ...)
+    /// without reaching for the theme itself.
+    pub theme: ThemeColors,
 }
 
 /// The context passed to [`NodeTemplate::notification_ui`].
@@ -1177,6 +1191,13 @@ pub struct NotificationContext {
     pub kind: NodeAnimation,
     /// The id of the node this notification belongs to.
     pub node_id: usize,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode --
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert) is what
+    /// `color` falls back to when the notification has no override. The
+    /// whole palette is handed over so a `NodeTemplate` can use any other
+    /// theme role without reaching for the theme itself.
+    pub theme: ThemeColors,
 }
 
 /// The context passed to [`NodeTemplate::marker_ui`].
@@ -1210,6 +1231,14 @@ pub struct MarkerContext {
     /// marker (light or dark depending on the surrounding UI's theme) --
     /// plain markers don't have their own color setting to override.
     pub color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode -- for a node's
+    /// lasting state, [`ThemeColors::alert`](super::theme::ThemeColors::alert)
+    /// is what `color` falls back to; plain markers use the fixed green in
+    /// `color` instead. The whole palette is handed over so a
+    /// `NodeTemplate` can use any theme role without reaching for the
+    /// theme itself.
+    pub theme: ThemeColors,
 }
 
 /// Customizes how segments and their visual effects are rendered.
@@ -1364,15 +1393,15 @@ pub struct SegmentContext<'a> {
     /// -- resolved once here so every `SegmentTemplate` doesn't need to
     /// repeat it.
     pub color: Color32,
-    /// The active [`MapTheme`](super::theme::MapTheme)'s
-    /// [`ThemeColors::segment`](super::theme::ThemeColors::segment) for the
-    /// current color mode -- the base color the theme paints segments with,
-    /// before any per-segment [`segment.color`](MapSegment::color) override
-    /// is applied, faded in with the zoom the same way `color` is. This is
-    /// what `color` falls back to when the segment has no override, so it
-    /// lets a `SegmentTemplate` tell the theme's own color apart from a
-    /// segment's computed (overridden) one.
-    pub theme_color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode --
+    /// [`ThemeColors::segment`](super::theme::ThemeColors::segment) is the
+    /// base color the theme paints segments with, before any per-segment
+    /// [`segment.color`](MapSegment::color) override or zoom fade is applied
+    /// (the faded, resolved value is `color`). The whole palette is handed
+    /// over so a `SegmentTemplate` can use any other theme role (`alert`,
+    /// `selected`, ...) without reaching for the theme itself.
+    pub theme: ThemeColors,
 }
 
 /// The context passed to [`SegmentTemplate::segment_notification_ui`].
@@ -1399,14 +1428,14 @@ pub struct SegmentNotificationContext<'a> {
     /// override if it was given one when triggered, otherwise the active
     /// theme's [`ThemeColors::alert`](super::theme::ThemeColors::alert).
     pub color: Color32,
-    /// The active [`MapTheme`](super::theme::MapTheme)'s
-    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert) for the
-    /// current color mode -- the base color the theme paints alert effects
-    /// with, before any override is applied (faded with the zoom the same
-    /// way `color` is). This is what `color` falls back to when the
-    /// notification has no override, so it lets a `SegmentTemplate` tell the
-    /// theme's own color apart from a computed (overridden) one.
-    pub theme_color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode --
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert) is what
+    /// `color` falls back to when the notification has no override (the
+    /// faded, resolved value is `color`). The whole palette is handed over
+    /// so a `SegmentTemplate` can use any other theme role without
+    /// reaching for the theme itself.
+    pub theme: ThemeColors,
     /// Which built-in event effect was requested (`flash`, `comet_once`,
     /// `wipe`). Match on this to dispatch to the corresponding
     /// [`Animation`](crate::map::animation::Animation) function instead of
@@ -1438,14 +1467,14 @@ pub struct SegmentStateContext<'a> {
     /// was given one, otherwise the active theme's
     /// [`ThemeColors::alert`](super::theme::ThemeColors::alert).
     pub color: Color32,
-    /// The active [`MapTheme`](super::theme::MapTheme)'s
-    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert) for the
-    /// current color mode -- the base color the theme paints alert effects
-    /// with, before any override is applied (faded with the zoom the same
-    /// way `color` is). This is what `color` falls back to when the state has
-    /// no override, so it lets a `SegmentTemplate` tell the theme's own
-    /// color apart from a computed (overridden) one.
-    pub theme_color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode --
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert) is what
+    /// `color` falls back to when the state has no override (the faded,
+    /// resolved value is `color`). The whole palette is handed over so a
+    /// `SegmentTemplate` can use any other theme role without reaching
+    /// for the theme itself.
+    pub theme: ThemeColors,
     /// Which built-in persistent effect was requested (`comet`, `dash`,
     /// `glow_band`, `chevrons`). Match on this to dispatch to the
     /// corresponding [`Animation`](crate::map::animation::Animation)
