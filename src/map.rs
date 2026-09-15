@@ -1411,7 +1411,7 @@ impl Map {
                             zoom: self.zoom,
                             point: system,
                             color: node_color,
-                            background_color: ui_obj.ctx().theme().default_visuals().faint_bg_color,
+                            background_color: ui_obj.ctx().theme().default_visuals().extreme_bg_color,
                             theme: self.theme_colors(),
                         },
                     );
