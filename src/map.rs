@@ -1408,7 +1408,10 @@ impl Map {
                             zoom: self.zoom,
                             point: system,
                             color: node_color,
-                            text_color: ui_obj.ctx().theme().default_visuals().text_color(),
+                            text_color: match ui_obj.ctx().theme() {
+                                egui::Theme::Dark => egui::Color32::WHITE,
+                                egui::Theme::Light => egui::Color32::BLACK,
+                            },
                             background_color: ui_obj.ctx().theme().default_visuals().faint_bg_color,
                             theme: self.theme_colors(),
                         },
