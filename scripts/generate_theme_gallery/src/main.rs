@@ -169,6 +169,36 @@ fn thick_line(img: &mut RgbImage, a: (f32, f32), b: (f32, f32), width: i32, colo
     }
 }
 
+/// A `dash`-in-progress snapshot: alternating drawn/gap stretches along
+/// `a`-`b`, the same segment color a real `dash` animation would use, so
+/// the gallery also shows what an animated segment looks like mid-flight
+/// instead of every connection being a plain static line.
+fn thick_dashed_line(
+    img: &mut RgbImage,
+    a: (f32, f32),
+    b: (f32, f32),
+    width: i32,
+    dash: f32,
+    gap: f32,
+    color: Rgb<u8>,
+) {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let len = (dx * dx + dy * dy).sqrt();
+    if len <= 0.0 {
+        return;
+    }
+    let (ux, uy) = (dx / len, dy / len);
+    let period = dash + gap;
+    let mut t = 0.0;
+    while t < len {
+        let seg_end = (t + dash).min(len);
+        let p0 = (a.0 + ux * t, a.1 + uy * t);
+        let p1 = (a.0 + ux * seg_end, a.1 + uy * seg_end);
+        thick_line(img, p0, p1, width, color);
+        t += period;
+    }
+}
+
 #[derive(Clone, Copy)]
 struct CardArea {
     x0: i32,
@@ -231,6 +261,10 @@ fn draw_card(
     let seg = rgb(colors["segment"]);
     thick_line(img, top, left, 2, seg);
     thick_line(img, top, right, 2, seg);
+    // The right and marker nodes used to sit unconnected -- wire them up
+    // with a `dash` animation snapshot instead of a plain line, so the
+    // gallery also shows what an in-flight segment animation looks like.
+    thick_dashed_line(img, right, marker_node, 2, 6.0, 5.0, seg);
 
     let r: i32 = 7;
     let node = rgb(colors["node"]);

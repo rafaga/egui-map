@@ -76,7 +76,7 @@ impl Theme {
             (SlateOcean, Dark) => ThemeColors {
                 node: Color32::from_rgb(0x6E, 0x93, 0xBF),
                 segment: Color32::from_rgb(0x4A, 0x5A, 0x6E),
-                selected: Color32::from_rgb(0x38, 0xBD, 0xF8),
+                selected: Color32::from_rgb(0x26, 0xB7, 0xF8),
                 alert: Color32::from_rgb(0xFF, 0x8A, 0x4C),
                 marker: Color32::from_rgb(0xD4, 0x3D, 0xF2),
                 text: Color32::from_rgb(0xD7, 0xDE, 0xE6),
@@ -84,7 +84,7 @@ impl Theme {
             (SlateOcean, Light) => ThemeColors {
                 node: Color32::from_rgb(0x2E, 0x4C, 0x6D),
                 segment: Color32::from_rgb(0x8A, 0x99, 0xA8),
-                selected: Color32::from_rgb(0x0E, 0xA5, 0xE9),
+                selected: Color32::from_rgb(0x0C, 0xA4, 0xE9),
                 alert: Color32::from_rgb(0xE0, 0x59, 0x2A),
                 marker: Color32::from_rgb(0x40, 0xBF, 0x1D),
                 text: Color32::from_rgb(0x2B, 0x33, 0x3D),
@@ -93,7 +93,7 @@ impl Theme {
             (NebulaViolet, Dark) => ThemeColors {
                 node: Color32::from_rgb(0xA7, 0x8B, 0xFA),
                 segment: Color32::from_rgb(0x5C, 0x4A, 0x80),
-                selected: Color32::from_rgb(0x2D, 0xD4, 0xBF),
+                selected: Color32::from_rgb(0x20, 0xD4, 0xBD),
                 alert: Color32::from_rgb(0xFF, 0x5F, 0xA3),
                 marker: Color32::from_rgb(0xCB, 0xF2, 0x3D),
                 text: Color32::from_rgb(0xE4, 0xDC, 0xF2),
@@ -101,7 +101,7 @@ impl Theme {
             (NebulaViolet, Light) => ThemeColors {
                 node: Color32::from_rgb(0x5B, 0x3E, 0x96),
                 segment: Color32::from_rgb(0xB3, 0xA4, 0xD6),
-                selected: Color32::from_rgb(0x16, 0xB8, 0xA6),
+                selected: Color32::from_rgb(0x0A, 0xB8, 0xA5),
                 alert: Color32::from_rgb(0xE6, 0x33, 0x7A),
                 marker: Color32::from_rgb(0x97, 0xBF, 0x1D),
                 text: Color32::from_rgb(0x37, 0x2F, 0x45),
@@ -110,7 +110,7 @@ impl Theme {
             (TerminalGreen, Dark) => ThemeColors {
                 node: Color32::from_rgb(0x4A, 0xDE, 0x80),
                 segment: Color32::from_rgb(0x3A, 0x52, 0x40),
-                selected: Color32::from_rgb(0x60, 0xA5, 0xFA),
+                selected: Color32::from_rgb(0x27, 0x88, 0xFF),
                 alert: Color32::from_rgb(0xFF, 0xC9, 0x4D),
                 marker: Color32::from_rgb(0xF2, 0x3D, 0xDD),
                 text: Color32::from_rgb(0xD7, 0xE6, 0xDA),
@@ -118,7 +118,7 @@ impl Theme {
             (TerminalGreen, Light) => ThemeColors {
                 node: Color32::from_rgb(0x1F, 0x7A, 0x3D),
                 segment: Color32::from_rgb(0x9B, 0xB8, 0x9E),
-                selected: Color32::from_rgb(0x25, 0x63, 0xEB),
+                selected: Color32::from_rgb(0x0C, 0x52, 0xEB),
                 alert: Color32::from_rgb(0xD6, 0xA4, 0x29),
                 marker: Color32::from_rgb(0xBF, 0x1D, 0x9F),
                 text: Color32::from_rgb(0x2A, 0x33, 0x2C),
@@ -127,7 +127,7 @@ impl Theme {
             (EmberForge, Dark) => ThemeColors {
                 node: Color32::from_rgb(0xD9, 0x7F, 0x3D),
                 segment: Color32::from_rgb(0x5A, 0x46, 0x32),
-                selected: Color32::from_rgb(0xF4, 0x72, 0xB6),
+                selected: Color32::from_rgb(0xFF, 0x27, 0x98),
                 alert: Color32::from_rgb(0x4F, 0xC3, 0xE8),
                 marker: Color32::from_rgb(0xB0, 0xF2, 0x3D),
                 text: Color32::from_rgb(0xED, 0xE0, 0xD3),
@@ -135,7 +135,7 @@ impl Theme {
             (EmberForge, Light) => ThemeColors {
                 node: Color32::from_rgb(0x8C, 0x4A, 0x1F),
                 segment: Color32::from_rgb(0xC9, 0xA9, 0x8C),
-                selected: Color32::from_rgb(0xC4, 0x25, 0x8C),
+                selected: Color32::from_rgb(0xC4, 0x0A, 0x83),
                 alert: Color32::from_rgb(0x2E, 0x86, 0xAB),
                 marker: Color32::from_rgb(0x8C, 0xBF, 0x1D),
                 text: Color32::from_rgb(0x36, 0x2E, 0x28),
@@ -144,7 +144,7 @@ impl Theme {
             (SolarAmber, Dark) => ThemeColors {
                 node: Color32::from_rgb(0xF0, 0xC2, 0x4C),
                 segment: Color32::from_rgb(0x5A, 0x4E, 0x2E),
-                selected: Color32::from_rgb(0x4F, 0xBF, 0x9E),
+                selected: Color32::from_rgb(0x1D, 0xBF, 0x8F),
                 alert: Color32::from_rgb(0xE8, 0x65, 0x4A),
                 marker: Color32::from_rgb(0x91, 0x3D, 0xF2),
                 text: Color32::from_rgb(0xEF, 0xE4, 0xC4),
@@ -152,7 +152,7 @@ impl Theme {
             (SolarAmber, Light) => ThemeColors {
                 node: Color32::from_rgb(0x8A, 0x6D, 0x1E),
                 segment: Color32::from_rgb(0xD8, 0xC4, 0x8F),
-                selected: Color32::from_rgb(0x2D, 0x6E, 0x5E),
+                selected: Color32::from_rgb(0x06, 0x6E, 0x54),
                 alert: Color32::from_rgb(0xC1, 0x44, 0x2A),
                 marker: Color32::from_rgb(0x63, 0x1D, 0xBF),
                 text: Color32::from_rgb(0x36, 0x2E, 0x1C),
@@ -169,7 +169,7 @@ impl Theme {
             (ArticCyan, Light) => ThemeColors {
                 node: Color32::from_rgb(0x12, 0x70, 0x8A),
                 segment: Color32::from_rgb(0x9A, 0xC6, 0xD1),
-                selected: Color32::from_rgb(0xF5, 0xA5, 0x24),
+                selected: Color32::from_rgb(0xF5, 0x9C, 0x0D),
                 alert: Color32::from_rgb(0xE0, 0x52, 0x7A),
                 marker: Color32::from_rgb(0x1D, 0x9C, 0xBF),
                 text: Color32::from_rgb(0x1F, 0x2E, 0x30),
@@ -178,7 +178,7 @@ impl Theme {
             (CrimsonSignal, Dark) => ThemeColors {
                 node: Color32::from_rgb(0xE3, 0x5B, 0x6B),
                 segment: Color32::from_rgb(0x5C, 0x45, 0x48),
-                selected: Color32::from_rgb(0x58, 0xA6, 0xFF),
+                selected: Color32::from_rgb(0x27, 0x8C, 0xFF),
                 alert: Color32::from_rgb(0xFF, 0xC4, 0x59),
                 marker: Color32::from_rgb(0xF2, 0x3D, 0xE3),
                 text: Color32::from_rgb(0xE8, 0xD6, 0xD8),
@@ -186,7 +186,7 @@ impl Theme {
             (CrimsonSignal, Light) => ThemeColors {
                 node: Color32::from_rgb(0x7A, 0x1F, 0x2B),
                 segment: Color32::from_rgb(0xB9, 0xA8, 0xA8),
-                selected: Color32::from_rgb(0x1F, 0x6F, 0xEB),
+                selected: Color32::from_rgb(0x0C, 0x64, 0xEB),
                 alert: Color32::from_rgb(0xE8, 0xA6, 0x28),
                 marker: Color32::from_rgb(0xBF, 0x1D, 0xAA),
                 text: Color32::from_rgb(0x33, 0x26, 0x28),
@@ -195,7 +195,7 @@ impl Theme {
             (MidnightIndigo, Dark) => ThemeColors {
                 node: Color32::from_rgb(0x7B, 0x82, 0xE0),
                 segment: Color32::from_rgb(0x3A, 0x3D, 0x66),
-                selected: Color32::from_rgb(0x2D, 0xD4, 0xC8),
+                selected: Color32::from_rgb(0x20, 0xD4, 0xC7),
                 alert: Color32::from_rgb(0xFF, 0xD1, 0x66),
                 marker: Color32::from_rgb(0xD1, 0x3D, 0xF2),
                 text: Color32::from_rgb(0xD8, 0xDA, 0xF0),
@@ -212,7 +212,7 @@ impl Theme {
             (CopperRose, Dark) => ThemeColors {
                 node: Color32::from_rgb(0xE0, 0x8B, 0x6F),
                 segment: Color32::from_rgb(0x5E, 0x45, 0x3D),
-                selected: Color32::from_rgb(0x4F, 0xC3, 0xAE),
+                selected: Color32::from_rgb(0x1E, 0xC3, 0xA5),
                 alert: Color32::from_rgb(0xFF, 0xC6, 0x5C),
                 marker: Color32::from_rgb(0xC2, 0x3D, 0xF2),
                 text: Color32::from_rgb(0xEF, 0xDA, 0xD0),
@@ -220,7 +220,7 @@ impl Theme {
             (CopperRose, Light) => ThemeColors {
                 node: Color32::from_rgb(0x9C, 0x4A, 0x3C),
                 segment: Color32::from_rgb(0xD9, 0xB8, 0xAE),
-                selected: Color32::from_rgb(0x2F, 0x7A, 0x6B),
+                selected: Color32::from_rgb(0x06, 0x7A, 0x63),
                 alert: Color32::from_rgb(0xE0, 0xA2, 0x3C),
                 marker: Color32::from_rgb(0x91, 0x1D, 0xBF),
                 text: Color32::from_rgb(0x3D, 0x2E, 0x29),
@@ -229,7 +229,7 @@ impl Theme {
             (LimeCircuit, Dark) => ThemeColors {
                 node: Color32::from_rgb(0xA8, 0xE0, 0x5F),
                 segment: Color32::from_rgb(0x44, 0x52, 0x30),
-                selected: Color32::from_rgb(0xA7, 0x8B, 0xFA),
+                selected: Color32::from_rgb(0x5D, 0x27, 0xFF),
                 alert: Color32::from_rgb(0xFF, 0x85, 0x52),
                 marker: Color32::from_rgb(0x3D, 0xF2, 0x6D),
                 text: Color32::from_rgb(0xDC, 0xEA, 0xC0),
@@ -237,7 +237,7 @@ impl Theme {
             (LimeCircuit, Light) => ThemeColors {
                 node: Color32::from_rgb(0x4D, 0x7A, 0x1F),
                 segment: Color32::from_rgb(0xB9, 0xC7, 0x9A),
-                selected: Color32::from_rgb(0x7B, 0x3F, 0xE4),
+                selected: Color32::from_rgb(0x5A, 0x0C, 0xE4),
                 alert: Color32::from_rgb(0xE8, 0x5D, 0x2E),
                 marker: Color32::from_rgb(0x1D, 0xBF, 0x4D),
                 text: Color32::from_rgb(0x2E, 0x33, 0x20),
@@ -246,7 +246,7 @@ impl Theme {
             (CoralReef, Dark) => ThemeColors {
                 node: Color32::from_rgb(0xFF, 0x8B, 0x73),
                 segment: Color32::from_rgb(0x38, 0x65, 0x60),
-                selected: Color32::from_rgb(0x5C, 0xA8, 0xE0),
+                selected: Color32::from_rgb(0x23, 0x93, 0xE5),
                 alert: Color32::from_rgb(0xFF, 0xC1, 0x5E),
                 marker: Color32::from_rgb(0xF2, 0x3D, 0xEF),
                 text: Color32::from_rgb(0xD6, 0xED, 0xE8),
@@ -254,7 +254,7 @@ impl Theme {
             (CoralReef, Light) => ThemeColors {
                 node: Color32::from_rgb(0xD6, 0x5A, 0x45),
                 segment: Color32::from_rgb(0xA8, 0xD4, 0xCE),
-                selected: Color32::from_rgb(0x1D, 0x5C, 0x9E),
+                selected: Color32::from_rgb(0x08, 0x51, 0x9E),
                 alert: Color32::from_rgb(0xF2, 0xA9, 0x3C),
                 marker: Color32::from_rgb(0xBF, 0x1D, 0xB7),
                 text: Color32::from_rgb(0x33, 0x40, 0x3E),
@@ -263,7 +263,7 @@ impl Theme {
             (GraphiteMono, Dark) => ThemeColors {
                 node: Color32::from_rgb(0xD6, 0xD6, 0xD2),
                 segment: Color32::from_rgb(0x4A, 0x4A, 0x46),
-                selected: Color32::from_rgb(0x4F, 0xB3, 0xF5),
+                selected: Color32::from_rgb(0x25, 0xA2, 0xF5),
                 alert: Color32::from_rgb(0xFF, 0x6B, 0x5C),
                 marker: Color32::from_rgb(0x6A, 0xF2, 0x3D),
                 text: Color32::from_rgb(0xE8, 0xE8, 0xE4),
@@ -271,7 +271,7 @@ impl Theme {
             (GraphiteMono, Light) => ThemeColors {
                 node: Color32::from_rgb(0x3A, 0x3A, 0x3A),
                 segment: Color32::from_rgb(0xB8, 0xB8, 0xB4),
-                selected: Color32::from_rgb(0x1F, 0x8F, 0xE0),
+                selected: Color32::from_rgb(0x0C, 0x87, 0xE0),
                 alert: Color32::from_rgb(0xE0, 0x48, 0x3A),
                 marker: Color32::from_rgb(0x45, 0xBF, 0x1D),
                 text: Color32::from_rgb(0x23, 0x23, 0x23),
@@ -280,7 +280,7 @@ impl Theme {
             (PlumStatic, Dark) => ThemeColors {
                 node: Color32::from_rgb(0xC9, 0x94, 0xBB),
                 segment: Color32::from_rgb(0x4A, 0x3A, 0x45),
-                selected: Color32::from_rgb(0x52, 0xC9, 0x9A),
+                selected: Color32::from_rgb(0x1F, 0xC9, 0x86),
                 alert: Color32::from_rgb(0xFF, 0xA0, 0x5C),
                 marker: Color32::from_rgb(0x9A, 0x3D, 0xF2),
                 text: Color32::from_rgb(0xEB, 0xD9, 0xE5),
@@ -288,7 +288,7 @@ impl Theme {
             (PlumStatic, Light) => ThemeColors {
                 node: Color32::from_rgb(0x6B, 0x3B, 0x5E),
                 segment: Color32::from_rgb(0xC7, 0xAE, 0xC0),
-                selected: Color32::from_rgb(0x2E, 0x8B, 0x6E),
+                selected: Color32::from_rgb(0x07, 0x8B, 0x62),
                 alert: Color32::from_rgb(0xE0, 0x79, 0x3D),
                 marker: Color32::from_rgb(0x73, 0x1D, 0xBF),
                 text: Color32::from_rgb(0x36, 0x2B, 0x33),
@@ -297,7 +297,7 @@ impl Theme {
             (SandstoneTrail, Dark) => ThemeColors {
                 node: Color32::from_rgb(0xC9, 0xAD, 0x72),
                 segment: Color32::from_rgb(0x4E, 0x45, 0x30),
-                selected: Color32::from_rgb(0x4F, 0xA8, 0xCC),
+                selected: Color32::from_rgb(0x1F, 0x9A, 0xCC),
                 alert: Color32::from_rgb(0xF0, 0x70, 0x8A),
                 marker: Color32::from_rgb(0x8E, 0xF2, 0x3D),
                 text: Color32::from_rgb(0xE6, 0xD9, 0xB8),
@@ -305,7 +305,7 @@ impl Theme {
             (SandstoneTrail, Light) => ThemeColors {
                 node: Color32::from_rgb(0x6B, 0x5A, 0x3A),
                 segment: Color32::from_rgb(0xDC, 0xCB, 0xA0),
-                selected: Color32::from_rgb(0x2A, 0x6E, 0x8C),
+                selected: Color32::from_rgb(0x07, 0x63, 0x8C),
                 alert: Color32::from_rgb(0xD1, 0x49, 0x5B),
                 marker: Color32::from_rgb(0x60, 0xBF, 0x1D),
                 text: Color32::from_rgb(0x3A, 0x31, 0x21),
@@ -314,7 +314,7 @@ impl Theme {
             (EguiDefault, Dark) => ThemeColors {
                 node: Color32::from_rgb(0x5A, 0xAA, 0xFF),
                 segment: Color32::from_rgb(0x3C, 0x3C, 0x3C),
-                selected: Color32::from_rgb(0xC0, 0xDE, 0xFF),
+                selected: Color32::from_rgb(0x00, 0x79, 0xFF),
                 alert: Color32::from_rgb(0xFF, 0x8F, 0x00),
                 marker: Color32::from_rgb(0xFF, 0x00, 0x00),
                 text: Color32::from_rgb(0xFF, 0xFF, 0xFF),
@@ -617,7 +617,7 @@ mod tests {
             ThemeColors {
                 node: Color32::from_rgb(0x8A, 0x6D, 0x1E),
                 segment: Color32::from_rgb(0xD8, 0xC4, 0x8F),
-                selected: Color32::from_rgb(0x2D, 0x6E, 0x5E),
+                selected: Color32::from_rgb(0x06, 0x6E, 0x54),
                 alert: Color32::from_rgb(0xC1, 0x44, 0x2A),
                 marker: Color32::from_rgb(0x63, 0x1D, 0xBF),
                 text: Color32::from_rgb(0x36, 0x2E, 0x1C),
@@ -670,6 +670,47 @@ mod tests {
                     ratio >= MIN_CONTRAST,
                     "{theme:?}/{mode:?}: text {text:?} has only {ratio:.2}:1 contrast \
                      against the {mode:?} canvas -- needs at least {MIN_CONTRAST}:1"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn built_in_theme_selected_is_at_least_as_saturated_as_marker() {
+        // `selected` (the ring around the node nearest the pointer, live and
+        // real-time) is meant to read as more vivid than `marker` (a lasting
+        // "this is flagged" indicator) -- not a different hue, just clearly
+        // punchier -- so the two roles don't compete for attention with the
+        // wrong one winning. Saturation (not brightness) is the right axis
+        // to compare on: it tracks "how colorful" independent of how bright
+        // a color happens to be, so boosting it doesn't force `selected`
+        // toward washed-out pastel or blown-out white the way chasing raw
+        // brightness would.
+        fn hsv_saturation(c: Color32) -> f32 {
+            let (r, g, b) = (c.r() as f32, c.g() as f32, c.b() as f32);
+            let max = r.max(g).max(b);
+            let min = r.min(g).min(b);
+            if max <= 0.0 { 0.0 } else { (max - min) / max }
+        }
+
+        for theme in ALL_THEMES {
+            for mode in [ColorMode::Light, ColorMode::Dark] {
+                let colors = theme.colors(mode);
+                let (sel_s, marker_s) = (
+                    hsv_saturation(colors.selected),
+                    hsv_saturation(colors.marker),
+                );
+                // `EguiDefault`'s marker is egui's own `error_fg_color`, already
+                // at maximum saturation (a pure hue) -- `selected` can only tie
+                // it there without abandoning "EguiDefault's colors all come
+                // from egui::Visuals, none invented", so the check allows a tiny
+                // float-rounding slack rather than a strict `>`.
+                assert!(
+                    sel_s >= marker_s - 0.01,
+                    "{theme:?}/{mode:?}: selected {:?} (S={sel_s:.2}) is less \
+                     saturated than marker {:?} (S={marker_s:.2})",
+                    colors.selected,
+                    colors.marker,
                 );
             }
         }
