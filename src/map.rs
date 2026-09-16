@@ -1282,6 +1282,18 @@ impl Map {
                 nearest_id = Some(nearest_node.first().unwrap().1);
             }
         }
+        // Resolved once for the whole batch of nodes below, instead of once
+        // per role per node (`selected`, `marker`, `alert`, `node`, plus a
+        // whole `theme: self.theme_colors()` copy for up to four separate
+        // context structs) -- `Theme::colors` is cheap (a `const fn` over
+        // plain `Color32` literals, no allocation), but there is no reason
+        // to repeat it dozens of times a frame when the active theme and
+        // color mode can't change mid-frame. Same reasoning for
+        // `background_color`: the surrounding UI's visuals don't change
+        // node to node either.
+        let theme = self.theme_colors();
+        let background_color = ui_obj.ctx().theme().default_visuals().extreme_bg_color;
+
         // filling text settings
         let mut text_settings = TextSettings {
             // Screen-space size: unlike the map geometry this is NOT
@@ -1294,7 +1306,7 @@ impl Map {
             position: RawPoint::default(),
             // Same reasoning as the free-floating label above: the active
             // theme's text color, so node names honor a custom `MapTheme`.
-            text_color: self.theme_colors().text,
+            text_color: theme.text,
         };
 
         // Drawing Points
@@ -1310,8 +1322,8 @@ impl Map {
                                 position: viewport_point.into(),
                                 zoom: self.zoom,
                                 point: system,
-                                color: self.theme_colors().selected,
-                                theme: self.theme_colors(),
+                                color: theme.selected,
+                                theme,
                             },
                         );
                     }
@@ -1333,7 +1345,7 @@ impl Map {
                 // Persistent node state is drawn first so a notification --
                 // the *event* -- sits on top of the *state*.
                 if let Some(state) = self.node_states.get(&system_id) {
-                    let color = state.color.unwrap_or(self.theme_colors().marker);
+                    let color = state.color.unwrap_or(theme.marker);
                     if let Some(template) = &self.node_template {
                         // There is no dedicated template hook for node state:
                         // `marker_ui` is the persistent-visual one, so state and
@@ -1349,7 +1361,7 @@ impl Map {
                                 kind: state.animation,
                                 node_id: system_id,
                                 color,
-                                theme: self.theme_colors(),
+                                theme,
                             },
                         );
                     } else {
@@ -1368,7 +1380,7 @@ impl Map {
                 }
 
                 if let Some(notification) = self.notifications.get(&system_id) {
-                    let color = notification.color.unwrap_or(self.theme_colors().alert);
+                    let color = notification.color.unwrap_or(theme.alert);
                     if let Some(template) = &self.node_template {
                         template.notification_ui(
                             ui_obj,
@@ -1379,7 +1391,7 @@ impl Map {
                                 color,
                                 kind: notification.animation,
                                 node_id: system_id,
-                                theme: self.theme_colors(),
+                                theme,
                             },
                         );
                     } else {
@@ -1410,7 +1422,7 @@ impl Map {
                 // active theme's full palette is handed over separately
                 // (`NodeContext::theme`) so a template can tell the
                 // two apart.
-                let node_color = system.color.unwrap_or(self.theme_colors().node);
+                let node_color = system.color.unwrap_or(theme.node);
                 if let Some(node_template) = &self.node_template {
                     node_template.node_ui(
                         ui_obj,
@@ -1419,12 +1431,8 @@ impl Map {
                             zoom: self.zoom,
                             point: system,
                             color: node_color,
-                            background_color: ui_obj
-                                .ctx()
-                                .theme()
-                                .default_visuals()
-                                .extreme_bg_color,
-                            theme: self.theme_colors(),
+                            background_color,
+                            theme,
                         },
                     );
                 } else {
@@ -1437,6 +1445,7 @@ impl Map {
             }
         }
         paint.extend(shape_vec);
+
         Ok(nodes_to_remove)
     }
 

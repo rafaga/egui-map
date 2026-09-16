@@ -1060,11 +1060,17 @@ pub trait NodeTemplate {
     ///
     /// Called every frame for each visible node. The widget no longer draws
     /// the node name once a template is installed, so render it here (e.g.
-    /// with [`Painter::text`](egui::Painter::text)) if you need it. See
-    /// [`NodeContext`] for the fields available, in particular `ctx.color`
-    /// -- the color already resolved for this node, so you don't have to
-    /// repeat the `point.color.unwrap_or(...)` fallback (or reach for the
-    /// active theme yourself) to honor a per-node color override.
+    /// with [`Painter::text`](egui::Painter::text), or
+    /// [`Shape::text`](egui::Shape::text) plus your own
+    /// `ui.ctx().fonts_mut(...)`) if you need it. See [`NodeContext`] for the
+    /// fields available, in particular `ctx.color` -- the color already
+    /// resolved for this node, so you don't have to repeat the
+    /// `point.color.unwrap_or(...)` fallback (or reach for the active theme
+    /// yourself) to honor a per-node color override. If you lay out text
+    /// yourself, consider caching the resulting `Arc<Galley>` keyed by
+    /// `ctx.point.id` (and whatever else affects it -- text, color, size) so
+    /// a cache hit avoids opening `fonts_mut` at all; this hook runs once per
+    /// visible node, every frame.
     fn node_ui(&self, ui: &mut Ui, ctx: NodeContext);
 
     /// Draws the highlight over the node closest to the mouse pointer.
