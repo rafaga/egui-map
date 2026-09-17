@@ -132,7 +132,7 @@ fn find<'a>(texts: &'a [(String, f32, Color32)], needle: &str) -> &'a (String, f
 fn region_label_font_size_scales_with_zoom() {
     // Opposite of `node_name_size_does_not_change_with_zoom`/
     // `free_label_size_does_not_change_with_zoom` in `tests/text_scaling.rs`.
-    let base = MapSettings::default().styles[0].region_label_font.size;
+    let base = MapSettings::default().style.region_label_font.size;
     for zoom in [0.2_f32, 0.5, 1.0, 1.8] {
         let mut map = map_with_region_label("Domain", zoom);
         let texts = drawn_texts(&mut map);
@@ -148,9 +148,7 @@ fn region_label_font_size_scales_with_zoom() {
 #[test]
 fn region_label_font_size_is_configurable() {
     let mut map = map_with_region_label("Domain", 2.0);
-    for style in &mut map.settings.styles {
-        style.region_label_font.size = 10.0;
-    }
+    map.settings.style.region_label_font.size = 10.0;
     let texts = drawn_texts(&mut map);
     let (_, size, _) = find(&texts, "Domain");
     assert_eq!(*size, 20.0);
@@ -208,9 +206,7 @@ fn region_label_font_family_defaults_to_proportional() {
 #[test]
 fn region_label_font_family_is_configurable() {
     let mut map = map_with_region_label("Domain", 1.0);
-    for style in &mut map.settings.styles {
-        style.region_label_font = FontId::new(30.0, FontFamily::Monospace);
-    }
+    map.settings.style.region_label_font = FontId::new(30.0, FontFamily::Monospace);
     let families = drawn_text_families(&mut map);
     let (_, family) = families
         .iter()
@@ -332,7 +328,7 @@ fn label_template_replaces_the_built_in_renderer_and_receives_the_documented_con
     assert_eq!(call.zoom, 1.5);
     assert_eq!(
         call.size,
-        MapSettings::default().styles[0].region_label_font.size * 1.5,
+        MapSettings::default().style.region_label_font.size * 1.5,
         "ctx.size must already be scaled by zoom"
     );
     let [r, g, b, a] = call.color.to_srgba_unmultiplied();

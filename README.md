@@ -178,14 +178,12 @@ map.add_region_labels(vec![RegionLabel {
 
 Install a `LabelTemplate` with `Map::set_label_template` to take over the drawing entirely — see its rustdoc for the `LabelContext` fields (`position`, `zoom`, `label`, `size` already scaled by zoom, `color` already faded, and the full theme `ThemeColors` palette).
 
-The built-in renderer's font comes from `Style::region_label_font` — a `FontId`, for symmetry with `Style::font` — set per light/dark `Style` in `MapSettings::styles`. Unlike `Style::font`, it is mandatory rather than optional: every `Style` must pick an explicit typeface and base size, there is no built-in fallback. `family` picks the typeface and `size` is the base size, still scaled by the current zoom:
+The built-in renderer's font comes from `Style::region_label_font` — a `FontId`, for symmetry with `Style::font` — set on the single `Style` shared by both light and dark mode, `MapSettings::style`. Unlike `Style::font`, it is mandatory rather than optional: every `Style` must pick an explicit typeface and base size, there is no built-in fallback. `family` picks the typeface and `size` is the base size, still scaled by the current zoom:
 
 ```rust
 use egui::{FontFamily, FontId};
 
-for style in &mut map.settings.styles {
-    style.region_label_font = FontId::new(30.0, FontFamily::Monospace);
-}
+map.settings.style.region_label_font = FontId::new(30.0, FontFamily::Monospace);
 ```
 
 ### Custom themes

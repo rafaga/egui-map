@@ -108,7 +108,7 @@ use crate::map::objects::{
     RegionLabel, SegmentAnimation, SegmentContext, SegmentNotificationContext, SegmentStateContext,
     SelectionContext, SteadyAnimation, SteadySegmentAnimation, TextSettings, VisibilitySetting,
 };
-use crate::map::theme::{ColorMode, MapTheme, Style, Theme, ThemeColors};
+use crate::map::theme::{ColorMode, MapTheme, Theme, ThemeColors};
 use egui::text::Galley;
 use egui::{widgets::*, *};
 use kdtree::KdTree;
@@ -198,7 +198,7 @@ pub struct Map {
     region_labels: Vec<RegionLabel>,
     /// Layout cache for the built-in [`RegionLabel`] renderer, keyed by
     /// `(text, rounded screen size, font family)` so a repeated frame at a
-    /// steady zoom and [`Style::region_label_font`] is a cache lookup rather
+    /// steady zoom and [`Style::region_label_font`](theme::Style::region_label_font) is a cache lookup rather
     /// than a relayout -- see [`objects::LabelTemplate::label_ui`]'s doc.
     /// Cleared whenever [`Map::add_region_labels`] replaces the label set.
     region_label_cache: HashMap<(String, i32, FontFamily), Arc<Galley>>,
@@ -207,7 +207,10 @@ pub struct Map {
     map_area: Rect,
     reference: MapBounds,
     current: MapBounds,
-    current_index: usize,
+    /// Whether the widget last painted with `ui`'s `Visuals` in dark mode --
+    /// drives [`Map::color_mode`], kept up to date by
+    /// [`Map::assign_visual_style`].
+    dark_mode: bool,
     notifications: HashMap<usize, Notification>,
     node_states: HashMap<usize, NodeState>,
     segment_notifications: HashMap<(usize, usize), SegmentNotification>,
@@ -591,8 +594,8 @@ impl Widget for &mut Map {
                     // the immutable borrow of `self` ends before the
                     // `&mut self.region_label_cache` borrow the loop below
                     // needs.
-                    let region_label_size = self.current_style().region_label_font.size * zoom;
-                    let region_label_family = self.current_style().region_label_font.family.clone();
+                    let region_label_size = self.settings.style.region_label_font.size * zoom;
+                    let region_label_family = self.settings.style.region_label_font.family.clone();
                     let region_label_font = FontId::new(region_label_size, region_label_family);
                     let template = self.label_template.clone();
                     if let Some(template) = &template {
@@ -780,7 +783,7 @@ impl Map {
             settings,
             min_size: (None, None),
             max_size: (None, None),
-            current_index: 0,
+            dark_mode: false,
             notifications: HashMap::new(),
             node_states: HashMap::new(),
             segment_notifications: HashMap::new(),
@@ -1173,36 +1176,26 @@ impl Map {
         self.zoom
     }
 
-    /// Returns the style for the current theme, falling back to the first
-    /// style if the current theme index has no entry.
-    fn current_style(&self) -> &Style {
-        self.settings
-            .styles
-            .get(self.current_index)
-            .or(self.settings.styles.first())
-            .expect("MapSettings::styles must not be empty")
-    }
-
     fn assign_visual_style(&mut self, ui_obj: &mut Ui) {
-        let style_index = ui_obj.visuals().dark_mode as usize;
+        let dark_mode = ui_obj.visuals().dark_mode;
 
-        if self.current_index != style_index {
+        if self.dark_mode != dark_mode {
             let _span = tracing::info_span!("asign_visual_style").entered();
 
-            self.current_index = style_index;
+            self.dark_mode = dark_mode;
         }
     }
 
     /// The [`ColorMode`] the widget is currently painting with -- `Dark`
-    /// when `current_index` selects the dark style slot, `Light` otherwise.
+    /// when `dark_mode` is `true`, `Light` otherwise.
     fn color_mode(&self) -> ColorMode {
-        ColorMode::from_dark_mode(self.current_index == 1)
+        ColorMode::from_dark_mode(self.dark_mode)
     }
 
     /// Resolves the color palette the widget paints with right now: the
     /// active [`MapTheme`]'s colors for the current [`ColorMode`]. This is
     /// the single, canonical source for every color the widget paints --
-    /// unlike `settings.styles`, it can never drift out of sync with the
+    /// unlike `settings.style`, it can never drift out of sync with the
     /// installed theme because nothing caches it.
     fn theme_colors(&self) -> ThemeColors {
         self.theme.colors(self.color_mode())
@@ -1569,7 +1562,7 @@ impl Map {
         // `SegmentTemplate` or a segment effect installed through
         // `Map::segment` still needs to run, e.g. for a consumer who draws
         // lines entirely on their own and only wants the built-in effects.
-        let line_width = self.current_style().line_width;
+        let line_width = self.settings.style.line_width;
 
         // Broad-phase: query the segment R-tree with the viewport AABB (in
         // map coordinates), padded by the stroke width -- when there is one
@@ -1982,8 +1975,8 @@ impl Map {
     /// [`Theme`] variant -- e.g. `map.set_theme(Rc::new(Theme::ArticCyan))` --
     /// or a custom palette. The new colors are resolved live from
     /// `new_theme` on the very next frame, in whichever light/dark mode is
-    /// active then -- there is nothing to eagerly refresh, since [`Style`]
-    /// never caches theme colors.
+    /// active then -- there is nothing to eagerly refresh, since
+    /// [`Style`](theme::Style) never caches theme colors.
     pub fn set_theme(&mut self, new_theme: Rc<dyn MapTheme>) {
         self.theme = new_theme;
     }
@@ -2045,7 +2038,7 @@ mod tests {
         assert!(map.segment_ids.is_empty());
         assert_eq!(map.min_size, (None, None));
         assert_eq!(map.max_size, (None, None));
-        assert_eq!(map.current_index, 0);
+        assert!(!map.dark_mode);
     }
 
     #[test]
@@ -2513,9 +2506,9 @@ mod tests {
         output.textures_delta.clear();
 
         // Read *after* the frame ran, once `assign_visual_style` has settled
-        // `current_index` to whatever light/dark mode this `Context`
-        // actually painted with -- reading it beforehand would compare
-        // against the wrong mode's text color.
+        // `dark_mode` to whatever light/dark mode this `Context` actually
+        // painted with -- reading it beforehand would compare against the
+        // wrong mode's text color.
         let expected = scale_alpha(map.theme_colors().text, 0.4);
 
         let painted_color = output
@@ -3017,12 +3010,12 @@ mod tests {
         let light = Theme::ArticCyan.colors(ColorMode::Light);
         let dark = Theme::ArticCyan.colors(ColorMode::Dark);
 
-        assert_eq!(map.current_index, 0, "Map::new starts in light mode");
+        assert!(!map.dark_mode, "Map::new starts in light mode");
         assert_eq!(map.theme_colors(), light);
 
         // Simulate the app flipping to dark mode: still the very same
         // installed theme, resolved for the other `ColorMode`.
-        map.current_index = 1;
+        map.dark_mode = true;
         assert_eq!(map.theme_colors(), dark);
     }
 
@@ -3030,7 +3023,7 @@ mod tests {
     fn a_custom_map_theme_reaches_the_painted_node() {
         // End-to-end: a `MapTheme` installed through `set_theme` must be the
         // color a plain (un-templated, un-colored) node is actually painted
-        // with, not just a value sitting in `settings.styles`.
+        // with, not just a value sitting in `settings.style`.
         use crate::map::theme::ThemeColors;
         use egui::{Context, RawInput, Shape};
 

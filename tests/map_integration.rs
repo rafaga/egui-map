@@ -190,5 +190,6 @@ fn map_settings_default_from_outside_crate() {
     assert_eq!(settings.max_zoom, 2.0);
     assert_eq!(settings.min_zoom, 0.1);
     assert_eq!(settings.node_text_visibility, VisibilitySetting::Always);
-    assert_eq!(settings.styles.len(), 2);
+    assert!(settings.style.line_width.is_some());
+    assert!(settings.style.font.is_some());
 }

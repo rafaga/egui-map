@@ -735,10 +735,11 @@ pub(crate) struct TextSettings {
 
 /// Configuration of a [`Map`](super::Map) widget.
 ///
-/// [`MapSettings::default()`] provides sensible zoom limits plus a light and a
-/// dark theme; the widget picks the style to apply based on
-/// [`egui::Visuals::dark_mode`], using `styles[0]` in light mode and
-/// `styles[1]` in dark mode.
+/// [`MapSettings::default()`] provides sensible zoom limits plus a `2.0`-wide
+/// line style and a `12.0`pt font; unlike the palette (light and dark come
+/// from the active [`MapTheme`](super::theme::MapTheme), see
+/// [`Map::set_theme`](super::Map::set_theme)), the same [`Style`] applies in
+/// both light and dark mode.
 #[derive(Clone, Debug)]
 pub struct MapSettings {
     /// Maximum zoom factor.
@@ -787,13 +788,12 @@ pub struct MapSettings {
     /// keep region labels reading as a faint backdrop instead of competing
     /// with node names and other foreground text.
     pub region_label_alpha: f32,
-    /// Per-mode styles; index `0` is used in light mode, index `1` in dark
-    /// mode. `Style` carries no palette color of its own -- node fill,
-    /// connection lines, alerts, selection, markers, text and background are
-    /// all kept in sync with the active
-    /// [`MapTheme`](super::theme::MapTheme) instead, see
+    /// Visual style, shared by both light and dark mode. `Style` carries no
+    /// palette color of its own -- node fill, connection lines, alerts,
+    /// selection, markers, text and background are all kept in sync with the
+    /// active [`MapTheme`](super::theme::MapTheme) instead, see
     /// [`Map::set_theme`](super::Map::set_theme).
-    pub styles: Vec<Style>,
+    pub style: Style,
 }
 
 impl MapSettings {
@@ -813,7 +813,7 @@ impl MapSettings {
             node_text_size: 12.0,
             label_text_size: 24.0,
             region_label_alpha: 0.0,
-            styles: vec![Style::new()],
+            style: Style::new(),
         }
     }
 }
@@ -821,10 +821,17 @@ impl MapSettings {
 impl Default for MapSettings {
     /// Returns the default configuration: zoom from `0.1` to `2.0`, connection
     /// lines visible above `0.2`, node names above `0.58`, region labels at a
-    /// base size of `48.0` map units faded to `25%` of the theme's text
-    /// alpha, and built-in light and dark themes.
+    /// base size of `48.0` map units faded to `50%` of the theme's text
+    /// alpha, and a `2.0`-wide line style with a `12.0`pt font.
     fn default() -> Self {
-        let mut obj = MapSettings {
+        // `Style` carries no palette color of its own -- every *palette*
+        // color the widget paints with (node fill, connection lines,
+        // alerts, selection, markers, text, background) comes live from the
+        // default `MapTheme` instead (see `Map::set_theme`/
+        // `Map::theme_colors`), so there is nothing here to keep in sync
+        // with a `Theme`; the same `Style` below applies in both light and
+        // dark mode.
+        MapSettings {
             max_zoom: 2.0,
             min_zoom: 0.1,
             line_visible_zoom: 0.2,
@@ -833,33 +840,13 @@ impl Default for MapSettings {
             marker_animation: SteadyAnimation::Blink,
             node_text_size: 12.0,
             label_text_size: 24.0,
-            region_label_alpha: 0.25,
-            styles: Vec::new(),
-        };
-
-        // `Style` carries no palette color of its own -- every *palette*
-        // color the widget paints with (node fill, connection lines,
-        // alerts, selection, markers, text, background) comes live from the
-        // default `MapTheme` instead (see `Map::set_theme`/
-        // `Map::theme_colors`), so there is nothing here to keep in sync
-        // with a `Theme`. These two entries only differ from each other in
-        // which mode they apply to -- both currently carry the same
-        // line width/font/region label font.
-
-        // light style
-        obj.styles.push(Style {
-            line_width: Some(2.0),
-            font: Some(FontId::new(12.00, FontFamily::Proportional)),
-            region_label_font: FontId::new(48.0, FontFamily::Proportional),
-        });
-
-        // dark style
-        obj.styles.push(Style {
-            line_width: Some(2.0),
-            font: Some(FontId::new(12.00, FontFamily::Proportional)),
-            region_label_font: FontId::new(48.0, FontFamily::Proportional),
-        });
-        obj
+            region_label_alpha: 0.50,
+            style: Style {
+                line_width: Some(2.0),
+                font: Some(FontId::new(12.00, FontFamily::Proportional)),
+                region_label_font: FontId::new(48.0, FontFamily::Proportional),
+            },
+        }
     }
 }
 
@@ -2162,7 +2149,8 @@ mod tests {
         assert_eq!(s.marker_animation, SteadyAnimation::Blink);
         assert_eq!(s.node_text_size, 12.0);
         assert_eq!(s.label_text_size, 24.0);
-        assert_eq!(s.styles.len(), 1);
+        assert!(s.style.line_width.is_none());
+        assert!(s.style.font.is_none());
     }
 
     #[test]
@@ -2176,14 +2164,9 @@ mod tests {
         assert_eq!(s.marker_animation, SteadyAnimation::Blink);
         assert_eq!(s.node_text_size, 12.0);
         assert_eq!(s.label_text_size, 24.0);
-        // light + dark themes
-        assert_eq!(s.styles.len(), 2);
-        // light theme
-        assert!(s.styles[0].line_width.is_some());
-        assert!(s.styles[0].font.is_some());
-        // dark theme
-        assert!(s.styles[1].line_width.is_some());
-        assert!(s.styles[1].font.is_some());
+        // shared by light and dark mode
+        assert!(s.style.line_width.is_some());
+        assert!(s.style.font.is_some());
     }
 
     // ---------- VisibilitySetting ----------
