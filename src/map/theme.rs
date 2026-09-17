@@ -35,7 +35,7 @@ pub enum Theme {
     /// looks like plain egui, not like an arbitrary house palette. The
     /// default theme.
     #[default]
-    EguiDefault,
+    SystemDefault,
     /// Muted blues over slate grays.
     SlateOcean,
     /// Violet and teal on a soft neutral backdrop.
@@ -337,7 +337,7 @@ impl Theme {
                 background: Color32::from_rgb(0xFB, 0xFB, 0xF1),
             },
 
-            (EguiDefault, Dark) => ThemeColors {
+            (SystemDefault, Dark) => ThemeColors {
                 node: Color32::from_rgb(0x5A, 0xAA, 0xFF),
                 segment: Color32::from_rgb(0x8C, 0x8C, 0x8C),
                 selected: Color32::from_rgb(0xC0, 0xDE, 0xFF),
@@ -346,7 +346,7 @@ impl Theme {
                 text: Color32::from_rgb(0xFF, 0xFF, 0xFF),
                 background: Color32::from_rgb(0x0A, 0x0A, 0x0A),
             },
-            (EguiDefault, Light) => ThemeColors {
+            (SystemDefault, Light) => ThemeColors {
                 node: Color32::from_rgb(0x00, 0x9B, 0xFF),
                 segment: Color32::from_rgb(0xBE, 0xBE, 0xBE),
                 selected: Color32::from_rgb(0x00, 0x53, 0x7D),
@@ -603,7 +603,7 @@ mod tests {
     use super::*;
 
     const ALL_THEMES: [Theme; 15] = [
-        Theme::EguiDefault,
+        Theme::SystemDefault,
         Theme::SlateOcean,
         Theme::NebulaViolet,
         Theme::TerminalGreen,
@@ -738,7 +738,7 @@ mod tests {
         }
 
         for theme in ALL_THEMES {
-            // `EguiDefault` is excluded: its `selected` is egui's own
+            // `SystemDefault` is excluded: its `selected` is egui's own
             // `selection.stroke` light-blue (S=0.25 in Dark mode), which is
             // deliberately *less* saturated than the pale `marker` derived
             // from its `alert` (S=0.50) -- keeping `selected` at egui's own
@@ -747,7 +747,7 @@ mod tests {
             // theme specifically, see `claude/diseno-revamp-temas-...md`.
             // The invariant still holds, unforced, for every other built-in
             // theme.
-            if theme == Theme::EguiDefault {
+            if theme == Theme::SystemDefault {
                 continue;
             }
             for mode in [ColorMode::Light, ColorMode::Dark] {

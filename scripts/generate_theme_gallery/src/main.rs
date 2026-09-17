@@ -160,7 +160,7 @@ fn xml_escape(s: &str) -> String {
 }
 
 fn card_short_description(name: &str, doc: &str) -> String {
-    if name == "EguiDefault" {
+    if name == "SystemDefault" {
         "Plain egui's own default colors. The default theme.".to_string()
     } else {
         doc.chars().take(90).collect()
@@ -208,6 +208,19 @@ fn build_card_svg(x0: f32, y0: f32, mode: &str, colors: &BTreeMap<&'static str, 
         h = CARD_H - 2.0
     );
 
+    // `RegionLabel` backdrop: the widget paints these first, behind
+    // everything else, in `ThemeColors::text` faded by
+    // `MapSettings::region_label_alpha` (default 0.25). Shown here bold and
+    // at a fixed 50% so it reads clearly in a small preview card -- not the
+    // crate's own default alpha, just enough to make the layer visible.
+    let text_color = hex(colors["text"]);
+    let _ = write!(
+        s,
+        r#"<text x="{cx}" y="{cy}" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="36" fill="{text_color}" fill-opacity="0.5">Region</text>"#,
+        cx = x0 + CARD_W / 2.0,
+        cy = y0 + CARD_H / 2.0 + 12.0
+    );
+
     // Mode label, top-left of the card.
     let _ = write!(
         s,
@@ -241,11 +254,27 @@ fn build_card_svg(x0: f32, y0: f32, mode: &str, colors: &BTreeMap<&'static str, 
     // The right and marker nodes used to sit unconnected -- wire them up
     // with a `dash` animation snapshot instead of a plain line, so the
     // gallery also shows what an in-flight segment animation looks like.
-    // SVG's own `stroke-dasharray` reproduces `thick_dashed_line`'s
-    // dash=6/gap=5 pattern exactly, no manual stepping needed.
+    // "Marching ants" in two colors: the `segment` line draws the 6-on/5-off
+    // pattern as before, and a second line in `alert` fills exactly the
+    // 5-unit gaps left by the first -- its own dasharray is the complement
+    // ("5,6", on-length matching the first line's gap) offset by 5 so its
+    // "on" phase lands precisely where the first line is "off". Together
+    // they tile the full 11-unit period with no overlap and no true gap --
+    // a naive same-dasharray offset by a full period (11) is a no-op and
+    // was tried first, which just left the gaps empty instead of alert-
+    // colored.
+    let alert_stroke = hex(colors["alert"]);
     let _ = write!(
         s,
         r#"<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{seg}" stroke-width="2" stroke-dasharray="6,5"/>"#,
+        x1 = right.0,
+        y1 = right.1,
+        x2 = marker_node.0,
+        y2 = marker_node.1
+    );
+    let _ = write!(
+        s,
+        r#"<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{alert_stroke}" stroke-width="2" stroke-dasharray="5,6" stroke-dashoffset="5"/>"#,
         x1 = right.0,
         y1 = right.1,
         x2 = marker_node.0,
@@ -312,8 +341,8 @@ fn build_card_svg(x0: f32, y0: f32, mode: &str, colors: &BTreeMap<&'static str, 
 
     // Node name label in the theme's actual `text` color, anchored under
     // the left node -- the concrete thing the ArticCyan/SolarAmber
-    // contrast bug broke.
-    let text_color = hex(colors["text"]);
+    // contrast bug broke. Reuses `text_color` from the `RegionLabel`
+    // backdrop above.
     let _ = write!(
         s,
         r#"<text x="{x}" y="{y}" font-family="sans-serif" font-size="13" fill="{text_color}">Node name</text>"#,
@@ -431,7 +460,7 @@ fn render_themes_md(themes: &[ThemeData], out: &Path) {
         "`egui-map` ships {} named color palettes (`map::theme::Theme`), each with a `Light` and a `Dark` variant (`map::theme::ColorMode`, a re-export of `egui::Theme`). `Theme::colors(mode)` resolves a theme to the seven colors the widget actually paints with (`map::theme::ThemeColors`): the node fill, connection lines (`segment`), the selection ring around the nearest node (`selected`), one-off notification/alert animations (`alert`), a lasting \"this is marked\" indicator -- a node's persistent state or a plain `update_marker` marker (`marker`) -- node names/labels (`text`), and the map canvas itself (`background`).\n\n",
         themes.len()
     ));
-    md.push_str("`EguiDefault` is the odd one out and the default theme: instead of a hand-picked palette, it carries over egui's own default `Visuals` colors (`hyperlink_color`, the separator-line color, `selection.stroke`, `warn_fg_color`, `error_fg_color`, and the active-widget text color, `strong_text_color()`), so a map with no theme installed looks like plain egui rather than an arbitrary house style.\n\n");
+    md.push_str("`SystemDefault` is the odd one out and the default theme: instead of a hand-picked palette, it carries over egui's own default `Visuals` colors (`hyperlink_color`, the separator-line color, `selection.stroke`, `warn_fg_color`, `error_fg_color`, and the active-widget text color, `strong_text_color()`), so a map with no theme installed looks like plain egui rather than an arbitrary house style.\n\n");
     md.push_str("Install a built-in theme, or your own palette, with `Map::set_theme` and the `MapTheme` trait -- see the README's \"Custom themes\" section and the `MapTheme` rustdoc for the full API.\n\n");
     md.push_str("Each theme below has its own preview, generated straight from the `Theme::colors` values in the table under it -- each card mocks the shapes the widget paints (nodes, connection lines, a selection ring, an alert ring, a marker ring), a node name label in the theme's actual `text` color, and the card itself filled with the theme's own `background`, rather than being a captured screenshot of a running app.\n\n");
 
@@ -474,7 +503,7 @@ fn render_themes_md(themes: &[ThemeData], out: &Path) {
     }
 
     md.push_str("---\n\n");
-    md.push_str("`EguiDefault` is the default theme (`Theme::default()`). Every preview above and the tables alongside them are generated together, straight from `src/map/theme.rs`, by `scripts/generate_theme_gallery` (a standalone Rust tool -- run it with `cargo run --manifest-path scripts/generate_theme_gallery/Cargo.toml` from the repo root) -- if the palettes there ever change, rerun it rather than hand-editing this file or the SVGs under `theme_gallery/`.\n");
+    md.push_str("`SystemDefault` is the default theme (`Theme::default()`). Every preview above and the tables alongside them are generated together, straight from `src/map/theme.rs`, by `scripts/generate_theme_gallery` (a standalone Rust tool -- run it with `cargo run --manifest-path scripts/generate_theme_gallery/Cargo.toml` from the repo root) -- if the palettes there ever change, rerun it rather than hand-editing this file or the SVGs under `theme_gallery/`.\n");
 
     fs::write(out, md).expect("failed to write THEMES.md");
     println!("wrote {}", out.display());

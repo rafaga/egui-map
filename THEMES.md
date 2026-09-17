@@ -2,20 +2,20 @@
 
 `egui-map` ships 15 named color palettes (`map::theme::Theme`), each with a `Light` and a `Dark` variant (`map::theme::ColorMode`, a re-export of `egui::Theme`). `Theme::colors(mode)` resolves a theme to the seven colors the widget actually paints with (`map::theme::ThemeColors`): the node fill, connection lines (`segment`), the selection ring around the nearest node (`selected`), one-off notification/alert animations (`alert`), a lasting "this is marked" indicator -- a node's persistent state or a plain `update_marker` marker (`marker`) -- node names/labels (`text`), and the map canvas itself (`background`).
 
-`EguiDefault` is the odd one out and the default theme: instead of a hand-picked palette, it carries over egui's own default `Visuals` colors (`hyperlink_color`, the separator-line color, `selection.stroke`, `warn_fg_color`, `error_fg_color`, and the active-widget text color, `strong_text_color()`), so a map with no theme installed looks like plain egui rather than an arbitrary house style.
+`SystemDefault` is the odd one out and the default theme: instead of a hand-picked palette, it carries over egui's own default `Visuals` colors (`hyperlink_color`, the separator-line color, `selection.stroke`, `warn_fg_color`, `error_fg_color`, and the active-widget text color, `strong_text_color()`), so a map with no theme installed looks like plain egui rather than an arbitrary house style.
 
 Install a built-in theme, or your own palette, with `Map::set_theme` and the `MapTheme` trait -- see the README's "Custom themes" section and the `MapTheme` rustdoc for the full API.
 
 Each theme below has its own preview, generated straight from the `Theme::colors` values in the table under it -- each card mocks the shapes the widget paints (nodes, connection lines, a selection ring, an alert ring, a marker ring), a node name label in the theme's actual `text` color, and the card itself filled with the theme's own `background`, rather than being a captured screenshot of a running app.
 
-## `EguiDefault`
+## `SystemDefault`
 
 egui's own default `Visuals` colors (light and dark), carried over as a `Theme` instead of invented -- so a map with no theme installed looks like plain egui, not like an arbitrary house palette. The default theme.
 
-![Preview of EguiDefault, light and dark](theme_gallery/EguiDefault.svg)
+![Preview of SystemDefault, light and dark](theme_gallery/SystemDefault.svg)
 
 ```rust
-map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::EguiDefault));
+map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::SystemDefault));
 ```
 
 | Mode | node | segment | selected | alert | marker | text | background |
@@ -235,4 +235,4 @@ map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::SandstoneTrail));
 
 ---
 
-`EguiDefault` is the default theme (`Theme::default()`). Every preview above and the tables alongside them are generated together, straight from `src/map/theme.rs`, by `scripts/generate_theme_gallery` (a standalone Rust tool -- run it with `cargo run --manifest-path scripts/generate_theme_gallery/Cargo.toml` from the repo root) -- if the palettes there ever change, rerun it rather than hand-editing this file or the SVGs under `theme_gallery/`.
+`SystemDefault` is the default theme (`Theme::default()`). Every preview above and the tables alongside them are generated together, straight from `src/map/theme.rs`, by `scripts/generate_theme_gallery` (a standalone Rust tool -- run it with `cargo run --manifest-path scripts/generate_theme_gallery/Cargo.toml` from the repo root) -- if the palettes there ever change, rerun it rather than hand-editing this file or the SVGs under `theme_gallery/`.
