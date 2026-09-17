@@ -9,9 +9,10 @@ An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D
 - Node names with configurable visibility rules (always / on hover / hidden).
 - Connection lines between nodes and free-floating text labels.
 - Text is sized in **screen pixels** (`MapSettings::node_text_size`, `MapSettings::label_text_size`), so names stay readable at any zoom level instead of shrinking away as you zoom out.
+- Region labels (`RegionLabel`, via `Map::add_region_labels`) for naming an *area* of the map rather than a node: unlike every other text the widget draws, their size scales *with* zoom, they are always painted first (behind everything else) and in a faded color, with the built-in renderer caching laid-out text for performance. Customizable through the `LabelTemplate` trait.
 - Animations attached per node through `map.node(id)`: one-off events that end on their own (`pulse`, `ripple`, `countdown`, `scale_in`, `crosshair`) and lasting state that runs until `clear()` (`halo`, `blink`, `orbit`), each with an optional `color()`. The effects live in `map::animation::Animation` and can be reused from your own `NodeTemplate`.
 - The same idiom for segments through `map.segment(id)`: `flash` / `comet_once(at, direction)` / `wipe` (one-off) and `comet` / `dash` / `glow_band` / `chevrons` (lasting, until `clear()`) -- `comet_once` is a single dot pass with the direction you choose (`CometDirection::Forward`/`Reverse`), `wipe` draws the line in from one endpoint to the other, `dash` is a "marching ants" pattern and `chevrons` a row of sliding arrowheads, both painted as a repeating-texture mesh (two triangles per segment, one shared texture), `glow_band` a soft travelling highlight that fades out past each end instead of repeating, also with an optional `color()`.
-- Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits, and custom segment rendering through `SegmentTemplate`.
+- Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits, custom segment rendering through `SegmentTemplate`, and custom region-label rendering through `LabelTemplate`.
 - [Fifteen built-in color themes](THEMES.md), each with a light and a dark variant -- `EguiDefault`, matching plain egui's own colors, is the default -- or install your own through the `MapTheme` trait.
 
 ## Usage
@@ -160,6 +161,33 @@ map.set_segment_template(std::rc::Rc::new(MySegments));
 
 `examples/animations.rs` shows the built-in node and segment effects end to end, with no custom template at all. `examples/node_template_animations.rs` shows the opposite pairing: a custom `NodeTemplate` (its own node shape) that still reuses the built-in `Animation::*` functions from its `notification_ui`/`marker_ui` hooks instead of hand-rolling new ones, dispatching directly on the `kind`/`node_id` those hooks receive.
 
+### Region labels
+
+`RegionLabel` names an area of the map rather than a single node — think "Domain" or "Nullsec", not a station name. It is deliberately the opposite of every other text the widget draws: its font size (see `Style::region_label_font` below) scales *with* the current zoom instead of staying a fixed screen size, it is always painted first so every node, line and free-floating `MapLabel` draws over it, and its default color is the active theme's text color faded by `MapSettings::region_label_alpha` (`0.25` by default) so it reads as a backdrop instead of competing for attention. The built-in renderer caches the laid-out text (`Arc<Galley>`, keyed by text and rounded size) and only re-applies color at paint time, so a region label that hasn't changed costs a cache lookup rather than a full relayout every frame:
+
+```rust
+use egui_map::map::Map;
+use egui_map::map::objects::RegionLabel;
+
+let mut map = Map::new();
+map.add_region_labels(vec![RegionLabel {
+    text: "Domain".to_string(),
+    center: egui::pos2(300.0, 200.0), // map coordinates, like MapPoint::coords
+}]);
+```
+
+Install a `LabelTemplate` with `Map::set_label_template` to take over the drawing entirely — see its rustdoc for the `LabelContext` fields (`position`, `zoom`, `label`, `size` already scaled by zoom, `color` already faded, and the full theme `ThemeColors` palette).
+
+The built-in renderer's font comes from `Style::region_label_font` — a `FontId`, for symmetry with `Style::font` — set per light/dark `Style` in `MapSettings::styles`. Unlike `Style::font`, it is mandatory rather than optional: every `Style` must pick an explicit typeface and base size, there is no built-in fallback. `family` picks the typeface and `size` is the base size, still scaled by the current zoom:
+
+```rust
+use egui::{FontFamily, FontId};
+
+for style in &mut map.settings.styles {
+    style.region_label_font = FontId::new(30.0, FontFamily::Monospace);
+}
+```
+
 ### Custom themes
 
 The widget ships fifteen named [`Theme`](https://docs.rs/egui-map/latest/egui_map/map/theme/enum.Theme.html) palettes — `EguiDefault`, which carries over egui's own default colors so an unthemed map looks like plain egui, is the default — each with a light and a dark variant; see the `Theme` rustdoc for the full list. Switch between them, or install your own palette, with `Map::set_theme` and the `MapTheme` trait:
@@ -183,6 +211,7 @@ impl MapTheme for HighContrast {
                 alert: egui::Color32::RED,
                 marker: egui::Color32::BLUE,
                 text: egui::Color32::BLACK,
+                background: egui::Color32::WHITE,
             },
             ColorMode::Dark => ThemeColors {
                 node: egui::Color32::WHITE,
@@ -191,6 +220,7 @@ impl MapTheme for HighContrast {
                 alert: egui::Color32::YELLOW,
                 marker: egui::Color32::LIGHT_BLUE,
                 text: egui::Color32::WHITE,
+                background: egui::Color32::BLACK,
             },
         }
     }

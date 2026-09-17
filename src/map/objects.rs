@@ -1,11 +1,12 @@
 //! Data types consumed by the [`Map`](super::Map) widget.
 //!
 //! This module contains the geometry primitives ([`RawPoint`], [`RawLine`]),
-//! the map content types ([`MapPoint`], [`MapSegment`], [`MapLabel`]) and the
-//! customization points of the widget: [`MapSettings`],
-//! [`Style`], [`VisibilitySetting`],
-//! [`ContextMenuManager`] and [`NodeTemplate`]. The color palette a `Style`
-//! paints with lives in [`super::theme`], via [`MapTheme`](super::theme::MapTheme).
+//! the map content types ([`MapPoint`], [`MapSegment`], [`MapLabel`],
+//! [`RegionLabel`]) and the customization points of the widget:
+//! [`MapSettings`], [`Style`], [`VisibilitySetting`],
+//! [`ContextMenuManager`], [`NodeTemplate`], [`SegmentTemplate`] and
+//! [`LabelTemplate`]. The color palette a `Style` paints with lives in
+//! [`super::theme`], via [`MapTheme`](super::theme::MapTheme).
 
 use crate::map::theme::{Style, ThemeColors};
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Ui};
@@ -481,6 +482,57 @@ impl MapLabel {
     }
 }
 
+/// A text label anchored to a region of the map, rather than to a single
+/// node.
+///
+/// Contrast with [`MapLabel`], which is a fixed-size on-screen annotation:
+/// a `RegionLabel`'s font size scales continuously with the map's zoom
+/// instead of staying screen-constant (see
+/// [`Style::region_label_font`](super::theme::Style::region_label_font)),
+/// it is always painted as the very first, deepest layer -- behind
+/// connection lines, nodes and
+/// [`MapLabel`]s -- and it is drawn in a more transparent color so it reads
+/// as a backdrop naming an area instead of competing with the map's own
+/// content (see [`MapSettings::region_label_alpha`]).
+///
+/// Region labels are installed with
+/// [`Map::add_region_labels`](super::Map::add_region_labels). Unless a
+/// [`LabelTemplate`] is installed with
+/// [`Map::set_label_template`](super::Map::set_label_template), the widget
+/// draws them itself, caching the laid-out text so a label that hasn't
+/// changed text or (rounded) size costs a cache lookup rather than a full
+/// relayout every frame.
+#[derive(Clone, Debug)]
+pub struct RegionLabel {
+    /// The text to display.
+    pub text: String,
+    /// The center of the label, in **map coordinates** -- the same space as
+    /// [`MapPoint::coords`]. It is projected to the screen with the map's
+    /// own pan/zoom (`coords * zoom - min_point`), exactly like a node.
+    pub center: Pos2,
+    /// The color that user want to display for this particular region label. 
+    /// The default is the Theme text color with alpha multiplied by 
+    /// [`MapSettings::region_label_alpha`].
+    pub color: Option<Color32>,
+}
+
+impl Default for RegionLabel {
+    fn default() -> Self {
+        RegionLabel::new()
+    }
+}
+
+impl RegionLabel {
+    /// Creates an empty region label centered at the origin.
+    pub fn new() -> Self {
+        RegionLabel {
+            text: String::new(),
+            center: Pos2::new(0.00, 0.00),
+            color: None,
+        }
+    }
+}
+
 /// A connection line between two points on the map, ready to be stored in an
 /// [`rstar::RTree`].
 ///
@@ -725,14 +777,22 @@ pub struct MapSettings {
     ///
     /// Screen-space, exactly like [`node_text_size`](Self::node_text_size).
     pub label_text_size: f32,
+    /// Multiplier applied to the active theme's
+    /// [`ThemeColors::text`](super::theme::ThemeColors::text) alpha when
+    /// painting [`RegionLabel`]s, clamped to `0.0..=1.0`.
+    ///
+    /// Kept separate from [`ThemeColors`] because it shapes *this widget's*
+    /// background layer rather than a palette role a custom
+    /// [`MapTheme`](super::theme::MapTheme) would want to own. Lower values
+    /// keep region labels reading as a faint backdrop instead of competing
+    /// with node names and other foreground text.
+    pub region_label_alpha: f32,
     /// Per-mode styles; index `0` is used in light mode, index `1` in dark
-    /// mode. Their palette colors (node fill, connection lines, alerts,
-    /// selection, markers, text) are kept in sync with the active
-    /// [`MapTheme`](super::theme::MapTheme) -- see
-    /// [`Map::set_theme`](super::Map::set_theme) -- rather than set here.
-    /// Their one color field, [`Style::background_color`], is the
-    /// exception: it follows the host application's own visuals instead,
-    /// see its own doc.
+    /// mode. `Style` carries no palette color of its own -- node fill,
+    /// connection lines, alerts, selection, markers, text and background are
+    /// all kept in sync with the active
+    /// [`MapTheme`](super::theme::MapTheme) instead, see
+    /// [`Map::set_theme`](super::Map::set_theme).
     pub styles: Vec<Style>,
 }
 
@@ -752,6 +812,7 @@ impl MapSettings {
             marker_animation: SteadyAnimation::Blink,
             node_text_size: 12.0,
             label_text_size: 24.0,
+            region_label_alpha: 0.0,
             styles: vec![Style::new()],
         }
     }
@@ -759,8 +820,9 @@ impl MapSettings {
 
 impl Default for MapSettings {
     /// Returns the default configuration: zoom from `0.1` to `2.0`, connection
-    /// lines visible above `0.2`, node names above `0.58`, and built-in light
-    /// and dark themes.
+    /// lines visible above `0.2`, node names above `0.58`, region labels at a
+    /// base size of `48.0` map units faded to `25%` of the theme's text
+    /// alpha, and built-in light and dark themes.
     fn default() -> Self {
         let mut obj = MapSettings {
             max_zoom: 2.0,
@@ -771,31 +833,31 @@ impl Default for MapSettings {
             marker_animation: SteadyAnimation::Blink,
             node_text_size: 12.0,
             label_text_size: 24.0,
+            region_label_alpha: 0.25,
             styles: Vec::new(),
         };
 
-        // The background color below is a placeholder, overwritten by
-        // `Map::assign_visual_style` from egui's own visuals on the first
-        // frame -- it intentionally follows the host application, not the
-        // installed `MapTheme` (see `Style::background_color`'s own doc).
-        // Every *palette* color the widget paints with (node fill,
-        // connection lines, alerts, selection, markers, text) comes live from the
+        // `Style` carries no palette color of its own -- every *palette*
+        // color the widget paints with (node fill, connection lines,
+        // alerts, selection, markers, text, background) comes live from the
         // default `MapTheme` instead (see `Map::set_theme`/
         // `Map::theme_colors`), so there is nothing here to keep in sync
-        // with a `Theme`.
+        // with a `Theme`. These two entries only differ from each other in
+        // which mode they apply to -- both currently carry the same
+        // line width/font/region label font.
 
         // light style
         obj.styles.push(Style {
             line_width: Some(2.0),
             font: Some(FontId::new(12.00, FontFamily::Proportional)),
-            background_color: Color32::WHITE,
+            region_label_font: FontId::new(48.0, FontFamily::Proportional),
         });
 
         // dark style
         obj.styles.push(Style {
             line_width: Some(2.0),
             font: Some(FontId::new(12.00, FontFamily::Proportional)),
-            background_color: Color32::DARK_GRAY,
+            region_label_font: FontId::new(48.0, FontFamily::Proportional),
         });
         obj
     }
@@ -1133,10 +1195,11 @@ pub struct NodeContext<'a> {
     pub color: Color32,
     /// The surrounding UI's faint background color (egui's active
     /// visuals, not the installed [`MapTheme`](super::theme::MapTheme) --
-    /// the map's canvas and this chip background intentionally follow the
-    /// host application's own light/dark visuals instead, see
-    /// [`Style::background_color`](super::theme::Style::background_color)),
-    /// for chips/panels drawn behind a node's own label.
+    /// this chip background deliberately follows the host application's own
+    /// light/dark visuals instead of
+    /// [`ThemeColors::background`](super::theme::ThemeColors::background),
+    /// so it blends into the surrounding UI the same way a plain egui panel
+    /// would), for chips/panels drawn behind a node's own label.
     pub background_color: Color32,
     /// The active [`MapTheme`](super::theme::MapTheme)'s
     /// [`ThemeColors::node`](super::theme::ThemeColors::node) for the current
@@ -1496,6 +1559,93 @@ pub struct SegmentStateContext<'a> {
     pub kind: SteadySegmentAnimation,
 }
 
+/// Customizes how [`RegionLabel`]s are drawn, replacing the widget's
+/// built-in background rendering.
+///
+/// Installed with
+/// [`Map::set_label_template`](super::Map::set_label_template). Unlike
+/// [`NodeTemplate`]/[`SegmentTemplate`], there is a single hook -- region
+/// labels have no selection, notification or marker state of their own, just
+/// text painted on the map.
+///
+/// # Examples
+///
+/// ```
+/// use egui::{Color32, FontFamily, FontId, Painter};
+/// use egui_map::map::objects::{LabelContext, LabelTemplate};
+///
+/// struct MyLabels;
+///
+/// impl LabelTemplate for MyLabels {
+///     fn label_ui(&self, painter: &Painter, ctx: LabelContext) {
+///         painter.text(
+///             ctx.position,
+///             egui::Align2::CENTER_CENTER,
+///             &ctx.label.text,
+///             FontId::new(ctx.size, FontFamily::Proportional),
+///             ctx.color,
+///         );
+///     }
+/// }
+/// # let _ = Color32::TRANSPARENT;
+/// ```
+pub trait LabelTemplate {
+    /// Draws one region label.
+    ///
+    /// Called every frame for each label passed to
+    /// [`Map::add_region_labels`](super::Map::add_region_labels), before
+    /// anything else on the map is painted -- see [`RegionLabel`] for why.
+    /// `ctx.size` is already scaled by the current zoom and `ctx.color`
+    /// already carries the active theme's text color faded by
+    /// [`MapSettings::region_label_alpha`] -- see [`LabelContext`]. If you
+    /// lay text out yourself, consider caching the resulting `Arc<Galley>`
+    /// keyed by the label's text and (rounded) size, and applying color at
+    /// paint time with
+    /// [`Painter::galley_with_override_text_color`](egui::Painter::galley_with_override_text_color)
+    /// instead of baking it into the layout -- that way a theme or alpha
+    /// change never forces a relayout. This is what the built-in renderer
+    /// does.
+    fn label_ui(&self, painter: &Painter, ctx: LabelContext);
+}
+
+/// The context passed to [`LabelTemplate::label_ui`].
+///
+/// `#[non_exhaustive]`, like [`NodeContext`]/[`SegmentContext`], so a future
+/// field can be added here without another breaking change to
+/// [`LabelTemplate`].
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct LabelContext<'a> {
+    /// The label's screen position: already scaled by `zoom` and translated
+    /// to the viewport origin.
+    pub position: Pos2,
+    /// Current map zoom factor.
+    ///
+    /// Unlike [`NodeContext::zoom`]/[`SegmentContext::zoom`], this is not a
+    /// multiplier left for you to apply to a fixed size -- `size` below
+    /// already has it baked in, since (unlike node names or [`MapLabel`])
+    /// region labels scale continuously with zoom instead of staying
+    /// screen-constant. It is still handed over for effects that want to
+    /// react to zoom some other way.
+    pub zoom: f32,
+    /// The label being painted -- its text and map-coordinate center.
+    pub label: &'a RegionLabel,
+    /// Font size, in screen pixels, of this label: already `base * zoom`,
+    /// where `base` is the active
+    /// [`Style::region_label_font`](super::theme::Style::region_label_font)'s
+    /// size.
+    pub size: f32,
+    /// The color the built-in renderer paints with: the active theme's
+    /// [`ThemeColors::text`](super::theme::ThemeColors::text) faded by
+    /// [`MapSettings::region_label_alpha`].
+    pub color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode -- the whole
+    /// palette is handed over so a `LabelTemplate` can use any other theme
+    /// role without reaching for the theme itself.
+    pub theme: ThemeColors,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1827,12 +1977,15 @@ mod tests {
     }
 
     // ---------- MapStyle ----------
-
     fn full_style() -> Style {
         Style {
             line_width: Some(4.0),
             font: Some(FontId::new(10.0, FontFamily::Proportional)),
-            background_color: Color32::BLACK,
+            // A deliberately different size than any real region label
+            // setting, so a test asserting it is *unchanged* by scaling
+            // (or unused by painting, in `tests/region_labels.rs`) can't
+            // pass by accident.
+            region_label_font: FontId::new(99.0, FontFamily::Monospace),
         }
     }
 
@@ -1841,7 +1994,10 @@ mod tests {
         let s = Style::new();
         assert!(s.line_width.is_none());
         assert!(s.font.is_none());
-        assert_eq!(s.background_color, Color32::TRANSPARENT);
+        assert_eq!(
+            s.region_label_font,
+            FontId::new(0.0, FontFamily::Proportional)
+        );
     }
 
     #[test]
@@ -1849,6 +2005,10 @@ mod tests {
         let s = Style::default();
         assert!(s.line_width.is_none());
         assert!(s.font.is_none());
+        assert_eq!(
+            s.region_label_font,
+            FontId::new(0.0, FontFamily::Proportional)
+        );
     }
 
     #[test]
@@ -1856,6 +2016,12 @@ mod tests {
         let s = full_style() * 2i64;
         assert_eq!(s.line_width.unwrap(), 8.0);
         assert_eq!(s.font.unwrap().size, 20.0);
+        // Scaling a `Style` only touches `line_width` and `font`'s size --
+        // `region_label_font` is left completely untouched, size included.
+        assert_eq!(
+            s.region_label_font,
+            FontId::new(99.0, FontFamily::Monospace)
+        );
     }
 
     #[test]
@@ -1884,6 +2050,10 @@ mod tests {
         let s = full_style() / 2i64;
         assert_eq!(s.line_width.unwrap(), 2.0);
         assert_eq!(s.font.unwrap().size, 5.0);
+        assert_eq!(
+            s.region_label_font,
+            FontId::new(99.0, FontFamily::Monospace)
+        );
     }
 
     #[test]
@@ -2009,11 +2179,9 @@ mod tests {
         // light + dark themes
         assert_eq!(s.styles.len(), 2);
         // light theme
-        assert_eq!(s.styles[0].background_color, Color32::WHITE);
         assert!(s.styles[0].line_width.is_some());
         assert!(s.styles[0].font.is_some());
         // dark theme
-        assert_eq!(s.styles[1].background_color, Color32::DARK_GRAY);
         assert!(s.styles[1].line_width.is_some());
         assert!(s.styles[1].font.is_some());
     }

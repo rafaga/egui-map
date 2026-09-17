@@ -1,43 +1,46 @@
-//! Regenerates `theme_gallery.png` and the per-theme sections of
-//! `THEMES.md` straight from `src/map/theme.rs`'s actual `Theme::colors`
-//! values, so neither can drift from the real palettes the way it could
-//! when the gallery was a one-off, uncommitted script (and the way
-//! `THEMES.md` itself did before this tool existed to keep it in sync --
-//! see the ArticCyan/SolarAmber text-contrast bug this tool's addition
-//! fixed alongside it).
+//! Regenerates one standalone SVG preview per built-in theme (under
+//! `theme_gallery/`) and the per-theme sections of `THEMES.md`, straight
+//! from `src/map/theme.rs`'s actual `Theme::colors` values, so neither can
+//! drift from the real palettes the way it could when the gallery was a
+//! one-off, uncommitted script (and the way `THEMES.md` itself did before
+//! this tool existed to keep it in sync -- see the ArticCyan/SolarAmber
+//! text-contrast bug this tool's addition fixed alongside it).
 //!
 //! Run from the repo root with `cargo run --manifest-path
 //! scripts/generate_theme_gallery/Cargo.toml`. Whenever a built-in theme's
 //! colors change, or a new one is added, rerun this and commit the
-//! resulting `theme_gallery.png` and `THEMES.md` alongside the code change.
+//! resulting `theme_gallery/*.svg` files and `THEMES.md` alongside the code
+//! change.
 //!
-//! Needs a DejaVu Sans (regular + bold) TTF on disk -- not vendored here on
-//! purpose, to keep this dev-only tool out of the repo's binary history.
-//! Looked for at the usual Linux package paths; point `DEJAVU_SANS_TTF` /
-//! `DEJAVU_SANS_BOLD_TTF` at your own copies if those aren't present (e.g.
-//! on macOS/Windows, or a `fonts-dejavu-core` package installed elsewhere).
-//!
-//! Each gallery card mocks the shapes the widget actually paints: two nodes
-//! joined by a segment-colored line, a third node wearing the
-//! selected+alert rings, a fourth wearing the marker ring, and a node name
-//! rendered in the theme's real `text` color -- so a text-contrast
-//! regression would show up here directly instead of only in a hex table.
+//! Each theme's preview is a self-contained `.svg` (no external font or
+//! image asset to keep in sync -- text is plain SVG `<text>`, rendered by
+//! whatever opens the file), one per theme rather than one combined image,
+//! so it can be embedded on its own inside that theme's own `THEMES.md`
+//! section and viewed individually. Each card mocks the shapes the widget
+//! actually paints: two nodes joined by a segment-colored line, a third
+//! node wearing the selected+alert rings, a fourth wearing the marker ring,
+//! a node name rendered in the theme's real `text` color, and the card
+//! itself filled with the theme's own `background` -- so a text/background
+//! contrast regression would show up here directly instead of only in a
+//! hex table.
 
-use ab_glyph::{FontRef, PxScale};
-use image::{Rgb, RgbImage};
-use imageproc::drawing::{
-    draw_filled_circle_mut, draw_filled_rect_mut, draw_hollow_circle_mut, draw_line_segment_mut,
-    draw_text_mut, text_size,
-};
-use imageproc::rect::Rect;
 use regex::Regex;
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 type Color = (u8, u8, u8);
 
-const FIELDS: [&str; 6] = ["node", "segment", "selected", "alert", "marker", "text"];
+const FIELDS: [&str; 7] = [
+    "node",
+    "segment",
+    "selected",
+    "alert",
+    "marker",
+    "text",
+    "background",
+];
 
 #[derive(Clone)]
 struct ThemeData {
@@ -57,6 +60,14 @@ fn repo_root() -> PathBuf {
 }
 
 fn parse_theme_rs(src: &str) -> Vec<ThemeData> {
+    // Normalize line endings up front: the real working tree this is meant
+    // to run against checks out `theme.rs` with CRLF (Windows), while every
+    // regex below is written against plain `\n` -- matching `\r?\n`
+    // everywhere instead would work too, but is easy to miss in a new regex
+    // added later, so it's simpler to normalize once here.
+    let src = src.replace("\r\n", "\n");
+    let src = src.as_str();
+
     // 1. Enum variant order + doc comments, in declaration order.
     let enum_re = Regex::new(r"(?s)pub enum Theme \{(.*?)\n\}").unwrap();
     let enum_block = &enum_re.captures(src).expect("Theme enum not found")[1];
@@ -124,21 +135,28 @@ fn parse_theme_rs(src: &str) -> Vec<ThemeData> {
 }
 
 // ---------------------------------------------------------------------
-// PNG gallery
+// SVG card (shared by every per-theme preview)
 // ---------------------------------------------------------------------
 
-const W: i32 = 894;
-const PAD: i32 = 24;
-const CARD_H: i32 = 190;
-const ROW_H: i32 = 30;
-const GAP: i32 = 14;
+const CARD_H: f32 = 190.0;
+const CARD_W: f32 = 411.0;
+const ROW_H: f32 = 30.0;
+const PAD: f32 = 24.0;
 
-fn card_w() -> i32 {
-    (W - PAD * 3) / 2
+/// Total width of a two-card (Light + Dark) row: `PAD` on each outer edge
+/// plus `PAD` in the gutter between the two cards.
+fn svg_width() -> f32 {
+    PAD * 3.0 + CARD_W * 2.0
 }
 
-fn rgb(c: Color) -> Rgb<u8> {
-    Rgb([c.0, c.1, c.2])
+fn hex(c: Color) -> String {
+    format!("#{:02X}{:02X}{:02X}", c.0, c.1, c.2)
+}
+
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn card_short_description(name: &str, doc: &str) -> String {
@@ -149,178 +167,165 @@ fn card_short_description(name: &str, doc: &str) -> String {
     }
 }
 
-fn thick_hollow_circle(
-    img: &mut RgbImage,
-    center: (i32, i32),
-    radius: i32,
-    width: i32,
-    color: Rgb<u8>,
-) {
-    for w in 0..width {
-        draw_hollow_circle_mut(img, center, radius + w, color);
-    }
+/// Rough advance width of `text` set at `size` px in a plain sans-serif
+/// face -- there is no font metrics library involved anymore (SVG text is
+/// rendered by whatever opens the file, not by this tool), so this is only
+/// precise enough to keep the legend chips in a row from overlapping.
+fn approx_text_width(text: &str, size: f32) -> f32 {
+    text.chars().count() as f32 * size * 0.56
 }
 
-fn thick_line(img: &mut RgbImage, a: (f32, f32), b: (f32, f32), width: i32, color: Rgb<u8>) {
-    for w in 0..width {
-        let off = w as f32;
-        draw_line_segment_mut(img, (a.0, a.1 + off), (b.0, b.1 + off), color);
-        draw_line_segment_mut(img, (a.0 + off, a.1), (b.0 + off, b.1), color);
-    }
-}
-
-/// A `dash`-in-progress snapshot: alternating drawn/gap stretches along
-/// `a`-`b`, the same segment color a real `dash` animation would use, so
-/// the gallery also shows what an animated segment looks like mid-flight
-/// instead of every connection being a plain static line.
-fn thick_dashed_line(
-    img: &mut RgbImage,
-    a: (f32, f32),
-    b: (f32, f32),
-    width: i32,
-    dash: f32,
-    gap: f32,
-    color: Rgb<u8>,
-) {
-    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
-    let len = (dx * dx + dy * dy).sqrt();
-    if len <= 0.0 {
-        return;
-    }
-    let (ux, uy) = (dx / len, dy / len);
-    let period = dash + gap;
-    let mut t = 0.0;
-    while t < len {
-        let seg_end = (t + dash).min(len);
-        let p0 = (a.0 + ux * t, a.1 + uy * t);
-        let p1 = (a.0 + ux * seg_end, a.1 + uy * seg_end);
-        thick_line(img, p0, p1, width, color);
-        t += period;
-    }
-}
-
-#[derive(Clone, Copy)]
-struct CardArea {
-    x0: i32,
-    y0: i32,
-    w: i32,
-    h: i32,
-}
-
-fn draw_card(
-    img: &mut RgbImage,
-    font_reg: &FontRef,
-    area: CardArea,
-    mode: &str,
-    colors: &BTreeMap<&'static str, Color>,
-) {
-    let CardArea { x0, y0, w, h } = area;
+/// Builds one `Light` or `Dark` card as an SVG `<g>` fragment, positioned at
+/// `(x0, y0)` -- the same geometry `draw_card` used to rasterize, just
+/// emitted as SVG elements instead of pixels. The card's own background and
+/// border now come from the theme's `background`/`text` colors instead of a
+/// fixed light/dark gray, closing the gap the PNG gallery's own footnote
+/// used to call out (the preview's background used to come from egui's
+/// `Visuals`, not from `ThemeColors`).
+fn build_card_svg(x0: f32, y0: f32, mode: &str, colors: &BTreeMap<&'static str, Color>) -> String {
     let dark = mode == "Dark";
-    let card_bg = if dark {
-        (26u8, 26u8, 30u8)
-    } else {
-        (255, 255, 255)
-    };
-    let border = if dark {
-        (50u8, 50u8, 55u8)
-    } else {
-        (222, 222, 226)
-    };
-    let fg_label = if dark {
-        (230u8, 230u8, 232u8)
-    } else {
-        (40, 40, 44)
-    };
+    let card_bg = hex(colors["background"]);
+    let border = if dark { "#3C3C3C" } else { "#DEDEE2" };
+    let fg_label = if dark { "#E6E6E8" } else { "#28282C" };
 
-    draw_filled_rect_mut(
-        img,
-        Rect::at(x0, y0).of_size(w as u32, h as u32),
-        rgb(border),
+    let mut s = String::new();
+
+    // Border + card background (border drawn first as a slightly larger
+    // rect showing a 1px ring around the fill, same trick `draw_card` used
+    // with two nested filled rects).
+    let _ = write!(
+        s,
+        r#"<rect x="{x0}" y="{y0}" width="{w}" height="{h}" fill="{border}"/>"#,
+        w = CARD_W,
+        h = CARD_H
     );
-    draw_filled_rect_mut(
-        img,
-        Rect::at(x0 + 1, y0 + 1).of_size((w - 2) as u32, (h - 2) as u32),
-        rgb(card_bg),
+    let _ = write!(
+        s,
+        r#"<rect x="{x1}" y="{y1}" width="{w}" height="{h}" fill="{card_bg}"/>"#,
+        x1 = x0 + 1.0,
+        y1 = y0 + 1.0,
+        w = CARD_W - 2.0,
+        h = CARD_H - 2.0
     );
 
-    draw_text_mut(
-        img,
-        rgb(fg_label),
-        x0 + 12,
-        y0 + 8,
-        PxScale::from(13.0),
-        font_reg,
-        mode,
+    // Mode label, top-left of the card.
+    let _ = write!(
+        s,
+        r#"<text x="{x}" y="{y}" font-family="sans-serif" font-size="13" fill="{fg_label}">{mode}</text>"#,
+        x = x0 + 12.0,
+        y = y0 + 20.0
     );
 
-    let top = (x0 as f32 + w as f32 * 0.34, y0 as f32 + 42.0);
-    let left = (x0 as f32 + w as f32 * 0.16, y0 as f32 + 82.0);
-    let right = (x0 as f32 + w as f32 * 0.40, y0 as f32 + 82.0);
-    let marker_node = (x0 as f32 + w as f32 * 0.60, y0 as f32 + 60.0);
+    let top = (x0 + CARD_W * 0.34, y0 + 42.0);
+    let left = (x0 + CARD_W * 0.16, y0 + 82.0);
+    let right = (x0 + CARD_W * 0.40, y0 + 82.0);
+    let marker_node = (x0 + CARD_W * 0.60, y0 + 60.0);
 
-    let seg = rgb(colors["segment"]);
-    thick_line(img, top, left, 2, seg);
-    thick_line(img, top, right, 2, seg);
+    let seg = hex(colors["segment"]);
+    let _ = write!(
+        s,
+        r#"<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{seg}" stroke-width="2"/>"#,
+        x1 = top.0,
+        y1 = top.1,
+        x2 = left.0,
+        y2 = left.1
+    );
+    let _ = write!(
+        s,
+        r#"<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{seg}" stroke-width="2"/>"#,
+        x1 = top.0,
+        y1 = top.1,
+        x2 = right.0,
+        y2 = right.1
+    );
     // The right and marker nodes used to sit unconnected -- wire them up
     // with a `dash` animation snapshot instead of a plain line, so the
     // gallery also shows what an in-flight segment animation looks like.
-    thick_dashed_line(img, right, marker_node, 2, 6.0, 5.0, seg);
-
-    let r: i32 = 7;
-    let node = rgb(colors["node"]);
-    draw_filled_circle_mut(img, (top.0 as i32, top.1 as i32), r, node);
-    draw_filled_circle_mut(img, (left.0 as i32, left.1 as i32), r, node);
-
-    // Right node: selection ring (outer) + alert ring (inner), same node.
-    let rr = r + 7;
-    thick_hollow_circle(
-        img,
-        (right.0 as i32, right.1 as i32),
-        rr,
-        2,
-        rgb(colors["selected"]),
+    // SVG's own `stroke-dasharray` reproduces `thick_dashed_line`'s
+    // dash=6/gap=5 pattern exactly, no manual stepping needed.
+    let _ = write!(
+        s,
+        r#"<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{seg}" stroke-width="2" stroke-dasharray="6,5"/>"#,
+        x1 = right.0,
+        y1 = right.1,
+        x2 = marker_node.0,
+        y2 = marker_node.1
     );
-    thick_hollow_circle(
-        img,
-        (right.0 as i32, right.1 as i32),
-        r + 3,
-        2,
-        rgb(colors["alert"]),
+
+    let r: f32 = 7.0;
+    let rr: f32 = r + 7.0;
+    let node = hex(colors["node"]);
+    let _ = write!(
+        s,
+        r#"<circle cx="{cx}" cy="{cy}" r="{r}" fill="{node}"/>"#,
+        cx = top.0,
+        cy = top.1
     );
-    draw_filled_circle_mut(img, (right.0 as i32, right.1 as i32), r, node);
+    let _ = write!(
+        s,
+        r#"<circle cx="{cx}" cy="{cy}" r="{r}" fill="{node}"/>"#,
+        cx = left.0,
+        cy = left.1
+    );
+
+    // Right node: selection ring (outer) + alert ring (inner), same node,
+    // redrawn on top with a plain filled circle last (same z-order as
+    // `draw_card`).
+    let selected = hex(colors["selected"]);
+    let alert = hex(colors["alert"]);
+    let _ = write!(
+        s,
+        r#"<circle cx="{cx}" cy="{cy}" r="{rr}" fill="none" stroke="{selected}" stroke-width="2"/>"#,
+        cx = right.0,
+        cy = right.1
+    );
+    let _ = write!(
+        s,
+        r#"<circle cx="{cx}" cy="{cy}" r="{ri}" fill="none" stroke="{alert}" stroke-width="2"/>"#,
+        cx = right.0,
+        cy = right.1,
+        ri = r + 3.0
+    );
+    let _ = write!(
+        s,
+        r#"<circle cx="{cx}" cy="{cy}" r="{r}" fill="{node}"/>"#,
+        cx = right.0,
+        cy = right.1
+    );
 
     // Separate node with a marker ring -- the "flagged" role, drawn apart
     // from the selected/alert node so it doesn't read as a third ring on
     // the same target.
-    thick_hollow_circle(
-        img,
-        (marker_node.0 as i32, marker_node.1 as i32),
-        rr,
-        3,
-        rgb(colors["marker"]),
+    let marker = hex(colors["marker"]);
+    let _ = write!(
+        s,
+        r#"<circle cx="{cx}" cy="{cy}" r="{rr}" fill="none" stroke="{marker}" stroke-width="3"/>"#,
+        cx = marker_node.0,
+        cy = marker_node.1
     );
-    draw_filled_circle_mut(img, (marker_node.0 as i32, marker_node.1 as i32), r, node);
+    let _ = write!(
+        s,
+        r#"<circle cx="{cx}" cy="{cy}" r="{r}" fill="{node}"/>"#,
+        cx = marker_node.0,
+        cy = marker_node.1
+    );
 
     // Node name label in the theme's actual `text` color, anchored under
     // the left node -- the concrete thing the ArticCyan/SolarAmber
     // contrast bug broke.
-    let label = "Node name";
-    let tx = (left.0 - 24.0) as i32;
-    let ty = (left.1 + 12.0) as i32;
-    draw_text_mut(
-        img,
-        rgb(colors["text"]),
-        tx,
-        ty,
-        PxScale::from(13.0),
-        font_reg,
-        label,
+    let text_color = hex(colors["text"]);
+    let _ = write!(
+        s,
+        r#"<text x="{x}" y="{y}" font-family="sans-serif" font-size="13" fill="{text_color}">Node name</text>"#,
+        x = left.0 - 24.0,
+        y = left.1 + 12.0 + 10.0
     );
 
-    // Legend chips: node / seg / sel / alert / marker / text
-    let legend_y = y0 + h - 22;
-    let chip = 10;
-    let mut lx = x0 + 12;
+    // Legend chips: node / seg / sel / alert / marker / text / bg.
+    let legend_y = y0 + CARD_H - 22.0;
+    let chip: f32 = 10.0;
+    let mut lx = x0 + 12.0;
+    let legend_size: f32 = 11.0;
     let entries = [
         ("node", colors["node"]),
         ("seg", colors["segment"]),
@@ -328,204 +333,148 @@ fn draw_card(
         ("alert", colors["alert"]),
         ("marker", colors["marker"]),
         ("text", colors["text"]),
+        ("bg", colors["background"]),
     ];
-    let legend_scale = PxScale::from(11.0);
     for (name, col) in entries {
-        draw_filled_rect_mut(
-            img,
-            Rect::at(lx, legend_y).of_size((chip + 1) as u32, (chip + 1) as u32),
-            rgb(fg_label),
+        let _ = write!(
+            s,
+            r#"<rect x="{x}" y="{y}" width="{sz}" height="{sz}" fill="{fg_label}"/>"#,
+            x = lx,
+            y = legend_y,
+            sz = chip + 1.0
         );
-        draw_filled_rect_mut(
-            img,
-            Rect::at(lx + 1, legend_y + 1).of_size(chip as u32, chip as u32),
-            rgb(col),
+        let _ = write!(
+            s,
+            r#"<rect x="{x}" y="{y}" width="{sz}" height="{sz}" fill="{col}"/>"#,
+            x = lx + 1.0,
+            y = legend_y + 1.0,
+            sz = chip,
+            col = hex(col)
         );
-        let (tw, _) = text_size(legend_scale, font_reg, name);
-        draw_text_mut(
-            img,
-            rgb(fg_label),
-            lx + chip + 3,
-            legend_y - 1,
-            legend_scale,
-            font_reg,
-            name,
+        let _ = write!(
+            s,
+            r#"<text x="{x}" y="{y}" font-family="sans-serif" font-size="{sz}" fill="{fg_label}">{name}</text>"#,
+            x = lx + chip + 3.0,
+            y = legend_y + chip,
+            sz = legend_size
         );
-        lx += chip + 6 + tw as i32 + 10;
+        lx += chip + 6.0 + approx_text_width(name, legend_size) + 10.0;
     }
+
+    s
 }
 
-fn load_font_bytes(env_var: &str, candidates: &[&str]) -> Vec<u8> {
-    if let Ok(path) = std::env::var(env_var) {
-        return fs::read(&path)
-            .unwrap_or_else(|e| panic!("failed to read font from ${env_var}={path}: {e}"));
-    }
-    for path in candidates {
-        if let Ok(bytes) = fs::read(path) {
-            return bytes;
-        }
-    }
-    panic!(
-        "could not find a DejaVu Sans font in any of {candidates:?} -- install \
-         fonts-dejavu-core, or point {env_var} at your own copy"
+/// Renders one theme's complete, self-contained preview: a title, its
+/// tagline, and its `Light`/`Dark` cards side by side.
+fn render_theme_svg(theme: &ThemeData) -> String {
+    let w = svg_width();
+    let h = 56.0 + ROW_H + 8.0 + CARD_H + 12.0;
+
+    let mut svg = String::new();
+    let _ = write!(
+        svg,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}" font-family="sans-serif">"#
     );
+    let _ = write!(svg, r##"<rect width="{w}" height="{h}" fill="#F5F5F7"/>"##);
+    let _ = write!(
+        svg,
+        r##"<text x="{x}" y="24" font-size="18" font-weight="700" fill="#141418">{name}</text>"##,
+        x = PAD,
+        name = xml_escape(&theme.name)
+    );
+    let desc = card_short_description(&theme.name, &theme.doc);
+    let _ = write!(
+        svg,
+        r##"<text x="{x}" y="44" font-size="12" fill="#6E6E74">{desc}</text>"##,
+        x = PAD,
+        desc = xml_escape(&desc)
+    );
+
+    let card_y = 56.0;
+    svg.push_str(&build_card_svg(PAD, card_y, "Light", &theme.light));
+    svg.push_str(&build_card_svg(
+        PAD * 2.0 + CARD_W,
+        card_y,
+        "Dark",
+        &theme.dark,
+    ));
+
+    svg.push_str("</svg>\n");
+    svg
 }
 
-fn render_gallery(themes: &[ThemeData], out: &Path) {
-    let font_bold_bytes = load_font_bytes(
-        "DEJAVU_SANS_BOLD_TTF",
-        &[
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-            "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf",
-        ],
-    );
-    let font_reg_bytes = load_font_bytes(
-        "DEJAVU_SANS_TTF",
-        &[
-            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-            "/usr/share/fonts/dejavu/DejaVuSans.ttf",
-        ],
-    );
-    let font_bold = FontRef::try_from_slice(&font_bold_bytes).expect("bold font");
-    let font_reg = FontRef::try_from_slice(&font_reg_bytes).expect("regular font");
+/// SVG file name for a theme's preview, relative to `THEMES.md` -- used both
+/// to write the file and to embed it.
+fn svg_relative_path(theme_name: &str) -> String {
+    format!("theme_gallery/{theme_name}.svg")
+}
 
-    let n = themes.len() as i32;
-    let h = 120 + n * (ROW_H + 10 + CARD_H + GAP);
-    let bg = Rgb([245u8, 245, 247]);
-    let mut img = RgbImage::from_pixel(W as u32, h as u32, bg);
-
-    draw_text_mut(
-        &mut img,
-        Rgb([20, 20, 24]),
-        PAD,
-        18,
-        PxScale::from(24.0),
-        &font_bold,
-        "egui-map -- built-in Theme gallery",
-    );
-    draw_text_mut(
-        &mut img,
-        Rgb([90, 90, 96]),
-        PAD,
-        46,
-        PxScale::from(14.0),
-        &font_reg,
-        "Each palette resolves via Theme::colors(ColorMode) -- node / segment / selected / alert / marker / text.",
-    );
-
-    let mut y = 78;
-    let cw = card_w();
+fn write_theme_svgs(themes: &[ThemeData], root: &Path) {
+    let out_dir = root.join("theme_gallery");
+    fs::create_dir_all(&out_dir).expect("failed to create theme_gallery/");
     for theme in themes {
-        draw_text_mut(
-            &mut img,
-            Rgb([20, 20, 24]),
-            PAD,
-            y,
-            PxScale::from(18.0),
-            &font_bold,
-            &theme.name,
-        );
-        let desc = card_short_description(&theme.name, &theme.doc);
-        draw_text_mut(
-            &mut img,
-            Rgb([110, 110, 116]),
-            PAD,
-            y + 20,
-            PxScale::from(12.0),
-            &font_reg,
-            &desc,
-        );
-        let card_y = y + ROW_H + 8;
-        draw_card(
-            &mut img,
-            &font_reg,
-            CardArea {
-                x0: PAD,
-                y0: card_y,
-                w: cw,
-                h: CARD_H,
-            },
-            "Light",
-            &theme.light,
-        );
-        draw_card(
-            &mut img,
-            &font_reg,
-            CardArea {
-                x0: PAD * 2 + cw,
-                y0: card_y,
-                w: cw,
-                h: CARD_H,
-            },
-            "Dark",
-            &theme.dark,
-        );
-        y = card_y + CARD_H + GAP;
+        let svg = render_theme_svg(theme);
+        let out = out_dir.join(format!("{}.svg", theme.name));
+        fs::write(&out, svg).unwrap_or_else(|e| panic!("failed to write {}: {e}", out.display()));
+        println!("wrote {}", out.display());
     }
-
-    let cropped = image::imageops::crop_imm(&img, 0, 0, W as u32, (y + 8) as u32).to_image();
-    cropped.save(out).expect("failed to save theme_gallery.png");
-    println!(
-        "saved {} ({}x{})",
-        out.display(),
-        cropped.width(),
-        cropped.height()
-    );
 }
 
 // ---------------------------------------------------------------------
 // THEMES.md
 // ---------------------------------------------------------------------
 
-fn hex(c: Color) -> String {
-    format!("#{:02X}{:02X}{:02X}", c.0, c.1, c.2)
-}
-
 fn render_themes_md(themes: &[ThemeData], out: &Path) {
     let mut md = String::new();
     md.push_str("# egui-map -- built-in themes\n\n");
     md.push_str(&format!(
-        "`egui-map` ships {} named color palettes (`map::theme::Theme`), each with a `Light` and a `Dark` variant (`map::theme::ColorMode`, a re-export of `egui::Theme`). `Theme::colors(mode)` resolves a theme to the six colors the widget actually paints with (`map::theme::ThemeColors`): the node fill, connection lines (`segment`), the selection ring around the nearest node (`selected`), one-off notification/alert animations (`alert`), a lasting \"this is marked\" indicator -- a node's persistent state or a plain `update_marker` marker (`marker`) -- and node names/labels (`text`).\n\n",
+        "`egui-map` ships {} named color palettes (`map::theme::Theme`), each with a `Light` and a `Dark` variant (`map::theme::ColorMode`, a re-export of `egui::Theme`). `Theme::colors(mode)` resolves a theme to the seven colors the widget actually paints with (`map::theme::ThemeColors`): the node fill, connection lines (`segment`), the selection ring around the nearest node (`selected`), one-off notification/alert animations (`alert`), a lasting \"this is marked\" indicator -- a node's persistent state or a plain `update_marker` marker (`marker`) -- node names/labels (`text`), and the map canvas itself (`background`).\n\n",
         themes.len()
     ));
     md.push_str("`EguiDefault` is the odd one out and the default theme: instead of a hand-picked palette, it carries over egui's own default `Visuals` colors (`hyperlink_color`, the separator-line color, `selection.stroke`, `warn_fg_color`, `error_fg_color`, and the active-widget text color, `strong_text_color()`), so a map with no theme installed looks like plain egui rather than an arbitrary house style.\n\n");
     md.push_str("Install a built-in theme, or your own palette, with `Map::set_theme` and the `MapTheme` trait -- see the README's \"Custom themes\" section and the `MapTheme` rustdoc for the full API.\n\n");
-    md.push_str("![Preview of every built-in theme, light and dark](theme_gallery.png)\n\n");
-    md.push_str("*Preview generated from the exact `Theme::colors` values below -- each card mocks the shapes the widget paints (nodes, connection lines, a selection ring, an alert ring, a marker ring) plus a node name label in the theme's actual `text` color, rather than being a captured screenshot of a running app.*\n\n");
+    md.push_str("Each theme below has its own preview, generated straight from the `Theme::colors` values in the table under it -- each card mocks the shapes the widget paints (nodes, connection lines, a selection ring, an alert ring, a marker ring), a node name label in the theme's actual `text` color, and the card itself filled with the theme's own `background`, rather than being a captured screenshot of a running app.\n\n");
 
     for theme in themes {
         md.push_str(&format!("## `{}`\n\n", theme.name));
         md.push_str(&format!("{}\n\n", theme.doc));
+        md.push_str(&format!(
+            "![Preview of {name}, light and dark]({path})\n\n",
+            name = theme.name,
+            path = svg_relative_path(&theme.name)
+        ));
         md.push_str("```rust\n");
         md.push_str(&format!(
             "map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::{}));\n",
             theme.name
         ));
         md.push_str("```\n\n");
-        md.push_str("| Mode | node | segment | selected | alert | marker | text |\n");
-        md.push_str("|---|---|---|---|---|---|---|\n");
+        md.push_str("| Mode | node | segment | selected | alert | marker | text | background |\n");
+        md.push_str("|---|---|---|---|---|---|---|---|\n");
         md.push_str(&format!(
-            "| Light | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |\n",
+            "| Light | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |\n",
             hex(theme.light["node"]),
             hex(theme.light["segment"]),
             hex(theme.light["selected"]),
             hex(theme.light["alert"]),
             hex(theme.light["marker"]),
             hex(theme.light["text"]),
+            hex(theme.light["background"]),
         ));
         md.push_str(&format!(
-            "| Dark | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |\n\n",
+            "| Dark | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` | `{}` |\n\n",
             hex(theme.dark["node"]),
             hex(theme.dark["segment"]),
             hex(theme.dark["selected"]),
             hex(theme.dark["alert"]),
             hex(theme.dark["marker"]),
             hex(theme.dark["text"]),
+            hex(theme.dark["background"]),
         ));
     }
 
     md.push_str("---\n\n");
-    md.push_str("`EguiDefault` is the default theme (`Theme::default()`). The gallery image and the tables above are generated together, straight from `src/map/theme.rs`, by `scripts/generate_theme_gallery` (a standalone Rust tool -- run it with `cargo run --manifest-path scripts/generate_theme_gallery/Cargo.toml` from the repo root) -- if the palettes there ever change, rerun it rather than hand-editing this file or the PNG.\n");
+    md.push_str("`EguiDefault` is the default theme (`Theme::default()`). Every preview above and the tables alongside them are generated together, straight from `src/map/theme.rs`, by `scripts/generate_theme_gallery` (a standalone Rust tool -- run it with `cargo run --manifest-path scripts/generate_theme_gallery/Cargo.toml` from the repo root) -- if the palettes there ever change, rerun it rather than hand-editing this file or the SVGs under `theme_gallery/`.\n");
 
     fs::write(out, md).expect("failed to write THEMES.md");
     println!("wrote {}", out.display());
@@ -537,6 +486,6 @@ fn main() {
     let themes = parse_theme_rs(&theme_rs);
     assert!(!themes.is_empty(), "no themes parsed out of theme.rs");
 
-    render_gallery(&themes, &root.join("theme_gallery.png"));
+    write_theme_svgs(&themes, &root);
     render_themes_md(&themes, &root.join("THEMES.md"));
 }

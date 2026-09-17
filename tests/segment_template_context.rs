@@ -33,6 +33,7 @@ impl MapTheme for FixedPalette {
             alert: egui::Color32::from_rgb(10, 11, 12),
             marker: egui::Color32::from_rgb(16, 17, 18),
             text: egui::Color32::from_rgb(13, 14, 15),
+            background: egui::Color32::from_rgb(19, 20, 21),
         }
     }
 }

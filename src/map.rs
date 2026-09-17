@@ -103,20 +103,22 @@
 
 use crate::map::animation::Animation;
 use crate::map::objects::{
-    CometDirection, ContextMenuManager, MapBounds, MapLabel, MapPoint, MapSegment, MapSettings,
-    MarkerContext, NodeAnimation, NodeContext, NotificationContext, RawLine, RawPoint,
-    SegmentAnimation, SegmentContext, SegmentNotificationContext, SegmentStateContext,
+    CometDirection, ContextMenuManager, LabelContext, MapBounds, MapLabel, MapPoint, MapSegment,
+    MapSettings, MarkerContext, NodeAnimation, NodeContext, NotificationContext, RawLine, RawPoint,
+    RegionLabel, SegmentAnimation, SegmentContext, SegmentNotificationContext, SegmentStateContext,
     SelectionContext, SteadyAnimation, SteadySegmentAnimation, TextSettings, VisibilitySetting,
 };
 use crate::map::theme::{ColorMode, MapTheme, Style, Theme, ThemeColors};
+use egui::text::Galley;
 use egui::{widgets::*, *};
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 
-use self::objects::{NodeTemplate, SegmentTemplate};
+use self::objects::{LabelTemplate, NodeTemplate, SegmentTemplate};
 
 pub mod animation;
 pub mod objects;
@@ -162,9 +164,11 @@ fn scale_alpha(color: Color32, factor: f32) -> Color32 {
 /// Rendering of nodes and their visual effects (selection highlight,
 /// notifications and markers) can be fully customized by installing a
 /// [`objects::NodeTemplate`] implementation with [`Map::set_node_template`],
-/// and segments likewise with [`objects::SegmentTemplate`] and
-/// [`Map::set_segment_template`]; a right-click context menu can be provided
-/// with [`Map::set_context_manager`].
+/// segments likewise with [`objects::SegmentTemplate`] and
+/// [`Map::set_segment_template`], and region labels
+/// ([`objects::RegionLabel`], added with [`Map::add_region_labels`]) with
+/// [`objects::LabelTemplate`] and [`Map::set_label_template`]; a right-click
+/// context menu can be provided with [`Map::set_context_manager`].
 ///
 /// # Examples
 ///
@@ -191,6 +195,13 @@ pub struct Map {
     points: Option<HashMap<usize, MapPoint>>,
     segments: Option<rstar::RTree<MapSegment>>,
     labels: Vec<MapLabel>,
+    region_labels: Vec<RegionLabel>,
+    /// Layout cache for the built-in [`RegionLabel`] renderer, keyed by
+    /// `(text, rounded screen size, font family)` so a repeated frame at a
+    /// steady zoom and [`Style::region_label_font`] is a cache lookup rather
+    /// than a relayout -- see [`objects::LabelTemplate::label_ui`]'s doc.
+    /// Cleared whenever [`Map::add_region_labels`] replaces the label set.
+    region_label_cache: HashMap<(String, i32, FontFamily), Arc<Galley>>,
     tree: Option<KdTree<f32, usize, [f32; 2]>>,
     visible_points: Vec<isize>,
     map_area: Rect,
@@ -213,6 +224,7 @@ pub struct Map {
     menu_manager: Option<Rc<dyn ContextMenuManager>>,
     node_template: Option<Rc<dyn NodeTemplate>>,
     segment_template: Option<Rc<dyn SegmentTemplate>>,
+    label_template: Option<Rc<dyn LabelTemplate>>,
     markers: HashMap<usize, usize>,
     /// The active color palette. See [`Map::set_theme`].
     theme: Rc<dyn MapTheme>,
@@ -555,6 +567,74 @@ impl Widget for &mut Map {
                 let rect_midpoint = RawPoint::from(resp.rect.center());
                 let min_point = self.current.pos - rect_midpoint;
 
+                if !self.region_labels.is_empty() {
+                    // Region labels are the deepest layer: painted first so
+                    // every other element (connection lines, nodes,
+                    // free-floating `MapLabel`s) draws over them. See
+                    // `RegionLabel`'s own doc for how this differs from
+                    // `MapLabel`.
+                    let theme = self.theme_colors();
+                    // A more transparent color than ordinary text, so region
+                    // labels read as a backdrop rather than competing with
+                    // foreground content.
+                    let color = scale_alpha(theme.text, self.settings.region_label_alpha);
+                    let zoom = self.zoom;
+                    // `Style::region_label_font` configures only the built-in
+                    // renderer below; a custom `LabelTemplate` picks its own
+                    // font, the same way `NodeTemplate`/`SegmentTemplate`
+                    // implementations pick their own fonts freely. It is
+                    // mandatory (no `Option`), so there is no fallback to
+                    // resolve here: `size` (still scaled *by* zoom instead
+                    // of staying screen-constant, unlike
+                    // `node_text_size`/`label_text_size`) and `family` come
+                    // straight from it. Each read is its own statement so
+                    // the immutable borrow of `self` ends before the
+                    // `&mut self.region_label_cache` borrow the loop below
+                    // needs.
+                    let region_label_size = self.current_style().region_label_font.size * zoom;
+                    let region_label_family = self.current_style().region_label_font.family.clone();
+                    let region_label_font = FontId::new(region_label_size, region_label_family);
+                    let template = self.label_template.clone();
+                    if let Some(template) = &template {
+                        for label in &self.region_labels {
+                            let position: Pos2 =
+                                (RawPoint::from(label.center) * zoom - min_point).into();
+                            template.label_ui(
+                                &paint,
+                                LabelContext {
+                                    position,
+                                    zoom,
+                                    label,
+                                    size: region_label_size,
+                                    color,
+                                    theme,
+                                },
+                            );
+                        }
+                    } else {
+                        // `paint_region_label` needs `&mut self` (it caches into
+                        // `self.region_label_cache`), so it can't be called while
+                        // `self.region_labels` is still borrowed -- each iteration
+                        // extracts what it needs (`position`, an owned `text`) in a
+                        // block that ends that borrow before the method call.
+                        for i in 0..self.region_labels.len() {
+                            let (position, text) = {
+                                let label = &self.region_labels[i];
+                                let position: Pos2 =
+                                    (RawPoint::from(label.center) * zoom - min_point).into();
+                                (position, label.text.clone())
+                            };
+                            self.paint_region_label(
+                                &paint,
+                                position,
+                                text,
+                                region_label_font.clone(),
+                                color,
+                            );
+                        }
+                    }
+                }
+
                 if self.zoom < self.settings.line_visible_zoom {
                     // filling text settings
                     let mut text_settings = TextSettings {
@@ -692,6 +772,8 @@ impl Map {
             tree: None,
             points: None,
             labels: Vec::new(),
+            region_labels: Vec::new(),
+            region_label_cache: HashMap::new(),
             visible_points: Vec::new(),
             current: MapBounds::default(),
             reference: MapBounds::default(),
@@ -707,6 +789,7 @@ impl Map {
             menu_manager: None,
             node_template: None,
             segment_template: None,
+            label_template: None,
             markers: HashMap::new(),
             segments: None,
             theme: Rc::new(Theme::default()),
@@ -968,6 +1051,20 @@ impl Map {
         self.labels = labels;
     }
 
+    /// Replaces the set of region labels drawn on the map.
+    ///
+    /// Unlike [`Map::add_labels`], a [`RegionLabel`] is not a fixed
+    /// on-screen annotation -- see its own doc for how it differs (font
+    /// size that scales with zoom, background z-order, a more transparent
+    /// color) and [`Map::set_label_template`] for customizing how it is
+    /// drawn. Also clears the built-in renderer's layout cache, so call this
+    /// when the label *set* changes rather than every frame.
+    pub fn add_region_labels(&mut self, labels: Vec<RegionLabel>) {
+        let _span = tracing::info_span!("add_region_labels").entered();
+        self.region_labels = labels;
+        self.region_label_cache.clear();
+    }
+
     /// Replaces the set of connection lines between nodes.
     ///
     /// Lines are keyed by a connection id that the endpoint nodes must
@@ -1093,9 +1190,6 @@ impl Map {
             let _span = tracing::info_span!("asign_visual_style").entered();
 
             self.current_index = style_index;
-            let map_style = self.settings.styles.get_mut(style_index).unwrap();
-            let visuals = &ui_obj.style().visuals;
-            map_style.background_color = visuals.extreme_bg_color;
         }
     }
 
@@ -1639,6 +1733,62 @@ impl Map {
         );
     }
 
+    /// Paints one [`RegionLabel`] with the built-in renderer.
+    ///
+    /// Lays the text out once per distinct `(text, rounded size, family)`
+    /// triple and caches the resulting `Arc<Galley>` in
+    /// `self.region_label_cache`, then applies `color` fresh every call
+    /// through [`Painter::galley_with_override_text_color`] -- so a cache
+    /// hit skips `fonts_mut` entirely, and a theme or alpha change (which
+    /// only changes `color`) never invalidates the cache. Rounding `size`
+    /// to the nearest pixel before hashing keeps the cache useful while the
+    /// map sits at a steady zoom, at the cost of relaying out on every zoom
+    /// step that crosses a pixel boundary.
+    ///
+    /// Centers the text on `position` the same way [`Painter::text`] does
+    /// internally (`anchor.anchor_size(pos, galley.size())`), since a
+    /// pre-laid-out galley is painted with [`Painter::galley_with_override_text_color`]
+    /// rather than `Painter::text` itself.
+    ///
+    /// Takes `&mut self` (it mutates `self.region_label_cache`), so the
+    /// caller must not still be borrowing `self.region_labels` when this is
+    /// called -- see the call site above. `text` is taken by value rather
+    /// than `&str`: the cache key needs an owned `String` anyway, so the
+    /// caller's clone becomes that key directly instead of being cloned a
+    /// second time here. `font` bundles what used to be two separate
+    /// `size`/`family` parameters -- the caller still needs the raw
+    /// `size: f32` on its own (for `LabelContext::size` in the
+    /// `LabelTemplate` branch), so this doesn't remove any state, it just
+    /// packages what this function receives as the `FontId` it already
+    /// conceptually is.
+    fn paint_region_label(
+        &mut self,
+        paint: &Painter,
+        position: Pos2,
+        text: String,
+        font: FontId,
+        color: Color32,
+    ) {
+        let _span = tracing::info_span!("paint_region_label").entered();
+        // `font.size` is captured before `font.family` is moved into `key`
+        // below, since the cache key rounds the size for hashing but the
+        // actual layout call (on a cache miss) still needs the precise,
+        // unrounded value.
+        let size = font.size;
+        let key = (text, size.round() as i32, font.family);
+        let galley = match self.region_label_cache.get(&key) {
+            Some(galley) => galley.clone(),
+            None => {
+                let galley =
+                    paint.layout_no_wrap(key.0.clone(), FontId::new(size, key.2.clone()), color);
+                self.region_label_cache.insert(key, galley.clone());
+                galley
+            }
+        };
+        let rect = Align2::CENTER_CENTER.anchor_size(position, galley.size());
+        paint.galley_with_override_text_color(rect.min, galley, color);
+    }
+
     /// Triggers a pulsing notification on the node `id_node`.
     ///
     /// # Deprecated
@@ -1813,6 +1963,16 @@ impl Map {
     /// the [`SegmentTemplate`] examples for a custom line style and animation.
     pub fn set_segment_template(&mut self, template: Rc<dyn SegmentTemplate>) {
         self.segment_template = Some(template);
+    }
+
+    /// Replaces the built-in [`RegionLabel`] rendering with a custom
+    /// [`LabelTemplate`] implementation.
+    ///
+    /// The template takes over drawing every region label installed with
+    /// [`Map::add_region_labels`]. See the [`LabelTemplate`] example for a
+    /// custom look.
+    pub fn set_label_template(&mut self, template: Rc<dyn LabelTemplate>) {
+        self.label_template = Some(template);
     }
 
     /// Installs the color palette used to paint the map, replacing the
@@ -2259,6 +2419,115 @@ mod tests {
         map.add_labels(vec![label]);
         assert_eq!(map.labels.len(), 1);
         assert_eq!(map.labels[0].text, "Region");
+    }
+
+    #[test]
+    fn add_region_labels_stores_labels() {
+        let mut map = Map::new();
+        let label = RegionLabel {
+            text: "Domain".to_string(),
+            center: Pos2::new(3.0, 4.0),
+            color: None
+        };
+        map.add_region_labels(vec![label]);
+        assert_eq!(map.region_labels.len(), 1);
+        assert_eq!(map.region_labels[0].text, "Domain");
+    }
+
+    /// `add_region_labels` clears the built-in renderer's layout cache, so a
+    /// stale `Arc<Galley>` for text that no longer exists in the new label
+    /// set doesn't linger in memory forever.
+    #[test]
+    fn add_region_labels_clears_the_stale_layout_cache() {
+        use egui::{Context, RawInput};
+
+        let mut map = Map::new();
+        map.add_region_labels(vec![RegionLabel {
+            text: "Old".to_string(),
+            center: Pos2::new(0.0, 0.0),
+            color: None,
+        }]);
+
+        let ctx = Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0));
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(screen),
+                ..RawInput::default()
+            },
+            |ui| {
+                ui.add(&mut map);
+            },
+        );
+        output.textures_delta.clear();
+
+        assert_eq!(
+            map.region_label_cache.len(),
+            1,
+            "expected one cached galley after painting one region label"
+        );
+
+        map.add_region_labels(vec![RegionLabel {
+            text: "New".to_string(),
+            center: Pos2::new(0.0, 0.0),
+            color: None,
+        }]);
+
+        assert!(
+            map.region_label_cache.is_empty(),
+            "add_region_labels must clear the previous label set's cached galleys, found {:?}",
+            map.region_label_cache.keys().collect::<Vec<_>>()
+        );
+    }
+
+    /// Exact-byte counterpart to `tests/region_labels.rs`'s
+    /// `region_label_color_is_theme_text_faded_by_alpha`, which can only
+    /// assert an approximate color from outside the crate. From in here the
+    /// expected value can go through `scale_alpha` itself, the same way
+    /// `steady_segment_effect_alpha_tracks_the_lines_zoom_fade_with_a_head_start`
+    /// does for segment effects, avoiding a hand-derived byte value that
+    /// would be fragile against `Color32`'s premultiplied-alpha rounding.
+    #[test]
+    fn region_label_color_is_exactly_scale_alpha_of_theme_text() {
+        use egui::{Context, RawInput, Shape};
+
+        let mut map = Map::new();
+        map.settings.region_label_alpha = 0.4;
+        map.add_region_labels(vec![RegionLabel {
+            text: "Domain".to_string(),
+            center: Pos2::new(0.0, 0.0),
+            color: None,
+        }]);
+
+        let ctx = Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0));
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(screen),
+                ..RawInput::default()
+            },
+            |ui| {
+                ui.add(&mut map);
+            },
+        );
+        output.textures_delta.clear();
+
+        // Read *after* the frame ran, once `assign_visual_style` has settled
+        // `current_index` to whatever light/dark mode this `Context`
+        // actually painted with -- reading it beforehand would compare
+        // against the wrong mode's text color.
+        let expected = scale_alpha(map.theme_colors().text, 0.4);
+
+        let painted_color = output
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                Shape::Text(t) if t.galley.text() == "Domain" => t.override_text_color,
+                _ => None,
+            })
+            .expect("region label was not painted");
+
+        assert_eq!(painted_color, expected);
     }
 
     #[test]
@@ -2775,6 +3044,7 @@ mod tests {
                     alert: Color32::from_rgb(10, 11, 12),
                     marker: Color32::from_rgb(16, 17, 18),
                     text: Color32::from_rgb(13, 14, 15),
+                    background: Color32::from_rgb(19, 20, 21),
                 }
             }
         }
@@ -2834,6 +3104,7 @@ mod tests {
                     alert: Color32::from_rgb(10, 11, 12),
                     marker: Color32::from_rgb(16, 17, 18),
                     text: Color32::from_rgb(13, 14, 15),
+                    background: Color32::from_rgb(19, 20, 21),
                 }
             }
         }

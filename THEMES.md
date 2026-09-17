@@ -1,210 +1,238 @@
 # egui-map -- built-in themes
 
-`egui-map` ships 15 named color palettes (`map::theme::Theme`), each with a `Light` and a `Dark` variant (`map::theme::ColorMode`, a re-export of `egui::Theme`). `Theme::colors(mode)` resolves a theme to the six colors the widget actually paints with (`map::theme::ThemeColors`): the node fill, connection lines (`segment`), the selection ring around the nearest node (`selected`), one-off notification/alert animations (`alert`), a lasting "this is marked" indicator -- a node's persistent state or a plain `update_marker` marker (`marker`) -- and node names/labels (`text`).
+`egui-map` ships 15 named color palettes (`map::theme::Theme`), each with a `Light` and a `Dark` variant (`map::theme::ColorMode`, a re-export of `egui::Theme`). `Theme::colors(mode)` resolves a theme to the seven colors the widget actually paints with (`map::theme::ThemeColors`): the node fill, connection lines (`segment`), the selection ring around the nearest node (`selected`), one-off notification/alert animations (`alert`), a lasting "this is marked" indicator -- a node's persistent state or a plain `update_marker` marker (`marker`) -- node names/labels (`text`), and the map canvas itself (`background`).
 
 `EguiDefault` is the odd one out and the default theme: instead of a hand-picked palette, it carries over egui's own default `Visuals` colors (`hyperlink_color`, the separator-line color, `selection.stroke`, `warn_fg_color`, `error_fg_color`, and the active-widget text color, `strong_text_color()`), so a map with no theme installed looks like plain egui rather than an arbitrary house style.
 
 Install a built-in theme, or your own palette, with `Map::set_theme` and the `MapTheme` trait -- see the README's "Custom themes" section and the `MapTheme` rustdoc for the full API.
 
-![Preview of every built-in theme, light and dark](theme_gallery.png)
-
-*Preview generated from the exact `Theme::colors` values below -- each card mocks the shapes the widget paints (nodes, connection lines, a selection ring, an alert ring, a marker ring) plus a node name label in the theme's actual `text` color, rather than being a captured screenshot of a running app.*
+Each theme below has its own preview, generated straight from the `Theme::colors` values in the table under it -- each card mocks the shapes the widget paints (nodes, connection lines, a selection ring, an alert ring, a marker ring), a node name label in the theme's actual `text` color, and the card itself filled with the theme's own `background`, rather than being a captured screenshot of a running app.
 
 ## `EguiDefault`
 
 egui's own default `Visuals` colors (light and dark), carried over as a `Theme` instead of invented -- so a map with no theme installed looks like plain egui, not like an arbitrary house palette. The default theme.
 
+![Preview of EguiDefault, light and dark](theme_gallery/EguiDefault.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::EguiDefault));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#009BFF` | `#BEBEBE` | `#00537D` | `#FF6400` | `#FF0000` | `#000000` |
-| Dark | `#5AAAFF` | `#3C3C3C` | `#0079FF` | `#FF8F00` | `#FF0000` | `#FFFFFF` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#009BFF` | `#BEBEBE` | `#00537D` | `#FF0000` | `#F27979` | `#000000` | `#FFFFFF` |
+| Dark | `#5AAAFF` | `#8C8C8C` | `#C0DEFF` | `#FF0000` | `#F27979` | `#FFFFFF` | `#0A0A0A` |
 
 ## `SlateOcean`
 
 Muted blues over slate grays.
 
+![Preview of SlateOcean, light and dark](theme_gallery/SlateOcean.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::SlateOcean));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#2E4C6D` | `#8A99A8` | `#0CA4E9` | `#E0592A` | `#40BF1D` | `#2B333D` |
-| Dark | `#6E93BF` | `#4A5A6E` | `#26B7F8` | `#FF8A4C` | `#D43DF2` | `#D7DEE6` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#446285` | `#43484C` | `#3AADAD` | `#BF8448` | `#BFA284` | `#2B2F33` | `#F1F6FB` |
+| Dark | `#80ADE0` | `#748394` | `#61EBEB` | `#F2B06E` | `#F2D1B0` | `#DDE6F0` | `#0B0C0D` |
 
 ## `NebulaViolet`
 
 Violet and teal on a soft neutral backdrop.
 
+![Preview of NebulaViolet, light and dark](theme_gallery/NebulaViolet.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::NebulaViolet));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#5B3E96` | `#B3A4D6` | `#0AB8A5` | `#E6337A` | `#97BF1D` | `#372F45` |
-| Dark | `#A78BFA` | `#5C4A80` | `#20D4BD` | `#FF5FA3` | `#CBF23D` | `#E4DCF2` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#593285` | `#A396B2` | `#1AADAD` | `#BF2673` | `#BF7299` | `#2E2933` | `#F6F1FB` |
+| Dark | `#9F65E0` | `#545E8C` | `#3BEBEB` | `#F2499D` | `#F29EC8` | `#E3D8F0` | `#0C0B0D` |
 
 ## `TerminalGreen`
 
 Greens and blues reminiscent of a terminal color scheme.
 
+![Preview of TerminalGreen, light and dark](theme_gallery/TerminalGreen.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::TerminalGreen));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#1F7A3D` | `#9BB89E` | `#0C52EB` | `#D6A429` | `#BF1D9F` | `#2A332C` |
-| Dark | `#4ADE80` | `#3A5240` | `#2788FF` | `#FFC94D` | `#F23DDD` | `#D7E6DA` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#328547` | `#96B29D` | `#1A89AD` | `#BF4C26` | `#BF8672` | `#29332B` | `#F1FBF4` |
+| Dark | `#65E084` | `#5C8065` | `#3BBFEB` | `#F27349` | `#F2B29E` | `#D8F0DE` | `#0B0D0C` |
 
 ## `EmberForge`
 
 Warm oranges and pinks over charcoal/cream.
 
+![Preview of EmberForge, light and dark](theme_gallery/EmberForge.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::EmberForge));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#8C4A1F` | `#C9A98C` | `#C40A83` | `#2E86AB` | `#8CBF1D` | `#362E28` |
-| Dark | `#D97F3D` | `#5A4632` | `#FF2798` | `#4FC3E8` | `#B0F23D` | `#EDE0D3` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#856632` | `#B2A896` | `#1AAD7C` | `#265EBF` | `#728FBF` | `#332F29` | `#FBF7F1` |
+| Dark | `#E0B365` | `#D9C198` | `#3BEBB0` | `#4987F2` | `#9EBCF2` | `#F0E7D8` | `#0D0C0B` |
 
 ## `SolarAmber`
 
 Amber and teal on a warm neutral backdrop.
 
+![Preview of SolarAmber, light and dark](theme_gallery/SolarAmber.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::SolarAmber));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#8A6D1E` | `#D8C48F` | `#066E54` | `#C1442A` | `#631DBF` | `#362E1C` |
-| Dark | `#F0C24C` | `#5A4E2E` | `#1DBF8F` | `#E8654A` | `#913DF2` | `#EFE4C4` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#85732E` | `#B2AD95` | `#1353AD` | `#BF1F2C` | `#BF6F76` | `#333128` | `#FBF9F1` |
+| Dark | `#E0C65F` | `#948B68` | `#327FEB` | `#F2404F` | `#F299A0` | `#F0EBD7` | `#0D0C0B` |
 
 ## `ArticCyan`
 
 Cyan and gold over deep blue-gray.
 
+![Preview of ArticCyan, light and dark](theme_gallery/ArticCyan.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::ArticCyan));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#12708A` | `#9AC6D1` | `#F59C0D` | `#E0527A` | `#1D9CBF` | `#1F2E30` |
-| Dark | `#4FE0FF` | `#375E68` | `#FBBF24` | `#FF6B95` | `#3DD4F2` | `#D3EAEF` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#327785` | `#96AEB2` | `#AD1A95` | `#BF4026` | `#BF7F72` | `#293133` | `#F1FAFB` |
+| Dark | `#65CCE0` | `#65868C` | `#EB3BCD` | `#F26549` | `#F2AB9E` | `#D8ECF0` | `#0B0D0D` |
 
 ## `CrimsonSignal`
 
 Signal red and steel blue over near-black.
 
+![Preview of CrimsonSignal, light and dark](theme_gallery/CrimsonSignal.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::CrimsonSignal));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#7A1F2B` | `#B9A8A8` | `#0C64EB` | `#E8A628` | `#BF1DAA` | `#332628` |
-| Dark | `#E35B6B` | `#5C4548` | `#278CFF` | `#FFC459` | `#F23DE3` | `#E8D6D8` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#852A39` | `#332A2C` | `#0B77AD` | `#BF4117` | `#BF806B` | `#33282A` | `#FBF1F3` |
+| Dark | `#E0596F` | `#855C63` | `#29AAEB` | `#F26638` | `#F2AC95` | `#F0D5DA` | `#0D0B0C` |
 
 ## `MidnightIndigo`
 
 Indigo and teal on deep midnight blue.
 
+![Preview of MidnightIndigo, light and dark](theme_gallery/MidnightIndigo.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::MidnightIndigo));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#2B2F77` | `#A6A9C9` | `#00B8A9` | `#E0A400` | `#A41DBF` | `#262940` |
-| Dark | `#7B82E0` | `#3A3D66` | `#20D4C7` | `#FFD166` | `#D13DF2` | `#D8DAF0` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#393285` | `#464552` | `#AD3F1A` | `#BFA626` | `#BFB372` | `#2A2933` | `#F2F1FB` |
+| Dark | `#6F65E0` | `#6E6A94` | `#EB673B` | `#F2D649` | `#F2E49E` | `#DAD8F0` | `#0C0B0D` |
 
 ## `CopperRose`
 
 Copper and teal over warm taupe.
 
+![Preview of CopperRose, light and dark](theme_gallery/CopperRose.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::CopperRose));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#9C4A3C` | `#D9B8AE` | `#067A63` | `#E0A23C` | `#911DBF` | `#3D2E29` |
-| Dark | `#E08B6F` | `#5E453D` | `#1EC3A5` | `#FFC65C` | `#C23DF2` | `#EFDAD0` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#855B43` | `#4C4643` | `#AD3772` | `#45B5BF` | `#82BABF` | `#332E2B` | `#FBF5F1` |
+| Dark | `#E0A27E` | `#8C786D` | `#EB5EA4` | `#6BE7F2` | `#AEECF2` | `#F0E4DD` | `#0D0C0B` |
 
 ## `LimeCircuit`
 
 Lime green and violet over dark olive.
 
+![Preview of LimeCircuit, light and dark](theme_gallery/LimeCircuit.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::LimeCircuit));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#4D7A1F` | `#B9C79A` | `#5A0CE4` | `#E85D2E` | `#1DBF4D` | `#2E3320` |
-| Dark | `#A8E05F` | `#445230` | `#5D27FF` | `#FF8552` | `#3DF26D` | `#DCEAC0` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#4F8529` | `#A0B293` | `#084DAD` | `#7814BF` | `#9B6ABF` | `#2C3328` | `#F5FBF1` |
+| Dark | `#90E056` | `#A8CC8F` | `#2678EB` | `#A334F2` | `#CA93F2` | `#E0F0D5` | `#0C0D0B` |
 
 ## `CoralReef`
 
 Coral and ocean blue over sea-glass teal.
 
+![Preview of CoralReef, light and dark](theme_gallery/CoralReef.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::CoralReef));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#D65A45` | `#A8D4CE` | `#08519E` | `#F2A93C` | `#BF1DB7` | `#33403E` |
-| Dark | `#FF8B73` | `#386560` | `#2393E5` | `#FFC15E` | `#F23DEF` | `#D6EDE8` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#853D32` | `#4C4240` | `#1AAD2E` | `#26ABBF` | `#72B5BF` | `#332A29` | `#FBF2F1` |
+| Dark | `#E07565` | `#8C6A65` | `#3BEB52` | `#49DCF2` | `#9EE7F2` | `#F0DBD8` | `#0D0C0B` |
 
 ## `GraphiteMono`
 
 Grayscale with a cool blue accent.
 
+![Preview of GraphiteMono, light and dark](theme_gallery/GraphiteMono.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::GraphiteMono));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#3A3A3A` | `#B8B8B4` | `#0C87E0` | `#E0483A` | `#45BF1D` | `#232323` |
-| Dark | `#D6D6D2` | `#4A4A46` | `#25A2F5` | `#FF6B5C` | `#6AF23D` | `#E8E8E4` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#595959` | `#BFBFBF` | `#176399` | `#BF4C26` | `#BF8672` | `#262626` | `#FBFBFB` |
+| Dark | `#CCCCCC` | `#4C4C4C` | `#3BA1EB` | `#F26A3D` | `#F2AE98` | `#EBEBEB` | `#0D0D0D` |
 
 ## `PlumStatic`
 
 Plum and jade over muted mauve.
 
+![Preview of PlumStatic, light and dark](theme_gallery/PlumStatic.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::PlumStatic));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#6B3B5E` | `#C7AEC0` | `#078B62` | `#E0793D` | `#731DBF` | `#362B33` |
-| Dark | `#C994BB` | `#4A3A45` | `#1FC986` | `#FFA05C` | `#9A3DF2` | `#EBD9E5` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#854174` | `#473E45` | `#AD353F` | `#BF8B42` | `#BFA580` | `#332B31` | `#FBF1F9` |
+| Dark | `#E07BC7` | `#8C6C84` | `#EB5A66` | `#F2B867` | `#F2D5AC` | `#F0DCEB` | `#0D0B0C` |
 
 ## `SandstoneTrail`
 
 Sand and clay over warm khaki.
 
+![Preview of SandstoneTrail, light and dark](theme_gallery/SandstoneTrail.svg)
+
 ```rust
 map.set_theme(std::rc::Rc::new(egui_map::map::theme::Theme::SandstoneTrail));
 ```
 
-| Mode | node | segment | selected | alert | marker | text |
-|---|---|---|---|---|---|---|
-| Light | `#6B5A3A` | `#DCCBA0` | `#07638C` | `#D1495B` | `#60BF1D` | `#3A3121` |
-| Dark | `#C9AD72` | `#4E4530` | `#1F9ACC` | `#F0708A` | `#8EF23D` | `#E6D9B8` |
+| Mode | node | segment | selected | alert | marker | text | background |
+|---|---|---|---|---|---|---|---|
+| Light | `#838549` | `#B2B29E` | `#43AAAD` | `#5551BF` | `#8A88BF` | `#33332C` | `#FBFBF1` |
+| Dark | `#DDE088` | `#D7D99C` | `#6CE6EB` | `#7C78F2` | `#B7B5F2` | `#EFF0DE` | `#0D0D0B` |
 
 ---
 
-`EguiDefault` is the default theme (`Theme::default()`). The gallery image and the tables above are generated together, straight from `src/map/theme.rs`, by `scripts/generate_theme_gallery` (a standalone Rust tool -- run it with `cargo run --manifest-path scripts/generate_theme_gallery/Cargo.toml` from the repo root) -- if the palettes there ever change, rerun it rather than hand-editing this file or the PNG.
+`EguiDefault` is the default theme (`Theme::default()`). Every preview above and the tables alongside them are generated together, straight from `src/map/theme.rs`, by `scripts/generate_theme_gallery` (a standalone Rust tool -- run it with `cargo run --manifest-path scripts/generate_theme_gallery/Cargo.toml` from the repo root) -- if the palettes there ever change, rerun it rather than hand-editing this file or the SVGs under `theme_gallery/`.
