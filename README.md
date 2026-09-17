@@ -163,7 +163,7 @@ map.set_segment_template(std::rc::Rc::new(MySegments));
 
 ### Region labels
 
-`RegionLabel` names an area of the map rather than a single node — think "Domain" or "Nullsec", not a station name. It is deliberately the opposite of every other text the widget draws: its font size (see `Style::region_label_font` below) scales *with* the current zoom instead of staying a fixed screen size, it is always painted first so every node, line and free-floating `MapLabel` draws over it, and its default color is the active theme's text color faded by `MapSettings::region_label_alpha` (`0.25` by default) so it reads as a backdrop instead of competing for attention. The built-in renderer caches the laid-out text (`Arc<Galley>`, keyed by text and rounded size) and only re-applies color at paint time, so a region label that hasn't changed costs a cache lookup rather than a full relayout every frame:
+`RegionLabel` names an area of the map rather than a single node — think "Domain" or "Nullsec", not a station name. It is deliberately the opposite of every other text the widget draws: its font size (see `Style::region_label_font` below) scales *with* the current zoom instead of staying a fixed screen size, it is always painted first so every node, line and free-floating `MapLabel` draws over it, and its default color is the active theme's text color faded by `MapSettings::region_label_alpha` (`0.50` by default) so it reads as a backdrop instead of competing for attention. The built-in renderer caches the laid-out text (`Arc<Galley>`, keyed by text and rounded size) and only re-applies color at paint time, so a region label that hasn't changed costs a cache lookup rather than a full relayout every frame:
 
 ```rust
 use egui_map::map::Map;

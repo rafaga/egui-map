@@ -210,7 +210,7 @@ fn build_card_svg(x0: f32, y0: f32, mode: &str, colors: &BTreeMap<&'static str, 
 
     // `RegionLabel` backdrop: the widget paints these first, behind
     // everything else, in `ThemeColors::text` faded by
-    // `MapSettings::region_label_alpha` (default 0.25). Shown here bold and
+    // `MapSettings::region_label_alpha` (default 0.50). Shown here bold and
     // at a fixed 50% so it reads clearly in a small preview card -- not the
     // crate's own default alpha, just enough to make the layer visible.
     let text_color = hex(colors["text"]);
