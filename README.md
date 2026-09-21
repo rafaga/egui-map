@@ -9,10 +9,11 @@ An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D
 - Node names with configurable visibility rules (always / on hover / hidden).
 - Connection lines between nodes and free-floating text labels.
 - Text is sized in **screen pixels** (`MapSettings::node_text_size`, `MapSettings::label_text_size`), so names stay readable at any zoom level instead of shrinking away as you zoom out.
+- Region labels (`RegionLabel`, via `Map::add_region_labels`) for naming an *area* of the map rather than a node: unlike every other text the widget draws, their size scales *with* zoom, they are always painted first (behind everything else) and in a faded color, with the built-in renderer caching laid-out text for performance. Customizable through the `LabelTemplate` trait.
 - Animations attached per node through `map.node(id)`: one-off events that end on their own (`pulse`, `ripple`, `countdown`, `scale_in`, `crosshair`) and lasting state that runs until `clear()` (`halo`, `blink`, `orbit`), each with an optional `color()`. The effects live in `map::animation::Animation` and can be reused from your own `NodeTemplate`.
 - The same idiom for segments through `map.segment(id)`: `flash` / `comet_once(at, direction)` / `wipe` (one-off) and `comet` / `dash` / `glow_band` / `chevrons` (lasting, until `clear()`) -- `comet_once` is a single dot pass with the direction you choose (`CometDirection::Forward`/`Reverse`), `wipe` draws the line in from one endpoint to the other, `dash` is a "marching ants" pattern and `chevrons` a row of sliding arrowheads, both painted as a repeating-texture mesh (two triangles per segment, one shared texture), `glow_band` a soft travelling highlight that fades out past each end instead of repeating, also with an optional `color()`.
-- Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits, and custom segment rendering through `SegmentTemplate`.
-- [Fourteen built-in color themes](THEMES.md), each with a light and a dark variant, or install your own through the `MapTheme` trait.
+- Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits, custom segment rendering through `SegmentTemplate`, and custom region-label rendering through `LabelTemplate`.
+- [Fifteen built-in color themes](THEMES.md), each with a light and a dark variant -- `SystemDefault`, matching plain egui's own colors, is the default -- or install your own through the `MapTheme` trait.
 
 ## Usage
 
@@ -73,15 +74,19 @@ A line is only drawn while the zoom level is above `MapSettings::line_visible_zo
 Implement `NodeTemplate` to take over how nodes, selection highlights, notifications and markers are drawn — including the name labels, which the widget no longer paints once a template is installed:
 
 ```rust
-use egui_map::map::objects::{MapPoint, MarkerContext, NodeTemplate, NotificationContext};
-use egui::{Color32, Pos2, Ui};
+use egui_map::map::objects::{
+    MarkerContext, NodeContext, NodeTemplate, NotificationContext, SelectionContext,
+};
+use egui::Ui;
 
 struct MyTemplate;
 
 impl NodeTemplate for MyTemplate {
-    fn node_ui(&self, ui: &mut Ui, position: Pos2, zoom: f32, point: &MapPoint) {
-        // `point` is the node's screen position; scale every size by `zoom`.
-        ui.painter().circle_filled(position, 6.0 * zoom, Color32::GOLD);
+    fn node_ui(&self, ui: &mut Ui, ctx: NodeContext) {
+        // `ctx.position` is the node's screen position; scale every size by `ctx.zoom`.
+        // `ctx.color` is already resolved: the node's own color override, or the
+        // active theme's node color if it doesn't have one.
+        ui.painter().circle_filled(ctx.position, 6.0 * ctx.zoom, ctx.color);
     }
 
     fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
@@ -92,10 +97,17 @@ impl NodeTemplate for MyTemplate {
         ctx.initial_time.elapsed().as_secs_f32() < 2.0 // returning false removes the notification
     }
 
-    fn selection_ui(&self, _ui: &mut Ui, _position: Pos2, _zoom: f32) {}
+    fn selection_ui(&self, _ui: &mut Ui, _ctx: SelectionContext) {
+        // `ctx.point` is which node the highlight belongs to; `ctx.color` is the
+        // active theme's selection color.
+    }
     fn marker_ui(&self, _ui: &mut Ui, _ctx: MarkerContext) {
         // `ctx.kind` is Halo/Blink/Orbit for persistent node state, or the shared
         // `MapSettings::marker_animation` for a `Map::update_marker` marker.
+        // `ctx.color` is the color the built-in effect would paint with: the
+        // node's own override, or the active theme's `marker` color -- its own
+        // role, distinct from `selected`/`alert`, for "this is flagged"
+        // indefinitely rather than a one-off event.
     }
 }
 
@@ -106,28 +118,40 @@ See the `NodeTemplate` rustdoc for a complete example with a custom node shape a
 
 ### Custom segment rendering and animations
 
-`SegmentTemplate` is the segment counterpart of `NodeTemplate`. Its methods take a bare `&Painter` rather than `&mut Ui`, since segments are visited in bulk after the R-tree viewport culling — use `painter.ctx()` to reach `request_repaint()`:
+`SegmentTemplate` is the segment counterpart of `NodeTemplate`. Its methods take a bare `&Painter` rather than `&mut Ui`, since segments are visited in bulk after the R-tree viewport culling — use `painter.ctx()` to reach `request_repaint()`. Like `NodeTemplate`, every method takes a `#[non_exhaustive]` context struct — `SegmentContext`, `SegmentNotificationContext`, `SegmentStateContext` — each carrying the segment's endpoints (`pos_a`/`pos_b`), `zoom`, the `segment` itself (id and coordinates) and a resolved `color`; the two effect contexts also carry `kind`, so you can match it and dispatch straight to the built-in `Animation::*` function instead of reimplementing the effect:
 
 ```rust
-use egui_map::map::objects::{MapSegment, SegmentTemplate};
-use egui::{Color32, Painter, Pos2, Stroke};
-use std::time::Instant;
+use egui_map::map::animation::Animation;
+use egui_map::map::objects::{
+    SegmentContext, SegmentNotificationContext, SegmentStateContext, SegmentTemplate,
+    SteadySegmentAnimation,
+};
+use egui::{Color32, Painter, Stroke};
 
 struct MySegments;
 
 impl SegmentTemplate for MySegments {
-    fn segment_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, _segment: &MapSegment) {
-        painter.line_segment([a, b], Stroke::new(1.5 * zoom, Color32::GRAY));
+    fn segment_ui(&self, painter: &Painter, ctx: SegmentContext) {
+        painter.line_segment([ctx.pos_a, ctx.pos_b], Stroke::new(1.5 * ctx.zoom, Color32::GRAY));
     }
 
-    fn segment_notification_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, start: Instant, color: Color32) -> bool {
-        // ... draw a time-driven effect computed from `start.elapsed()` ...
+    fn segment_notification_ui(&self, painter: &Painter, ctx: SegmentNotificationContext) -> bool {
+        // `ctx.kind` is which of flash/comet_once/wipe was requested -- dispatch
+        // on it, or draw a time-driven effect computed from `ctx.initial_time.elapsed()`.
         painter.ctx().request_repaint(); // keep the animation frames coming
-        start.elapsed().as_secs_f32() < 1.0 // returning false removes the notification
+        ctx.initial_time.elapsed().as_secs_f32() < 1.0 // returning false removes the notification
     }
 
-    fn segment_state_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, time: f32, color: Color32) {
-        // `time` is the frame time (`ui.input(|i| i.time)`), shared by every element animated this frame.
+    fn segment_state_ui(&self, painter: &Painter, ctx: SegmentStateContext) {
+        // `ctx.kind` is which persistent effect was requested -- reuse the
+        // matching built-in one instead of reimplementing it:
+        let effect = match ctx.kind {
+            SteadySegmentAnimation::Comet => Animation::comet,
+            SteadySegmentAnimation::Dash => Animation::dash,
+            SteadySegmentAnimation::GlowBand => Animation::glow_band,
+            SteadySegmentAnimation::Chevrons => Animation::chevrons,
+        };
+        effect(painter, ctx.pos_a, ctx.pos_b, ctx.zoom, ctx.time, ctx.color);
         painter.ctx().request_repaint();
     }
 }
@@ -137,9 +161,34 @@ map.set_segment_template(std::rc::Rc::new(MySegments));
 
 `examples/animations.rs` shows the built-in node and segment effects end to end, with no custom template at all. `examples/node_template_animations.rs` shows the opposite pairing: a custom `NodeTemplate` (its own node shape) that still reuses the built-in `Animation::*` functions from its `notification_ui`/`marker_ui` hooks instead of hand-rolling new ones, dispatching directly on the `kind`/`node_id` those hooks receive.
 
+### Region labels
+
+`RegionLabel` names an area of the map rather than a single node — think "Domain" or "Nullsec", not a station name. It is deliberately the opposite of every other text the widget draws: its font size (see `Style::region_label_font` below) scales *with* the current zoom instead of staying a fixed screen size, it is always painted first so every node, line and free-floating `MapLabel` draws over it, and its default color is the active theme's text color faded by `MapSettings::region_label_alpha` (`0.50` by default) so it reads as a backdrop instead of competing for attention. The built-in renderer caches the laid-out text (`Arc<Galley>`, keyed by text and rounded size) and only re-applies color at paint time, so a region label that hasn't changed costs a cache lookup rather than a full relayout every frame:
+
+```rust
+use egui_map::map::Map;
+use egui_map::map::objects::RegionLabel;
+
+let mut map = Map::new();
+map.add_region_labels(vec![RegionLabel {
+    text: "Domain".to_string(),
+    center: egui::pos2(300.0, 200.0), // map coordinates, like MapPoint::coords
+}]);
+```
+
+Install a `LabelTemplate` with `Map::set_label_template` to take over the drawing entirely — see its rustdoc for the `LabelContext` fields (`position`, `zoom`, `label`, `size` already scaled by zoom, `color` already faded, and the full theme `ThemeColors` palette).
+
+The built-in renderer's font comes from `Style::region_label_font` — a `FontId`, for symmetry with `Style::font` — set on the single `Style` shared by both light and dark mode, `MapSettings::style`. Unlike `Style::font`, it is mandatory rather than optional: every `Style` must pick an explicit typeface and base size, there is no built-in fallback. `family` picks the typeface and `size` is the base size, still scaled by the current zoom:
+
+```rust
+use egui::{FontFamily, FontId};
+
+map.settings.style.region_label_font = FontId::new(30.0, FontFamily::Monospace);
+```
+
 ### Custom themes
 
-The widget ships fourteen named [`Theme`](https://docs.rs/egui-map/latest/egui_map/map/theme/enum.Theme.html) palettes — `NebulaViolet` is the default — each with a light and a dark variant; see the `Theme` rustdoc for the full list. Switch between them, or install your own palette, with `Map::set_theme` and the `MapTheme` trait:
+The widget ships fifteen named [`Theme`](https://docs.rs/egui-map/latest/egui_map/map/theme/enum.Theme.html) palettes — `SystemDefault`, which carries over egui's own default colors so an unthemed map looks like plain egui, is the default — each with a light and a dark variant; see the `Theme` rustdoc for the full list. Switch between them, or install your own palette, with `Map::set_theme` and the `MapTheme` trait:
 
 ```rust
 use egui_map::map::theme::{ColorMode, MapTheme, Theme, ThemeColors};
@@ -158,14 +207,18 @@ impl MapTheme for HighContrast {
                 segment: egui::Color32::DARK_GRAY,
                 selected: egui::Color32::RED,
                 alert: egui::Color32::RED,
+                marker: egui::Color32::BLUE,
                 text: egui::Color32::BLACK,
+                background: egui::Color32::WHITE,
             },
             ColorMode::Dark => ThemeColors {
                 node: egui::Color32::WHITE,
                 segment: egui::Color32::LIGHT_GRAY,
                 selected: egui::Color32::YELLOW,
                 alert: egui::Color32::YELLOW,
+                marker: egui::Color32::LIGHT_BLUE,
                 text: egui::Color32::WHITE,
+                background: egui::Color32::BLACK,
             },
         }
     }
@@ -174,7 +227,7 @@ impl MapTheme for HighContrast {
 map.set_theme(std::rc::Rc::new(HighContrast));
 ```
 
-`ColorMode` follows `egui`'s own light/dark mode, so the same map picks up the right palette automatically when the surrounding app's mode changes. Non-palette visual settings (stroke widths, font, background) stay on `MapSettings::styles` — see the `theme` module rustdoc.
+`ColorMode` is `egui::Theme` re-exported under this crate's name, so the same map picks up the right palette automatically when the surrounding app's mode changes. Non-palette visual settings (stroke width, font, background) stay on `MapSettings::styles` — see the `theme` module rustdoc.
 
 ## Crate features
 

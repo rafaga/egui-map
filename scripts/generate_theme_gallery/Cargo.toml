@@ -1,0 +1,17 @@
+[package]
+name = "generate_theme_gallery"
+version = "0.1.0"
+edition = "2021"
+publish = false
+# Standalone dev tool, deliberately its own crate outside the egui-map
+# workspace/dependency graph: `scripts/` is excluded from the published
+# `egui-map` package (see the top-level Cargo.toml `exclude`), so pulling in
+# a regex crate here never affects egui-map's own dependency tree.
+#
+# No raster/font dependencies (previously `image`/`imageproc`/`ab_glyph`):
+# the gallery is plain hand-built SVG text now, rendered by whatever opens
+# it (a browser, an image viewer, GitHub/crates.io's own Markdown preview)
+# instead of by this tool, so there is no TTF to locate on disk anymore.
+
+[dependencies]
+regex = "1"

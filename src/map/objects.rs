@@ -1,13 +1,14 @@
 //! Data types consumed by the [`Map`](super::Map) widget.
 //!
 //! This module contains the geometry primitives ([`RawPoint`], [`RawLine`]),
-//! the map content types ([`MapPoint`], [`MapSegment`], [`MapLabel`]) and the
-//! customization points of the widget: [`MapSettings`],
-//! [`Style`](super::theme::Style), [`VisibilitySetting`],
-//! [`ContextMenuManager`] and [`NodeTemplate`]. The color palette a `Style`
-//! paints with lives in [`super::theme`], via [`MapTheme`](super::theme::MapTheme).
+//! the map content types ([`MapPoint`], [`MapSegment`], [`MapLabel`],
+//! [`RegionLabel`]) and the customization points of the widget:
+//! [`MapSettings`], [`Style`], [`VisibilitySetting`],
+//! [`ContextMenuManager`], [`NodeTemplate`], [`SegmentTemplate`] and
+//! [`LabelTemplate`]. The color palette a `Style` paints with lives in
+//! [`super::theme`], via [`MapTheme`](super::theme::MapTheme).
 
-use crate::map::theme::{ColorMode, Style, Theme};
+use crate::map::theme::{Style, ThemeColors};
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Ui};
 use rstar::AABB;
 use std::convert::{From, Into};
@@ -457,7 +458,11 @@ impl From<[[i64; 2]; 2]> for RawLine {
 pub struct MapLabel {
     /// The text to display.
     pub text: String,
-    /// The position of the label's center.
+    /// The center of the label, in **map coordinates** -- the same space as
+    /// [`MapPoint::coords`]. It is projected to the screen with the map's own
+    /// pan/zoom (`coords * zoom - min_point`), so it tracks a place on the map
+    /// instead of a fixed pixel. Only the label's *font size* stays in screen
+    /// pixels.
     pub center: Pos2,
 }
 
@@ -473,6 +478,57 @@ impl MapLabel {
         MapLabel {
             text: String::new(),
             center: Pos2::new(0.00, 0.00),
+        }
+    }
+}
+
+/// A text label anchored to a region of the map, rather than to a single
+/// node.
+///
+/// Contrast with [`MapLabel`], which is a fixed-size on-screen annotation:
+/// a `RegionLabel`'s font size scales continuously with the map's zoom
+/// instead of staying screen-constant (see
+/// [`Style::region_label_font`](super::theme::Style::region_label_font)),
+/// it is always painted as the very first, deepest layer -- behind
+/// connection lines, nodes and
+/// [`MapLabel`]s -- and it is drawn in a more transparent color so it reads
+/// as a backdrop naming an area instead of competing with the map's own
+/// content (see [`MapSettings::region_label_alpha`]).
+///
+/// Region labels are installed with
+/// [`Map::add_region_labels`](super::Map::add_region_labels). Unless a
+/// [`LabelTemplate`] is installed with
+/// [`Map::set_label_template`](super::Map::set_label_template), the widget
+/// draws them itself, caching the laid-out text so a label that hasn't
+/// changed text or (rounded) size costs a cache lookup rather than a full
+/// relayout every frame.
+#[derive(Clone, Debug)]
+pub struct RegionLabel {
+    /// The text to display.
+    pub text: String,
+    /// The center of the label, in **map coordinates** -- the same space as
+    /// [`MapPoint::coords`]. It is projected to the screen with the map's
+    /// own pan/zoom (`coords * zoom - min_point`), exactly like a node.
+    pub center: Pos2,
+    /// The color that user want to display for this particular region label. 
+    /// The default is the Theme text color with alpha multiplied by 
+    /// [`MapSettings::region_label_alpha`].
+    pub color: Option<Color32>,
+}
+
+impl Default for RegionLabel {
+    fn default() -> Self {
+        RegionLabel::new()
+    }
+}
+
+impl RegionLabel {
+    /// Creates an empty region label centered at the origin.
+    pub fn new() -> Self {
+        RegionLabel {
+            text: String::new(),
+            center: Pos2::new(0.00, 0.00),
+            color: None,
         }
     }
 }
@@ -501,12 +557,33 @@ pub struct MapSegment {
     pub point1: [f32; 2],
     /// The other endpoint of the segment, in map coordinates.
     pub point2: [f32; 2],
+    /// Persistent color override for this segment's default line. `None`
+    /// (the default) falls back to the active
+    /// [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::segment`](super::theme::ThemeColors::segment) for the
+    /// current color mode -- see [`Map::set_theme`](super::Map::set_theme).
+    ///
+    /// Only consulted by the built-in stroke drawn when no
+    /// [`SegmentTemplate`] is installed -- a custom template receives this
+    /// same `MapSegment` via [`SegmentContext::segment`], with
+    /// [`SegmentContext::color`] already carrying the resolved fallback.
+    pub color: Option<Color32>,
 }
 
 impl MapSegment {
     /// Creates a segment for `id` between `point1` and `point2`.
     pub fn new(id: (usize, usize), point1: [f32; 2], point2: [f32; 2]) -> Self {
-        Self { id, point1, point2 }
+        Self {
+            id,
+            point1,
+            point2,
+            color: None,
+        }
+    }
+
+    /// Sets this segment's persistent color override (see [`Self::color`]).
+    pub fn set_color(&mut self, color: Color32) {
+        self.color = Some(color);
     }
 
     /// The segment geometry as a [`RawLine`], for the distance/midpoint math
@@ -548,7 +625,8 @@ impl rstar::RTreeObject for MapSegment {
 ///   for a bare coordinate with no entity behind it (e.g. a bounding-box
 ///   corner); every `MapPoint` loaded into the widget represents a real,
 ///   placed node whose id is used directly as the point-set `HashMap` key
-///   and the kd-tree payload (see [`Map::add_hashmap_points`]), so an
+///   and the kd-tree payload (see
+///   [`Map::add_hashmap_points`](super::Map::add_hashmap_points)), so an
 ///   optional id would just push an `.unwrap()` (or a silently dropped
 ///   node) into those call sites with no caller ever passing `None`.
 ///
@@ -573,14 +651,16 @@ pub struct MapPoint {
     /// visibility, so a line is drawn whenever its bounding box intersects
     /// the viewport.
     pub connections: Vec<(usize, usize)>,
-    /// Persistent fill color for this node's default circle, in place of
-    /// [`NodeStyle::fill_color`](super::NodeStyle::fill_color). `None`
-    /// (the default) keeps today's behavior of every node sharing the
-    /// same style color.
+    /// Persistent color override for this node's default circle. `None`
+    /// (the default) falls back to the active
+    /// [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::node`](super::theme::ThemeColors::node) for the
+    /// current color mode -- see [`Map::set_theme`](super::Map::set_theme).
     ///
     /// Only consulted by the built-in circle drawn when no
     /// [`NodeTemplate`] is installed -- a custom template receives this
-    /// same `MapPoint` and decides for itself whether/how to use `color`.
+    /// same `MapPoint` via [`NodeContext::point`], with
+    /// [`NodeContext::color`] already carrying the resolved fallback.
     pub color: Option<Color32>,
 }
 
@@ -655,10 +735,11 @@ pub(crate) struct TextSettings {
 
 /// Configuration of a [`Map`](super::Map) widget.
 ///
-/// [`MapSettings::default()`] provides sensible zoom limits plus a light and a
-/// dark theme; the widget picks the style to apply based on
-/// [`egui::Visuals::dark_mode`], using `styles[0]` in light mode and
-/// `styles[1]` in dark mode.
+/// [`MapSettings::default()`] provides sensible zoom limits plus a `2.0`-wide
+/// line style and a `12.0`pt font; unlike the palette (light and dark come
+/// from the active [`MapTheme`](super::theme::MapTheme), see
+/// [`Map::set_theme`](super::Map::set_theme)), the same [`Style`] applies in
+/// both light and dark mode.
 #[derive(Clone, Debug)]
 pub struct MapSettings {
     /// Maximum zoom factor.
@@ -697,11 +778,22 @@ pub struct MapSettings {
     ///
     /// Screen-space, exactly like [`node_text_size`](Self::node_text_size).
     pub label_text_size: f32,
-    /// Per-mode styles; index `0` is used in light mode, index `1` in dark
-    /// mode. Their colors are kept in sync with the active
-    /// [`MapTheme`](super::theme::MapTheme) -- see
-    /// [`Map::set_theme`](super::Map::set_theme) -- rather than set here.
-    pub styles: Vec<Style>,
+    /// Multiplier applied to the active theme's
+    /// [`ThemeColors::text`](super::theme::ThemeColors::text) alpha when
+    /// painting [`RegionLabel`]s, clamped to `0.0..=1.0`.
+    ///
+    /// Kept separate from [`ThemeColors`] because it shapes *this widget's*
+    /// background layer rather than a palette role a custom
+    /// [`MapTheme`](super::theme::MapTheme) would want to own. Lower values
+    /// keep region labels reading as a faint backdrop instead of competing
+    /// with node names and other foreground text.
+    pub region_label_alpha: f32,
+    /// Visual style, shared by both light and dark mode. `Style` carries no
+    /// palette color of its own -- node fill, connection lines, alerts,
+    /// selection, markers, text and background are all kept in sync with the
+    /// active [`MapTheme`](super::theme::MapTheme) instead, see
+    /// [`Map::set_theme`](super::Map::set_theme).
+    pub style: Style,
 }
 
 impl MapSettings {
@@ -720,17 +812,26 @@ impl MapSettings {
             marker_animation: SteadyAnimation::Blink,
             node_text_size: 12.0,
             label_text_size: 24.0,
-            styles: vec![Style::new()],
+            region_label_alpha: 0.0,
+            style: Style::new(),
         }
     }
 }
 
 impl Default for MapSettings {
     /// Returns the default configuration: zoom from `0.1` to `2.0`, connection
-    /// lines visible above `0.2`, node names above `0.58`, and built-in light
-    /// and dark themes.
+    /// lines visible above `0.2`, node names above `0.58`, region labels at a
+    /// base size of `48.0` map units faded to `50%` of the theme's text
+    /// alpha, and a `2.0`-wide line style with a `12.0`pt font.
     fn default() -> Self {
-        let mut obj = MapSettings {
+        // `Style` carries no palette color of its own -- every *palette*
+        // color the widget paints with (node fill, connection lines,
+        // alerts, selection, markers, text, background) comes live from the
+        // default `MapTheme` instead (see `Map::set_theme`/
+        // `Map::theme_colors`), so there is nothing here to keep in sync
+        // with a `Theme`; the same `Style` below applies in both light and
+        // dark mode.
+        MapSettings {
             max_zoom: 2.0,
             min_zoom: 0.1,
             line_visible_zoom: 0.2,
@@ -739,52 +840,13 @@ impl Default for MapSettings {
             marker_animation: SteadyAnimation::Blink,
             node_text_size: 12.0,
             label_text_size: 24.0,
-            styles: Vec::new(),
-        };
-
-        // The border/background colors below are placeholders, overwritten
-        // by `Map::assign_visual_style` from egui's own visuals on the first
-        // frame. The node/text/alert/line colors instead come from the
-        // default `MapTheme` (see `Map::set_theme`) so they never duplicate
-        // what `Theme::colors` already defines -- `Map::apply_theme_colors`
-        // keeps them in sync with whichever `MapTheme` is installed.
-        let light = Theme::default().colors(ColorMode::Light);
-        let dark = Theme::default().colors(ColorMode::Dark);
-
-        // light Theme
-        obj.styles.push(Style {
-            border: Some(egui::Stroke {
-                width: 2.0,
-                color: Color32::from_rgb(216, 142, 58),
-            }),
-            line: Some(egui::Stroke {
-                width: 2.0,
-                color: light.segment,
-            }),
-            fill_color: light.node,
-            text_color: light.text,
-            font: Some(FontId::new(12.00, FontFamily::Proportional)),
-            background_color: Color32::WHITE,
-            alert_color: light.alert,
-        });
-
-        // Dark Theme
-        obj.styles.push(Style {
-            border: Some(egui::Stroke {
-                width: 2.0,
-                color: Color32::GOLD,
-            }),
-            line: Some(egui::Stroke {
-                width: 2.0,
-                color: dark.segment,
-            }),
-            fill_color: dark.node,
-            text_color: dark.text,
-            font: Some(FontId::new(12.00, FontFamily::Proportional)),
-            background_color: Color32::DARK_GRAY,
-            alert_color: dark.alert,
-        });
-        obj
+            region_label_alpha: 0.50,
+            style: Style {
+                line_width: Some(2.0),
+                font: Some(FontId::new(12.00, FontFamily::Proportional)),
+                region_label_font: FontId::new(48.0, FontFamily::Proportional),
+            },
+        }
     }
 }
 
@@ -968,30 +1030,32 @@ pub trait ContextMenuManager {
 /// animation that expands and fades out over two seconds:
 ///
 /// ```
-/// use egui_map::map::objects::{MapPoint, NodeTemplate, NotificationContext, MarkerContext};
+/// use egui_map::map::objects::{MapPoint, NodeContext, NodeTemplate, NotificationContext, MarkerContext, SelectionContext};
 /// use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Ui, Vec2};
 /// use std::time::Instant;
 ///
 /// struct BoxedNodes;
 ///
 /// impl NodeTemplate for BoxedNodes {
-///     fn node_ui(&self, ui: &mut Ui, position: Pos2, zoom: f32, point: &MapPoint) {
-///         // Multiply every size by `zoom` so the node scales with the map.
-///         let rect = Rect::from_center_size(position, Vec2::new(90.0 * zoom, 35.0 * zoom));
-///         let rounding = CornerRadius::same((10.0 * zoom) as u8);
+///     fn node_ui(&self, ui: &mut Ui, ctx: NodeContext) {
+///         // Multiply every size by `ctx.zoom` so the node scales with the map.
+///         let rect = Rect::from_center_size(ctx.position, Vec2::new(90.0 * ctx.zoom, 35.0 * ctx.zoom));
+///         let rounding = CornerRadius::same((10.0 * ctx.zoom) as u8);
 ///         let painter = ui.painter();
-///         painter.rect_filled(rect, rounding, ui.visuals().extreme_bg_color);
+///         // `ctx.color` is already resolved: `ctx.point.color` if the node has
+///         // its own override, otherwise the active theme's node color.
+///         painter.rect_filled(rect, rounding, ctx.color);
 ///         painter.rect_stroke(
 ///             rect,
 ///             rounding,
-///             Stroke::new(4.0 * zoom, Color32::WHITE),
+///             Stroke::new(4.0 * ctx.zoom, Color32::WHITE),
 ///             egui::StrokeKind::Middle,
 ///         );
 ///         painter.text(
-///             position,
+///             ctx.position,
 ///             Align2::CENTER_CENTER,
-///             point.get_name(),
-///             FontId::proportional(12.0 * zoom),
+///             ctx.point.get_name(),
+///             FontId::proportional(12.0 * ctx.zoom),
 ///             Color32::WHITE,
 ///         );
 ///     }
@@ -1018,12 +1082,12 @@ pub trait ContextMenuManager {
 ///         // Returning `false` removes the notification.
 ///         secs < 2.0
 ///     }
-///     # fn selection_ui(&self, ui: &mut Ui, point: Pos2, zoom: f32) {
-///     #     let rect = Rect::from_center_size(point, Vec2::new(94.0 * zoom, 39.0 * zoom));
+///     # fn selection_ui(&self, ui: &mut Ui, ctx: SelectionContext) {
+///     #     let rect = Rect::from_center_size(ctx.position, Vec2::new(94.0 * ctx.zoom, 39.0 * ctx.zoom));
 ///     #     ui.painter().rect_stroke(
 ///     #         rect,
-///     #         CornerRadius::same((10.0 * zoom) as u8),
-///     #         Stroke::new(3.0 * zoom, Color32::YELLOW),
+///     #         CornerRadius::same((10.0 * ctx.zoom) as u8),
+///     #         Stroke::new(3.0 * ctx.zoom, ctx.color),
 ///     #         egui::StrokeKind::Middle,
 ///     #     );
 ///     # }
@@ -1036,23 +1100,36 @@ pub trait ContextMenuManager {
 ///
 /// # Note on `NodeAnimation`/`SteadyAnimation` in the examples above
 ///
-/// The hidden (`#`-prefixed) stub methods above still take `Pos2`/`f32`
-/// directly rather than a context struct -- only [`NotificationContext`] and
-/// [`MarkerContext`] exist; `node_ui`/`selection_ui` were not wide enough to
-/// need one.
+/// Every method here takes a context struct -- [`NodeContext`],
+/// [`SelectionContext`], [`NotificationContext`] or [`MarkerContext`] -- each
+/// `#[non_exhaustive]` so a future field can be added without another
+/// breaking change to `NodeTemplate` itself.
 pub trait NodeTemplate {
     /// Draws a node, replacing the default filled circle.
     ///
     /// Called every frame for each visible node. The widget no longer draws
     /// the node name once a template is installed, so render it here (e.g.
-    /// with [`Painter::text`](egui::Painter::text)) if you need it.
-    fn node_ui(&self, ui: &mut Ui, _viewport_position: Pos2, _zoom: f32, _point: &MapPoint);
+    /// with [`Painter::text`](egui::Painter::text), or
+    /// [`Shape::text`](egui::Shape::text) plus your own
+    /// `ui.ctx().fonts_mut(...)`) if you need it. See [`NodeContext`] for the
+    /// fields available, in particular `ctx.color` -- the color already
+    /// resolved for this node, so you don't have to repeat the
+    /// `point.color.unwrap_or(...)` fallback (or reach for the active theme
+    /// yourself) to honor a per-node color override. If you lay out text
+    /// yourself, consider caching the resulting `Arc<Galley>` keyed by
+    /// `ctx.point.id` (and whatever else affects it -- text, color, size) so
+    /// a cache hit avoids opening `fonts_mut` at all; this hook runs once per
+    /// visible node, every frame.
+    fn node_ui(&self, ui: &mut Ui, ctx: NodeContext);
 
     /// Draws the highlight over the node closest to the mouse pointer.
     ///
     /// The nearest node is only computed while the pointer is over the map and
     /// [`MapSettings::node_text_visibility`] is [`VisibilitySetting::Hover`].
-    fn selection_ui(&self, ui: &mut Ui, _viewport_position: Pos2, _zoom: f32);
+    /// See [`SelectionContext`] for the fields available, in particular
+    /// `ctx.point` (which node is being highlighted) and `ctx.color` (the
+    /// active theme's selection color, resolved for you).
+    fn selection_ui(&self, ui: &mut Ui, ctx: SelectionContext);
 
     /// Draws the notification effect of a node notified at
     /// `ctx.initial_time`.
@@ -1081,6 +1158,79 @@ pub trait NodeTemplate {
     fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext);
 }
 
+/// The context passed to [`NodeTemplate::node_ui`].
+///
+/// `#[non_exhaustive]`, like [`NotificationContext`]/[`MarkerContext`], so a
+/// future field can be added here without another breaking change.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct NodeContext<'a> {
+    /// The node's screen position: already scaled by `zoom` and translated
+    /// to the viewport origin.
+    pub position: Pos2,
+    /// Multiply every size you draw by this so it scales with the map.
+    pub zoom: f32,
+    /// The node being painted -- its id, name, coordinates and connections.
+    pub point: &'a MapPoint,
+    /// The color requested for this node: [`point.color`](MapPoint::color)
+    /// if the node has its own override, otherwise the active
+    /// [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::node`](super::theme::ThemeColors::node) for the
+    /// current color mode -- the same fallback the built-in circle uses when
+    /// no template is installed, resolved once here so every `NodeTemplate`
+    /// doesn't need to repeat it.
+    pub color: Color32,
+    /// The surrounding UI's faint background color (egui's active
+    /// visuals, not the installed [`MapTheme`](super::theme::MapTheme) --
+    /// this chip background deliberately follows the host application's own
+    /// light/dark visuals instead of
+    /// [`ThemeColors::background`](super::theme::ThemeColors::background),
+    /// so it blends into the surrounding UI the same way a plain egui panel
+    /// would), for chips/panels drawn behind a node's own label.
+    pub background_color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::node`](super::theme::ThemeColors::node) for the current
+    /// color mode -- the base color the theme paints nodes with, before any
+    /// per-node [`point.color`](MapPoint::color) override is applied. This is
+    /// what `color` falls back to when the node has no override, so it lets a
+    /// `NodeTemplate` tell the theme's own color apart from a node's computed
+    /// (overridden) one. Use
+    /// [`theme.text`](super::theme::ThemeColors::text) to paint a node's
+    /// label in the theme's text color -- the same color the built-in label
+    /// painting uses when no template is installed.
+    pub theme: ThemeColors,
+}
+
+/// The context passed to [`NodeTemplate::selection_ui`].
+///
+/// `#[non_exhaustive]`, like [`NodeContext`]/[`NotificationContext`]/
+/// [`MarkerContext`], so a future field can be added here without another
+/// breaking change.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct SelectionContext<'a> {
+    /// The node's screen position: already scaled by `zoom` and translated
+    /// to the viewport origin.
+    pub position: Pos2,
+    /// Multiply every size you draw by this so it scales with the map.
+    pub zoom: f32,
+    /// The node the highlight belongs to -- the one closest to the mouse
+    /// pointer. Its id, name, coordinates and connections.
+    pub point: &'a MapPoint,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::selected`](super::theme::ThemeColors::selected) for
+    /// the current color mode -- resolved once here so every `NodeTemplate`
+    /// doesn't need to reach for the theme itself.
+    pub color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode --
+    /// [`ThemeColors::selected`](super::theme::ThemeColors::selected) is
+    /// what `color` resolves from. The whole palette is handed over so a
+    /// `NodeTemplate` can use any other theme role (`node`, `alert`, ...)
+    /// without reaching for the theme itself.
+    pub theme: ThemeColors,
+}
+
 /// The context passed to [`NodeTemplate::notification_ui`].
 ///
 /// `#[non_exhaustive]` so a future field can be added here without another
@@ -1096,8 +1246,9 @@ pub struct NotificationContext {
     /// When the notification started -- usually fed into a progress
     /// computation like `Instant::now().duration_since(initial_time)`.
     pub initial_time: Instant,
-    /// The color requested for this notification (the node's own color, or
-    /// the current style's `alert_color` if none was set).
+    /// The color requested for this notification: the node's own override
+    /// if it was given one when triggered, otherwise the active theme's
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert).
     pub color: Color32,
     /// Which built-in event effect was requested (`pulse`, `ripple`, ...).
     /// Match on this to dispatch to the corresponding
@@ -1106,6 +1257,13 @@ pub struct NotificationContext {
     pub kind: NodeAnimation,
     /// The id of the node this notification belongs to.
     pub node_id: usize,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode --
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert) is what
+    /// `color` falls back to when the notification has no override. The
+    /// whole palette is handed over so a `NodeTemplate` can use any other
+    /// theme role without reaching for the theme itself.
+    pub theme: ThemeColors,
 }
 
 /// The context passed to [`NodeTemplate::marker_ui`].
@@ -1132,6 +1290,19 @@ pub struct MarkerContext {
     /// The id of the node the state/marker belongs to (for a marker: the id
     /// it points at, not the marker's own id).
     pub node_id: usize,
+    /// The color the built-in effect would draw with: the node's own
+    /// override for its lasting state, or -- for either a state with no
+    /// override or a plain [`Map::update_marker`](super::Map::update_marker)
+    /// marker, which has no color setting of its own at all -- the active
+    /// theme's [`ThemeColors::alert`](super::theme::ThemeColors::alert).
+    pub color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode --
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert) is what
+    /// `color` falls back to in every case, node state or plain marker
+    /// alike. The whole palette is handed over so a `NodeTemplate` can use
+    /// any other theme role without reaching for the theme itself.
+    pub theme: ThemeColors,
 }
 
 /// Customizes how segments and their visual effects are rendered.
@@ -1148,60 +1319,78 @@ pub struct MarkerContext {
 /// discard. Use [`Painter::ctx`] to reach the [`egui::Context`] — for example
 /// to call `request_repaint()`.
 ///
-/// The positions passed to these methods are in screen coordinates: already
-/// scaled by `zoom` and translated to the viewport origin, same as
-/// [`NodeTemplate`]'s. Multiply every size by `zoom` so your shapes scale
-/// together with the map.
+/// Every method takes a context struct -- [`SegmentContext`],
+/// [`SegmentNotificationContext`] or [`SegmentStateContext`] -- the same
+/// pattern [`NodeTemplate`] uses ([`NodeContext`], [`NotificationContext`],
+/// [`MarkerContext`]): each `#[non_exhaustive]` so a future field can be
+/// added without another breaking change, each carrying `pos_a`/`pos_b`
+/// (already scaled by `zoom` and translated to the viewport origin -- same
+/// convention as [`NodeTemplate`]'s `position`, just two points instead of
+/// one), `zoom`, `segment` (its id and endpoint coordinates) and a resolved
+/// `color` so you never have to reach for the active theme or reimplement a
+/// fallback yourself. The two effect contexts also carry `kind` -- match on
+/// it to dispatch straight to the matching built-in
+/// [`Animation`](crate::map::animation::Animation) function, exactly like
+/// [`NotificationContext::kind`]/[`MarkerContext::kind`] already let you do
+/// for nodes.
 ///
 /// # Examples
 ///
-/// A segment drawn as a dashed line, plus a notification that briefly
-/// thickens and brightens it:
+/// A segment drawn as a dashed line, a notification that briefly thickens
+/// and brightens it, and lasting state that reuses a built-in effect via
+/// `kind` instead of reimplementing it:
 ///
 /// ```
-/// use egui_map::map::objects::{MapSegment, SegmentTemplate};
-/// use egui::{Color32, Painter, Pos2, Stroke};
+/// use egui_map::map::animation::Animation;
+/// use egui_map::map::objects::{
+///     SegmentContext, SegmentNotificationContext, SegmentStateContext, SegmentTemplate,
+///     SteadySegmentAnimation,
+/// };
+/// use egui::{Color32, Painter, Stroke};
 /// use std::time::Instant;
 ///
 /// struct DashedRoutes;
 ///
 /// impl SegmentTemplate for DashedRoutes {
-///     fn segment_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, _segment: &MapSegment) {
+///     fn segment_ui(&self, painter: &Painter, ctx: SegmentContext) {
 ///         // A crude dash: short strokes along the segment, spaced in screen
 ///         // pixels so they don't stretch as the map zooms.
-///         let dir = b - a;
+///         let dir = ctx.pos_b - ctx.pos_a;
 ///         let len = dir.length();
-///         let step = 10.0 * zoom;
+///         let step = 10.0 * ctx.zoom;
 ///         let mut travelled = 0.0;
 ///         while travelled < len {
-///             let start = a + dir * (travelled / len);
-///             let end = a + dir * ((travelled + step * 0.6).min(len) / len);
-///             painter.line_segment([start, end], Stroke::new(2.0 * zoom, Color32::GRAY));
+///             let start = ctx.pos_a + dir * (travelled / len);
+///             let end = ctx.pos_a + dir * ((travelled + step * 0.6).min(len) / len);
+///             painter.line_segment([start, end], Stroke::new(2.0 * ctx.zoom, ctx.theme.segment));
 ///             travelled += step;
 ///         }
 ///     }
 ///
-///     fn segment_notification_ui(
-///         &self,
-///         painter: &Painter,
-///         a: Pos2,
-///         b: Pos2,
-///         zoom: f32,
-///         initial_time: Instant,
-///         color: Color32,
-///     ) -> bool {
-///         let secs = Instant::now().duration_since(initial_time).as_secs_f32();
+///     fn segment_notification_ui(&self, painter: &Painter, ctx: SegmentNotificationContext) -> bool {
+///         let secs = Instant::now().duration_since(ctx.initial_time).as_secs_f32();
 ///         let alpha = (1.0 - secs).clamp(0.0, 1.0);
-///         let fading =
-///             Color32::from_rgba_unmultiplied(color.r(), color.g(), color.b(), (255.0 * alpha) as u8);
-///         painter.line_segment([a, b], Stroke::new(5.0 * zoom, fading));
+///         let fading = Color32::from_rgba_unmultiplied(
+///             ctx.color.r(),
+///             ctx.color.g(),
+///             ctx.color.b(),
+///             (255.0 * alpha) as u8,
+///         );
+///         painter.line_segment([ctx.pos_a, ctx.pos_b], Stroke::new(5.0 * ctx.zoom, fading));
 ///         painter.ctx().request_repaint();
 ///         secs < 1.0
 ///     }
 ///
-///     fn segment_state_ui(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, time: f32, color: Color32) {
-///         let t = (time / 1.6).rem_euclid(1.0);
-///         painter.circle_filled(a + (b - a) * t, 4.0 * zoom, color);
+///     fn segment_state_ui(&self, painter: &Painter, ctx: SegmentStateContext) {
+///         // `ctx.kind` is which persistent effect this segment requested --
+///         // dispatch straight to it instead of reimplementing the math.
+///         let effect = match ctx.kind {
+///             SteadySegmentAnimation::Comet => Animation::comet,
+///             SteadySegmentAnimation::Dash => Animation::dash,
+///             SteadySegmentAnimation::GlowBand => Animation::glow_band,
+///             SteadySegmentAnimation::Chevrons => Animation::chevrons,
+///         };
+///         effect(painter, ctx.pos_a, ctx.pos_b, ctx.zoom, ctx.time, ctx.color);
 ///         painter.ctx().request_repaint();
 ///     }
 /// }
@@ -1210,50 +1399,238 @@ pub trait SegmentTemplate {
     /// Draws a segment, replacing the default stroked line.
     ///
     /// Called every frame for each segment that survives the R-tree viewport
-    /// culling in `paint_map_lines`.
-    fn segment_ui(
-        &self,
-        painter: &Painter,
-        pos_a: Pos2,
-        pos_b: Pos2,
-        zoom: f32,
-        segment: &MapSegment,
-    );
+    /// culling in `paint_map_lines`. See [`SegmentContext`] for the fields
+    /// available, in particular `ctx.color` -- the color the default stroke
+    /// would use, already resolved from the active theme.
+    fn segment_ui(&self, painter: &Painter, ctx: SegmentContext);
 
     /// Draws the notification effect of a segment notified through
     /// [`Map::segment`](super::Map::segment).
     ///
     /// Called every frame for each segment carrying an event-driven effect
-    /// (see [`SegmentHandle`](super::SegmentHandle)). Should return `true`
-    /// while the animation is still playing — remember to call
+    /// (see [`SegmentHandle`](super::SegmentHandle)). `ctx.kind` is which of
+    /// `flash`/`comet_once`/`wipe` was requested -- match on it to dispatch
+    /// to the corresponding [`Animation`](crate::map::animation::Animation)
+    /// function instead of reimplementing every effect by hand. See
+    /// [`SegmentNotificationContext`] for the rest of the fields. Should
+    /// return `true` while the animation is still playing — remember to call
     /// [`Painter::ctx`]`().request_repaint()` — once it returns `false` the
     /// notification is discarded.
-    fn segment_notification_ui(
-        &self,
-        painter: &Painter,
-        pos_a: Pos2,
-        pos_b: Pos2,
-        zoom: f32,
-        initial_time: Instant,
-        color: Color32,
-    ) -> bool;
+    fn segment_notification_ui(&self, painter: &Painter, ctx: SegmentNotificationContext) -> bool;
 
     /// Draws the lasting state effect of a segment (e.g. a travelling dot).
     ///
     /// Called every frame for each segment with lasting state set through
-    /// [`Map::segment`](super::Map::segment). `time` is the frame time in
-    /// seconds (`ui.input(|i| i.time)`), so every element animated this frame
-    /// shares one clock. For animated state, remember to call
+    /// [`Map::segment`](super::Map::segment). `ctx.kind` is which of
+    /// `comet`/`dash`/`glow_band`/`chevrons` was requested. `ctx.time` is the
+    /// frame time in seconds (`ui.input(|i| i.time)`), so every element
+    /// animated this frame shares one clock. See [`SegmentStateContext`] for
+    /// the rest of the fields. For animated state, remember to call
     /// [`Painter::ctx`]`().request_repaint()`.
-    fn segment_state_ui(
-        &self,
-        painter: &Painter,
-        pos_a: Pos2,
-        pos_b: Pos2,
-        zoom: f32,
-        time: f32,
-        color: Color32,
-    );
+    fn segment_state_ui(&self, painter: &Painter, ctx: SegmentStateContext);
+}
+
+/// The context passed to [`SegmentTemplate::segment_ui`].
+///
+/// `#[non_exhaustive]`, like [`SegmentNotificationContext`]/
+/// [`SegmentStateContext`], so a future field can be added here without
+/// another breaking change.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct SegmentContext<'a> {
+    /// The first endpoint's screen position: already scaled by `zoom` and
+    /// translated to the viewport origin.
+    pub pos_a: Pos2,
+    /// The second endpoint's screen position, same convention as `pos_a`.
+    pub pos_b: Pos2,
+    /// Multiply every size you draw by this so it scales with the map.
+    pub zoom: f32,
+    /// The segment being painted -- its id, endpoint coordinates and optional
+    /// color override.
+    pub segment: &'a MapSegment,
+    /// The color the default stroke would use: the segment's own
+    /// [`segment.color`](MapSegment::color) override if it has one, otherwise
+    /// the active [`MapTheme`](super::theme::MapTheme)'s
+    /// [`ThemeColors::segment`](super::theme::ThemeColors::segment) for the
+    /// current color mode -- already faded in with the zoom (see
+    /// [`MapSettings::line_visible_zoom`]) the same way the built-in line is
+    /// -- resolved once here so every `SegmentTemplate` doesn't need to
+    /// repeat it.
+    pub color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode --
+    /// [`ThemeColors::segment`](super::theme::ThemeColors::segment) is the
+    /// base color the theme paints segments with, before any per-segment
+    /// [`segment.color`](MapSegment::color) override or zoom fade is applied
+    /// (the faded, resolved value is `color`). The whole palette is handed
+    /// over so a `SegmentTemplate` can use any other theme role (`alert`,
+    /// `selected`, ...) without reaching for the theme itself.
+    pub theme: ThemeColors,
+}
+
+/// The context passed to [`SegmentTemplate::segment_notification_ui`].
+///
+/// `#[non_exhaustive]`, like [`SegmentContext`]/[`SegmentStateContext`], so a
+/// future field can be added here without another breaking change.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct SegmentNotificationContext<'a> {
+    /// The first endpoint's screen position: already scaled by `zoom` and
+    /// translated to the viewport origin.
+    pub pos_a: Pos2,
+    /// The second endpoint's screen position, same convention as `pos_a`.
+    pub pos_b: Pos2,
+    /// Multiply every size you draw by this so it scales with the map.
+    pub zoom: f32,
+    /// The segment this notification belongs to -- its id and endpoint
+    /// coordinates.
+    pub segment: &'a MapSegment,
+    /// When the notification started -- usually fed into a progress
+    /// computation like `Instant::now().duration_since(initial_time)`.
+    pub initial_time: Instant,
+    /// The color requested for this notification: the segment's own
+    /// override if it was given one when triggered, otherwise the active
+    /// theme's [`ThemeColors::alert`](super::theme::ThemeColors::alert).
+    pub color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode --
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert) is what
+    /// `color` falls back to when the notification has no override (the
+    /// faded, resolved value is `color`). The whole palette is handed over
+    /// so a `SegmentTemplate` can use any other theme role without
+    /// reaching for the theme itself.
+    pub theme: ThemeColors,
+    /// Which built-in event effect was requested (`flash`, `comet_once`,
+    /// `wipe`). Match on this to dispatch to the corresponding
+    /// [`Animation`](crate::map::animation::Animation) function instead of
+    /// reimplementing the lookup yourself.
+    pub kind: SegmentAnimation,
+}
+
+/// The context passed to [`SegmentTemplate::segment_state_ui`].
+///
+/// `#[non_exhaustive]`, like [`SegmentContext`]/[`SegmentNotificationContext`],
+/// so a future field can be added here without another breaking change.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct SegmentStateContext<'a> {
+    /// The first endpoint's screen position: already scaled by `zoom` and
+    /// translated to the viewport origin.
+    pub pos_a: Pos2,
+    /// The second endpoint's screen position, same convention as `pos_a`.
+    pub pos_b: Pos2,
+    /// Multiply every size you draw by this so it scales with the map.
+    pub zoom: f32,
+    /// The segment this lasting state belongs to -- its id and endpoint
+    /// coordinates.
+    pub segment: &'a MapSegment,
+    /// The frame time in seconds (`ui.input(|i| i.time)`), shared by every
+    /// element animated this frame.
+    pub time: f32,
+    /// The color requested for this state: the segment's own override if it
+    /// was given one, otherwise the active theme's
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert).
+    pub color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode --
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert) is what
+    /// `color` falls back to when the state has no override (the faded,
+    /// resolved value is `color`). The whole palette is handed over so a
+    /// `SegmentTemplate` can use any other theme role without reaching
+    /// for the theme itself.
+    pub theme: ThemeColors,
+    /// Which built-in persistent effect was requested (`comet`, `dash`,
+    /// `glow_band`, `chevrons`). Match on this to dispatch to the
+    /// corresponding [`Animation`](crate::map::animation::Animation)
+    /// function instead of reimplementing the lookup yourself.
+    pub kind: SteadySegmentAnimation,
+}
+
+/// Customizes how [`RegionLabel`]s are drawn, replacing the widget's
+/// built-in background rendering.
+///
+/// Installed with
+/// [`Map::set_label_template`](super::Map::set_label_template). Unlike
+/// [`NodeTemplate`]/[`SegmentTemplate`], there is a single hook -- region
+/// labels have no selection, notification or marker state of their own, just
+/// text painted on the map.
+///
+/// # Examples
+///
+/// ```
+/// use egui::{Color32, FontFamily, FontId, Painter};
+/// use egui_map::map::objects::{LabelContext, LabelTemplate};
+///
+/// struct MyLabels;
+///
+/// impl LabelTemplate for MyLabels {
+///     fn label_ui(&self, painter: &Painter, ctx: LabelContext) {
+///         painter.text(
+///             ctx.position,
+///             egui::Align2::CENTER_CENTER,
+///             &ctx.label.text,
+///             FontId::new(ctx.size, FontFamily::Proportional),
+///             ctx.color,
+///         );
+///     }
+/// }
+/// # let _ = Color32::TRANSPARENT;
+/// ```
+pub trait LabelTemplate {
+    /// Draws one region label.
+    ///
+    /// Called every frame for each label passed to
+    /// [`Map::add_region_labels`](super::Map::add_region_labels), before
+    /// anything else on the map is painted -- see [`RegionLabel`] for why.
+    /// `ctx.size` is already scaled by the current zoom and `ctx.color`
+    /// already carries the active theme's text color faded by
+    /// [`MapSettings::region_label_alpha`] -- see [`LabelContext`]. If you
+    /// lay text out yourself, consider caching the resulting `Arc<Galley>`
+    /// keyed by the label's text and (rounded) size, and applying color at
+    /// paint time with
+    /// [`Painter::galley_with_override_text_color`](egui::Painter::galley_with_override_text_color)
+    /// instead of baking it into the layout -- that way a theme or alpha
+    /// change never forces a relayout. This is what the built-in renderer
+    /// does.
+    fn label_ui(&self, painter: &Painter, ctx: LabelContext);
+}
+
+/// The context passed to [`LabelTemplate::label_ui`].
+///
+/// `#[non_exhaustive]`, like [`NodeContext`]/[`SegmentContext`], so a future
+/// field can be added here without another breaking change to
+/// [`LabelTemplate`].
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct LabelContext<'a> {
+    /// The label's screen position: already scaled by `zoom` and translated
+    /// to the viewport origin.
+    pub position: Pos2,
+    /// Current map zoom factor.
+    ///
+    /// Unlike [`NodeContext::zoom`]/[`SegmentContext::zoom`], this is not a
+    /// multiplier left for you to apply to a fixed size -- `size` below
+    /// already has it baked in, since (unlike node names or [`MapLabel`])
+    /// region labels scale continuously with zoom instead of staying
+    /// screen-constant. It is still handed over for effects that want to
+    /// react to zoom some other way.
+    pub zoom: f32,
+    /// The label being painted -- its text and map-coordinate center.
+    pub label: &'a RegionLabel,
+    /// Font size, in screen pixels, of this label: already `base * zoom`,
+    /// where `base` is the active
+    /// [`Style::region_label_font`](super::theme::Style::region_label_font)'s
+    /// size.
+    pub size: f32,
+    /// The color the built-in renderer paints with: the active theme's
+    /// [`ThemeColors::text`](super::theme::ThemeColors::text) faded by
+    /// [`MapSettings::region_label_alpha`].
+    pub color: Color32,
+    /// The active [`MapTheme`](super::theme::MapTheme)'s full
+    /// [`ThemeColors`] palette for the current color mode -- the whole
+    /// palette is handed over so a `LabelTemplate` can use any other theme
+    /// role without reaching for the theme itself.
+    pub theme: ThemeColors,
 }
 
 #[cfg(test)]
@@ -1587,100 +1964,103 @@ mod tests {
     }
 
     // ---------- MapStyle ----------
-
     fn full_style() -> Style {
         Style {
-            border: Some(egui::Stroke::new(2.0, Color32::RED)),
-            line: Some(egui::Stroke::new(4.0, Color32::BLUE)),
-            fill_color: Color32::GREEN,
-            text_color: Color32::WHITE,
+            line_width: Some(4.0),
             font: Some(FontId::new(10.0, FontFamily::Proportional)),
-            background_color: Color32::BLACK,
-            alert_color: Color32::YELLOW,
+            // A deliberately different size than any real region label
+            // setting, so a test asserting it is *unchanged* by scaling
+            // (or unused by painting, in `tests/region_labels.rs`) can't
+            // pass by accident.
+            region_label_font: FontId::new(99.0, FontFamily::Monospace),
         }
     }
 
     #[test]
     fn map_style_new() {
         let s = Style::new();
-        assert!(s.border.is_none());
-        assert!(s.line.is_none());
+        assert!(s.line_width.is_none());
         assert!(s.font.is_none());
-        assert_eq!(s.fill_color, Color32::TRANSPARENT);
-        assert_eq!(s.text_color, Color32::TRANSPARENT);
-        assert_eq!(s.background_color, Color32::TRANSPARENT);
-        assert_eq!(s.alert_color, Color32::TRANSPARENT);
+        assert_eq!(
+            s.region_label_font,
+            FontId::new(0.0, FontFamily::Proportional)
+        );
     }
 
     #[test]
     fn map_style_default_equals_new() {
         let s = Style::default();
-        assert!(s.border.is_none());
-        assert!(s.line.is_none());
+        assert!(s.line_width.is_none());
         assert!(s.font.is_none());
+        assert_eq!(
+            s.region_label_font,
+            FontId::new(0.0, FontFamily::Proportional)
+        );
     }
 
     #[test]
     fn map_style_mul_i64() {
         let s = full_style() * 2i64;
-        assert_eq!(s.border.unwrap().width, 4.0);
-        assert_eq!(s.line.unwrap().width, 8.0);
+        assert_eq!(s.line_width.unwrap(), 8.0);
         assert_eq!(s.font.unwrap().size, 20.0);
+        // Scaling a `Style` only touches `line_width` and `font`'s size --
+        // `region_label_font` is left completely untouched, size included.
+        assert_eq!(
+            s.region_label_font,
+            FontId::new(99.0, FontFamily::Monospace)
+        );
     }
 
     #[test]
     fn map_style_mul_i32() {
         let s = full_style() * 2i32;
-        assert_eq!(s.border.unwrap().width, 4.0);
-        assert_eq!(s.line.unwrap().width, 8.0);
+        assert_eq!(s.line_width.unwrap(), 8.0);
         assert_eq!(s.font.unwrap().size, 20.0);
     }
 
     #[test]
     fn map_style_mul_f32() {
         let s = full_style() * 0.5f32;
-        assert_eq!(s.border.unwrap().width, 1.0);
-        assert_eq!(s.line.unwrap().width, 2.0);
+        assert_eq!(s.line_width.unwrap(), 2.0);
         assert_eq!(s.font.unwrap().size, 5.0);
     }
 
     #[test]
     fn map_style_mul_f64() {
         let s = full_style() * 0.5f64;
-        assert_eq!(s.border.unwrap().width, 1.0);
-        assert_eq!(s.line.unwrap().width, 2.0);
+        assert_eq!(s.line_width.unwrap(), 2.0);
         assert_eq!(s.font.unwrap().size, 5.0);
     }
 
     #[test]
     fn map_style_div_i64() {
         let s = full_style() / 2i64;
-        assert_eq!(s.border.unwrap().width, 1.0);
-        assert_eq!(s.line.unwrap().width, 2.0);
+        assert_eq!(s.line_width.unwrap(), 2.0);
         assert_eq!(s.font.unwrap().size, 5.0);
+        assert_eq!(
+            s.region_label_font,
+            FontId::new(99.0, FontFamily::Monospace)
+        );
     }
 
     #[test]
     fn map_style_div_i32() {
         let s = full_style() / 2i32;
-        assert_eq!(s.border.unwrap().width, 1.0);
-        assert_eq!(s.line.unwrap().width, 2.0);
+        assert_eq!(s.line_width.unwrap(), 2.0);
         assert_eq!(s.font.unwrap().size, 5.0);
     }
 
     #[test]
     fn map_style_div_f32() {
         let s = full_style() / 0.5f32;
-        assert_eq!(s.border.unwrap().width, 4.0);
-        assert_eq!(s.line.unwrap().width, 8.0);
+        assert_eq!(s.line_width.unwrap(), 8.0);
         assert_eq!(s.font.unwrap().size, 20.0);
     }
 
     #[test]
     fn map_style_div_f64() {
         let s = full_style() / 0.5f64;
-        assert_eq!(s.border.unwrap().width, 4.0);
-        assert_eq!(s.line.unwrap().width, 8.0);
+        assert_eq!(s.line_width.unwrap(), 8.0);
         assert_eq!(s.font.unwrap().size, 20.0);
     }
 
@@ -1769,7 +2149,8 @@ mod tests {
         assert_eq!(s.marker_animation, SteadyAnimation::Blink);
         assert_eq!(s.node_text_size, 12.0);
         assert_eq!(s.label_text_size, 24.0);
-        assert_eq!(s.styles.len(), 1);
+        assert!(s.style.line_width.is_none());
+        assert!(s.style.font.is_none());
     }
 
     #[test]
@@ -1783,18 +2164,9 @@ mod tests {
         assert_eq!(s.marker_animation, SteadyAnimation::Blink);
         assert_eq!(s.node_text_size, 12.0);
         assert_eq!(s.label_text_size, 24.0);
-        // light + dark themes
-        assert_eq!(s.styles.len(), 2);
-        // light theme
-        assert_eq!(s.styles[0].background_color, Color32::WHITE);
-        assert!(s.styles[0].border.is_some());
-        assert!(s.styles[0].line.is_some());
-        assert!(s.styles[0].font.is_some());
-        // dark theme
-        assert_eq!(s.styles[1].background_color, Color32::DARK_GRAY);
-        assert!(s.styles[1].border.is_some());
-        assert!(s.styles[1].line.is_some());
-        assert!(s.styles[1].font.is_some());
+        // shared by light and dark mode
+        assert!(s.style.line_width.is_some());
+        assert!(s.style.font.is_some());
     }
 
     // ---------- VisibilitySetting ----------

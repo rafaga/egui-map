@@ -34,7 +34,7 @@ fn main() -> eframe::Result<()> {
     let seg2 = MapSegment::new((1, 3), [0.0, 0.0], [50.0, -80.0]);
     map.add_lines(vec![seg1, seg2]);
 
-    // A free-floating label. Its position is in screen coordinates.
+    // A free-floating label. Its position is in map coordinates.
     /*map.add_labels(vec![MapLabel {
         text: "Example region".to_string(),
         center: egui::pos2(100.0, 100.0),

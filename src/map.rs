@@ -103,19 +103,22 @@
 
 use crate::map::animation::Animation;
 use crate::map::objects::{
-    CometDirection, ContextMenuManager, MapBounds, MapLabel, MapPoint, MapSegment, MapSettings,
-    MarkerContext, NodeAnimation, NotificationContext, RawLine, RawPoint, SegmentAnimation,
-    SteadyAnimation, SteadySegmentAnimation, TextSettings, VisibilitySetting,
+    CometDirection, ContextMenuManager, LabelContext, MapBounds, MapLabel, MapPoint, MapSegment,
+    MapSettings, MarkerContext, NodeAnimation, NodeContext, NotificationContext, RawLine, RawPoint,
+    RegionLabel, SegmentAnimation, SegmentContext, SegmentNotificationContext, SegmentStateContext,
+    SelectionContext, SteadyAnimation, SteadySegmentAnimation, TextSettings, VisibilitySetting,
 };
-use crate::map::theme::{ColorMode, MapTheme, Style, Theme};
+use crate::map::theme::{ColorMode, MapTheme, Theme, ThemeColors};
+use egui::text::Galley;
 use egui::{widgets::*, *};
 use kdtree::KdTree;
 use kdtree::distance::squared_euclidean;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 use std::time::Instant;
 
-use self::objects::{NodeTemplate, SegmentTemplate};
+use self::objects::{LabelTemplate, NodeTemplate, SegmentTemplate};
 
 pub mod animation;
 pub mod objects;
@@ -128,6 +131,22 @@ pub mod theme;
 /// as at least as visible as the line beneath them instead of fading out in
 /// lockstep and risking disappearing into it.
 const SEGMENT_EFFECT_ALPHA_BOOST: f32 = 0.2;
+
+/// How far outside the visible rect a [`RegionLabel`]'s *center* point
+/// may still fall and be painted, expressed as a multiple of its current
+/// (zoom-scaled) font size.
+///
+/// The viewport cull below only has each label's projected center point
+/// available -- its actual painted width depends on the region's name
+/// and isn't known until the text is laid out, which is exactly the
+/// cost this cull exists to skip for labels nobody will see. `6.0` is a
+/// generous stand-in for "half the width of a typical region name plus
+/// some slack", picked to avoid visible pop-in at the edge of the
+/// screen rather than computed from an exact bound; it costs nothing to
+/// be generous here since the whole point is discarding the labels far
+/// outside the viewport, and a modest few false positives near the edge
+/// do not undermine that.
+const REGION_LABEL_CULL_MARGIN_FACTOR: f32 = 6.0;
 
 /// Returns `color` with its alpha multiplied by `factor` (clamped to
 /// `0.0..=1.0`), preserving whatever RGB the caller already set rather than
@@ -161,9 +180,11 @@ fn scale_alpha(color: Color32, factor: f32) -> Color32 {
 /// Rendering of nodes and their visual effects (selection highlight,
 /// notifications and markers) can be fully customized by installing a
 /// [`objects::NodeTemplate`] implementation with [`Map::set_node_template`],
-/// and segments likewise with [`objects::SegmentTemplate`] and
-/// [`Map::set_segment_template`]; a right-click context menu can be provided
-/// with [`Map::set_context_manager`].
+/// segments likewise with [`objects::SegmentTemplate`] and
+/// [`Map::set_segment_template`], and region labels
+/// ([`objects::RegionLabel`], added with [`Map::add_region_labels`]) with
+/// [`objects::LabelTemplate`] and [`Map::set_label_template`]; a right-click
+/// context menu can be provided with [`Map::set_context_manager`].
 ///
 /// # Examples
 ///
@@ -190,12 +211,22 @@ pub struct Map {
     points: Option<HashMap<usize, MapPoint>>,
     segments: Option<rstar::RTree<MapSegment>>,
     labels: Vec<MapLabel>,
+    region_labels: Vec<RegionLabel>,
+    /// Layout cache for the built-in [`RegionLabel`] renderer, keyed by
+    /// `(text, rounded screen size, font family)` so a repeated frame at a
+    /// steady zoom and [`Style::region_label_font`](theme::Style::region_label_font) is a cache lookup rather
+    /// than a relayout -- see [`objects::LabelTemplate::label_ui`]'s doc.
+    /// Cleared whenever [`Map::add_region_labels`] replaces the label set.
+    region_label_cache: HashMap<(String, i32, FontFamily), Arc<Galley>>,
     tree: Option<KdTree<f32, usize, [f32; 2]>>,
     visible_points: Vec<isize>,
     map_area: Rect,
     reference: MapBounds,
     current: MapBounds,
-    current_index: usize,
+    /// Whether the widget last painted with `ui`'s `Visuals` in dark mode --
+    /// drives [`Map::color_mode`], kept up to date by
+    /// [`Map::assign_visual_style`].
+    dark_mode: bool,
     notifications: HashMap<usize, Notification>,
     node_states: HashMap<usize, NodeState>,
     segment_notifications: HashMap<(usize, usize), SegmentNotification>,
@@ -212,6 +243,7 @@ pub struct Map {
     menu_manager: Option<Rc<dyn ContextMenuManager>>,
     node_template: Option<Rc<dyn NodeTemplate>>,
     segment_template: Option<Rc<dyn SegmentTemplate>>,
+    label_template: Option<Rc<dyn LabelTemplate>>,
     markers: HashMap<usize, usize>,
     /// The active color palette. See [`Map::set_theme`].
     theme: Rc<dyn MapTheme>,
@@ -222,7 +254,7 @@ pub struct Map {
 struct Notification {
     started: Instant,
     animation: NodeAnimation,
-    /// `None` falls back to the current style's `alert_color`.
+    /// `None` falls back to the active theme's `ThemeColors::alert`.
     color: Option<Color32>,
 }
 
@@ -230,7 +262,9 @@ struct Notification {
 #[derive(Clone, Copy, Debug)]
 struct NodeState {
     animation: SteadyAnimation,
-    /// `None` falls back to the current style's `alert_color`.
+    /// `None` falls back to the active theme's `ThemeColors::marker` -- this
+    /// is the persistent "flagged" state `marker_ui` paints, not a one-off
+    /// event, so it uses `marker` rather than `alert`.
     color: Option<Color32>,
 }
 
@@ -239,7 +273,7 @@ struct NodeState {
 struct SegmentNotification {
     started: Instant,
     animation: SegmentAnimation,
-    /// `None` falls back to the current style's `alert_color`.
+    /// `None` falls back to the active theme's `ThemeColors::alert`.
     color: Option<Color32>,
 }
 
@@ -247,7 +281,7 @@ struct SegmentNotification {
 #[derive(Clone, Copy, Debug)]
 struct SegmentState {
     animation: SteadySegmentAnimation,
-    /// `None` falls back to the current style's `alert_color`.
+    /// `None` falls back to the active theme's `ThemeColors::alert`.
     color: Option<Color32>,
 }
 
@@ -279,7 +313,10 @@ pub struct NodeHandle<'a> {
 impl NodeHandle<'_> {
     /// Overrides the colour of the effect about to be attached.
     ///
-    /// Without this the effect uses the current style's `alert_color`.
+    /// Without this, the effect falls back to the active theme's
+    /// `ThemeColors::alert` for a one-off event (`pulse`, `ripple`, ...) or
+    /// `ThemeColors::marker` for lasting state (`halo`, `blink`, `orbit`) --
+    /// whichever terminal method is called after this one.
     pub fn color(mut self, color: Color32) -> Self {
         self.color = Some(color);
         self
@@ -376,7 +413,10 @@ pub struct SegmentHandle<'a> {
 impl SegmentHandle<'_> {
     /// Overrides the colour of the effect about to be attached.
     ///
-    /// Without this the effect uses the current style's `alert_color`.
+    /// Without this, the effect falls back to the active theme's
+    /// `ThemeColors::alert`, for either a one-off notification or lasting
+    /// state -- segments don't have a `marker` role like a node's lasting
+    /// state does.
     pub fn color(mut self, color: Color32) -> Self {
         self.color = Some(color);
         self
@@ -494,7 +534,17 @@ impl Widget for &mut Map {
         let rect = self.calculate_widget_dimensions(ui);
 
         // we define the initial coordinate as the center of such rectangle
-        self.reference.dist = rect.distance();
+        let reference_dist = rect.distance();
+        // `reference.dist` is refreshed here every frame, but `current.dist` --
+        // the value the viewport cull actually queries with -- is only derived
+        // from it inside `adjust_bounds`, which used to run on a zoom change or
+        // a `set_pos` and nothing else. Resizing the window therefore left the
+        // cull radius stale until the next zoom, so the node set was culled
+        // against the *old* widget size (too few nodes after growing the
+        // window, too many after shrinking it). Tracked here so the bounds can
+        // be recomputed below, next to the zoom-change branch.
+        let resized = reference_dist != self.reference.dist;
+        self.reference.dist = reference_dist;
 
         self.assign_visual_style(ui);
 
@@ -526,6 +576,104 @@ impl Widget for &mut Map {
                     let new_pos = self.reference.pos - (coords / self.zoom);
                     self.set_pos(new_pos.into());
                 }
+                // Centre on the rect we actually paint into. Now that the
+                // painter is sized to the frame's content area this is exactly
+                // `map_area.center()`, but deriving it from `resp.rect` keeps
+                // projection, hover hit-testing and the frame in agreement if
+                // the frame's margins ever change. Computed *before* the labels
+                // below so they can reuse the same map -> screen projection as
+                // the nodes/markers instead of being pinned to a screen pixel.
+                let rect_midpoint = RawPoint::from(resp.rect.center());
+                let min_point = self.current.pos - rect_midpoint;
+
+                if !self.region_labels.is_empty() {
+                    // Region labels are the deepest layer: painted first so
+                    // every other element (connection lines, nodes,
+                    // free-floating `MapLabel`s) draws over them. See
+                    // `RegionLabel`'s own doc for how this differs from
+                    // `MapLabel`.
+                    let theme = self.theme_colors();
+                    // A more transparent color than ordinary text, so region
+                    // labels read as a backdrop rather than competing with
+                    // foreground content.
+                    let color = scale_alpha(theme.text, self.settings.region_label_alpha);
+                    let zoom = self.zoom;
+                    // `Style::region_label_font` configures only the built-in
+                    // renderer below; a custom `LabelTemplate` picks its own
+                    // font, the same way `NodeTemplate`/`SegmentTemplate`
+                    // implementations pick their own fonts freely. It is
+                    // mandatory (no `Option`), so there is no fallback to
+                    // resolve here: `size` (still scaled *by* zoom instead
+                    // of staying screen-constant, unlike
+                    // `node_text_size`/`label_text_size`) and `family` come
+                    // straight from it. Each read is its own statement so
+                    // the immutable borrow of `self` ends before the
+                    // `&mut self.region_label_cache` borrow the loop below
+                    // needs.
+                    let region_label_size = self.settings.style.region_label_font.size * zoom;
+                    let region_label_family = self.settings.style.region_label_font.family.clone();
+                    let region_label_font = FontId::new(region_label_size, region_label_family);
+                    // Every label's projected `position` is checked against this
+                    // before any layout/paint work happens. Without it, all of
+                    // `self.region_labels` (113 for the whole-galaxy view this
+                    // type ships for) were laid out and painted every frame
+                    // regardless of whether they were anywhere near the screen --
+                    // and at high zoom `region_label_size` grows right along with
+                    // it (see that field's own doc), making each one of those
+                    // off-screen-but-still-evaluated labels progressively more
+                    // expensive too. See `REGION_LABEL_CULL_MARGIN_FACTOR` for why
+                    // this uses a margin instead of the label's exact (not yet
+                    // known) rendered size.
+                    let visible_rect = resp
+                        .rect
+                        .expand(region_label_size * REGION_LABEL_CULL_MARGIN_FACTOR);
+                    let template = self.label_template.clone();
+                    if let Some(template) = &template {
+                        for label in &self.region_labels {
+                            let position: Pos2 =
+                                (RawPoint::from(label.center) * zoom - min_point).into();
+                            if !visible_rect.contains(position) {
+                                continue;
+                            }
+                            template.label_ui(
+                                &paint,
+                                LabelContext {
+                                    position,
+                                    zoom,
+                                    label,
+                                    size: region_label_size,
+                                    color,
+                                    theme,
+                                },
+                            );
+                        }
+                    } else {
+                        // `paint_region_label` needs `&mut self` (it caches into
+                        // `self.region_label_cache`), so it can't be called while
+                        // `self.region_labels` is still borrowed -- each iteration
+                        // extracts what it needs (`position`, an owned `text`) in a
+                        // block that ends that borrow before the method call.
+                        for i in 0..self.region_labels.len() {
+                            let (position, text) = {
+                                let label = &self.region_labels[i];
+                                let position: Pos2 =
+                                    (RawPoint::from(label.center) * zoom - min_point).into();
+                                (position, label.text.clone())
+                            };
+                            if !visible_rect.contains(position) {
+                                continue;
+                            }
+                            self.paint_region_label(
+                                &paint,
+                                position,
+                                text,
+                                region_label_font.clone(),
+                                color,
+                            );
+                        }
+                    }
+                }
+
                 if self.zoom < self.settings.line_visible_zoom {
                     // filling text settings
                     let mut text_settings = TextSettings {
@@ -537,22 +685,26 @@ impl Widget for &mut Map {
                         family: FontFamily::Proportional,
                         text: String::new(),
                         position: RawPoint::default(),
-                        text_color: ui.visuals().text_color(),
+                        // The active theme's own text color, not egui's
+                        // surrounding-UI text color -- so labels stay
+                        // legible against a custom `MapTheme`'s palette
+                        // instead of silently following the host app's
+                        // light/dark mode.
+                        text_color: self.theme_colors().text,
                     };
                     for label in &self.labels {
                         text_settings.text.clone_from(&label.text);
-                        text_settings.position = RawPoint::from(label.center);
+                        // `MapLabel::center` is in map coordinates, so project
+                        // it exactly like the nodes do (`coords * zoom -
+                        // min_point`). Using it verbatim (as this used to)
+                        // pinned every label to a fixed screen pixel that
+                        // ignored pan and zoom entirely.
+                        text_settings.position =
+                            RawPoint::from(label.center) * self.zoom - min_point;
                         self.paint_label(&paint, &text_settings);
                     }
                 }
 
-                // Centre on the rect we actually paint into. Now that the
-                // painter is sized to the frame's content area this is exactly
-                // `map_area.center()`, but deriving it from `resp.rect` keeps
-                // projection, hover hit-testing and the frame in agreement if
-                // the frame's margins ever change.
-                let rect_midpoint = RawPoint::from(resp.rect.center());
-                let min_point = self.current.pos - rect_midpoint;
                 let vec_points = &self.visible_points;
                 let hashm = &self.points;
 
@@ -580,6 +732,13 @@ impl Widget for &mut Map {
                 for marker in &self.markers {
                     if let Some(point) = self.points.as_ref().unwrap().get(marker.1) {
                         let adjusted_point = RawPoint::from(point.coords) * self.zoom - min_point;
+                        // Plain markers have no color setting of their own to
+                        // override, unlike a node's lasting state -- both
+                        // fall back to the active theme's `marker` color,
+                        // the same persistent "this is flagged" role the
+                        // `node_states` branch below uses, distinct from the
+                        // one-off `alert` color transient notifications use.
+                        let color = self.theme_colors().marker;
                         if let Some(template) = &self.node_template {
                             template.marker_ui(
                                 ui,
@@ -588,14 +747,11 @@ impl Widget for &mut Map {
                                     zoom: self.zoom,
                                     kind: self.settings.marker_animation,
                                     node_id: *marker.1,
+                                    color,
+                                    theme: self.theme_colors(),
                                 },
                             );
                         } else {
-                            let color = if ui.visuals().dark_mode {
-                                Color32::LIGHT_GREEN
-                            } else {
-                                Color32::GREEN
-                            };
                             // Frame time, so every marker in this frame shares
                             // one clock instead of each sampling the wall clock
                             // at a slightly different moment.
@@ -616,7 +772,7 @@ impl Widget for &mut Map {
 
                 self.capture_mouse_events(ui, &resp);
 
-                if self.zoom != self.previous_zoom {
+                if self.zoom != self.previous_zoom || resized {
                     let _span = tracing::info_span!("calculating viewport with zoom").entered();
                     self.adjust_bounds();
                     self.calculate_visible_points();
@@ -655,13 +811,15 @@ impl Map {
             tree: None,
             points: None,
             labels: Vec::new(),
+            region_labels: Vec::new(),
+            region_label_cache: HashMap::new(),
             visible_points: Vec::new(),
             current: MapBounds::default(),
             reference: MapBounds::default(),
             settings,
             min_size: (None, None),
             max_size: (None, None),
-            current_index: 0,
+            dark_mode: false,
             notifications: HashMap::new(),
             node_states: HashMap::new(),
             segment_notifications: HashMap::new(),
@@ -670,6 +828,7 @@ impl Map {
             menu_manager: None,
             node_template: None,
             segment_template: None,
+            label_template: None,
             markers: HashMap::new(),
             segments: None,
             theme: Rc::new(Theme::default()),
@@ -705,7 +864,18 @@ impl Map {
             && let Some(tree) = &self.tree
         {
             let center = self.current.pos / self.zoom;
-            let radius = self.current.dist.powi(2);
+            // `current.dist` is the *full* diagonal of the visible area
+            // expressed in map units (`reference.dist` is `RawLine::distance()`
+            // over the widget rect, divided by the zoom). A circle centred on
+            // the viewport only has to reach its corners to cover it, so the
+            // radius is the *half* diagonal -- the rect's circumradius.
+            // Querying with the full diagonal doubled the radius, i.e. covered
+            // 4x the area, and with the circle-over-rectangle slack that fed
+            // roughly 6x more nodes to the paint pass than are actually on
+            // screen. Halved here rather than at the `reference.dist`
+            // assignments so `dist` keeps meaning "diagonal" for the debug
+            // overlay and for `adjust_bounds`.
+            let radius = (self.current.dist / 2.0).powi(2);
             let point: [f32; 2] = center.into();
             let vis_pos = tree.within(&point, radius, &squared_euclidean).unwrap();
             self.visible_points.clear();
@@ -920,6 +1090,20 @@ impl Map {
         self.labels = labels;
     }
 
+    /// Replaces the set of region labels drawn on the map.
+    ///
+    /// Unlike [`Map::add_labels`], a [`RegionLabel`] is not a fixed
+    /// on-screen annotation -- see its own doc for how it differs (font
+    /// size that scales with zoom, background z-order, a more transparent
+    /// color) and [`Map::set_label_template`] for customizing how it is
+    /// drawn. Also clears the built-in renderer's layout cache, so call this
+    /// when the label *set* changes rather than every frame.
+    pub fn add_region_labels(&mut self, labels: Vec<RegionLabel>) {
+        let _span = tracing::info_span!("add_region_labels").entered();
+        self.region_labels = labels;
+        self.region_label_cache.clear();
+    }
+
     /// Replaces the set of connection lines between nodes.
     ///
     /// Lines are keyed by a connection id that the endpoint nodes must
@@ -1028,50 +1212,29 @@ impl Map {
         self.zoom
     }
 
-    /// Returns the style for the current theme, falling back to the first
-    /// style if the current theme index has no entry.
-    fn current_style(&self) -> &Style {
-        self.settings
-            .styles
-            .get(self.current_index)
-            .or(self.settings.styles.first())
-            .expect("MapSettings::styles must not be empty")
-    }
-
     fn assign_visual_style(&mut self, ui_obj: &mut Ui) {
-        let style_index = ui_obj.visuals().dark_mode as usize;
+        let dark_mode = ui_obj.visuals().dark_mode;
 
-        if self.current_index != style_index {
+        if self.dark_mode != dark_mode {
             let _span = tracing::info_span!("asign_visual_style").entered();
 
-            self.current_index = style_index;
-            self.apply_theme_colors(style_index);
-            let map_style = self.settings.styles.get_mut(style_index).unwrap();
-            let visuals = &ui_obj.style().visuals;
-            map_style.background_color = visuals.extreme_bg_color;
-            map_style.border = Some(visuals.window_stroke);
+            self.dark_mode = dark_mode;
         }
     }
 
-    /// Refreshes `self.settings.styles[index]`'s colors from
-    /// `self.theme.colors(mode)`, where `mode` is `Dark` for index `1` and
-    /// `Light` for any other index -- so `Style` never carries its own copy
-    /// of colors the active `MapTheme` already provides.
-    fn apply_theme_colors(&mut self, index: usize) {
-        let mode = if index == 1 {
-            ColorMode::Dark
-        } else {
-            ColorMode::Light
-        };
-        let colors = self.theme.colors(mode);
-        if let Some(map_style) = self.settings.styles.get_mut(index) {
-            map_style.fill_color = colors.node;
-            map_style.text_color = colors.text;
-            map_style.alert_color = colors.alert;
-            if let Some(line) = map_style.line.as_mut() {
-                line.color = colors.segment;
-            }
-        }
+    /// The [`ColorMode`] the widget is currently painting with -- `Dark`
+    /// when `dark_mode` is `true`, `Light` otherwise.
+    fn color_mode(&self) -> ColorMode {
+        ColorMode::from_dark_mode(self.dark_mode)
+    }
+
+    /// Resolves the color palette the widget paints with right now: the
+    /// active [`MapTheme`]'s colors for the current [`ColorMode`]. This is
+    /// the single, canonical source for every color the widget paints --
+    /// unlike `settings.style`, it can never drift out of sync with the
+    /// installed theme because nothing caches it.
+    fn theme_colors(&self) -> ThemeColors {
+        self.theme.colors(self.color_mode())
     }
 
     /// Floating debug read-out, compiled in only under the `debug_overlay`
@@ -1210,6 +1373,13 @@ impl Map {
         min_point: &RawPoint,
         resp: &Response,
     ) -> Result<Vec<usize>, ()> {
+        // One span for the whole node pass, rather than one per node inside
+        // the loop below. A per-node span made the *instrumentation* the
+        // dominant cost: measured against this widget, a field-less Tracy zone
+        // came to ~10.6 us per node, so at ~107 visible nodes it burned ~1.1 ms
+        // of every frame while measuring nothing that a single zone around the
+        // loop does not already report.
+        let _span = tracing::info_span!("paint_map_points").entered();
         let mut nearest_id = None;
         let mut nodes_to_remove = Vec::new();
         let mut shape_vec = vec![];
@@ -1235,6 +1405,18 @@ impl Map {
                 nearest_id = Some(nearest_node.first().unwrap().1);
             }
         }
+        // Resolved once for the whole batch of nodes below, instead of once
+        // per role per node (`selected`, `marker`, `alert`, `node`, plus a
+        // whole `theme: self.theme_colors()` copy for up to four separate
+        // context structs) -- `Theme::colors` is cheap (a `const fn` over
+        // plain `Color32` literals, no allocation), but there is no reason
+        // to repeat it dozens of times a frame when the active theme and
+        // color mode can't change mid-frame. Same reasoning for
+        // `background_color`: the surrounding UI's visuals don't change
+        // node to node either.
+        let theme = self.theme_colors();
+        let background_color = ui_obj.ctx().theme().default_visuals().extreme_bg_color;
+
         // filling text settings
         let mut text_settings = TextSettings {
             // Screen-space size: unlike the map geometry this is NOT
@@ -1245,18 +1427,28 @@ impl Map {
             family: FontFamily::Proportional,
             text: String::new(),
             position: RawPoint::default(),
-            text_color: ui_obj.visuals().text_color(),
+            // Same reasoning as the free-floating label above: the active
+            // theme's text color, so node names honor a custom `MapTheme`.
+            text_color: theme.text,
         };
 
         // Drawing Points
         for temp_point in vec_points {
             let parsed_point = temp_point.cast_unsigned();
             if let Some(system) = hashm.as_ref().unwrap().get(&parsed_point) {
-                let _span = tracing::info_span!("painting_points_m").entered();
                 let viewport_point = RawPoint::from(system.coords) * self.zoom - min_point;
                 if let Some(node_template) = &self.node_template {
                     if nearest_id.unwrap_or(&0usize) == &system.get_id() {
-                        node_template.selection_ui(ui_obj, viewport_point.into(), self.zoom);
+                        node_template.selection_ui(
+                            ui_obj,
+                            SelectionContext {
+                                position: viewport_point.into(),
+                                zoom: self.zoom,
+                                point: system,
+                                color: theme.selected,
+                                theme,
+                            },
+                        );
                     }
                 } else if self.zoom > self.settings.label_visible_zoom
                     && self.settings.node_text_visibility == VisibilitySetting::Always
@@ -1276,7 +1468,7 @@ impl Map {
                 // Persistent node state is drawn first so a notification --
                 // the *event* -- sits on top of the *state*.
                 if let Some(state) = self.node_states.get(&system_id) {
-                    let color = state.color.unwrap_or(self.current_style().alert_color);
+                    let color = state.color.unwrap_or(theme.marker);
                     if let Some(template) = &self.node_template {
                         // There is no dedicated template hook for node state:
                         // `marker_ui` is the persistent-visual one, so state and
@@ -1291,6 +1483,8 @@ impl Map {
                                 zoom: self.zoom,
                                 kind: state.animation,
                                 node_id: system_id,
+                                color,
+                                theme,
                             },
                         );
                     } else {
@@ -1309,9 +1503,7 @@ impl Map {
                 }
 
                 if let Some(notification) = self.notifications.get(&system_id) {
-                    let color = notification
-                        .color
-                        .unwrap_or(self.current_style().alert_color);
+                    let color = notification.color.unwrap_or(theme.alert);
                     if let Some(template) = &self.node_template {
                         template.notification_ui(
                             ui_obj,
@@ -1322,6 +1514,7 @@ impl Map {
                                 color,
                                 kind: notification.animation,
                                 node_id: system_id,
+                                theme,
                             },
                         );
                     } else {
@@ -1345,18 +1538,37 @@ impl Map {
                         }
                     }
                 }
+                // The color requested for this node: its own override if it
+                // has one, otherwise the active theme's node color -- the
+                // single fallback both the built-in circle and a
+                // `NodeTemplate` (via `NodeContext::color`) paint with. The
+                // active theme's full palette is handed over separately
+                // (`NodeContext::theme`) so a template can tell the
+                // two apart.
+                let node_color = system.color.unwrap_or(theme.node);
                 if let Some(node_template) = &self.node_template {
-                    node_template.node_ui(ui_obj, viewport_point.into(), self.zoom, system);
+                    node_template.node_ui(
+                        ui_obj,
+                        NodeContext {
+                            position: viewport_point.into(),
+                            zoom: self.zoom,
+                            point: system,
+                            color: node_color,
+                            background_color,
+                            theme,
+                        },
+                    );
                 } else {
                     shape_vec.push(Shape::circle_filled(
                         viewport_point.into(),
                         4.00 * self.zoom,
-                        system.color.unwrap_or(self.current_style().fill_color),
+                        node_color,
                     ));
                 }
             }
         }
         paint.extend(shape_vec);
+
         Ok(nodes_to_remove)
     }
 
@@ -1382,31 +1594,17 @@ impl Map {
         // entirely.
         let line_fade = ((self.zoom - self.settings.line_visible_zoom) / 0.80).clamp(0.0, 1.0);
 
-        // `style.line == None` only turns off the *default* stroke -- a
+        // `style.line_width == None` only turns off the *default* stroke -- a
         // `SegmentTemplate` or a segment effect installed through
         // `Map::segment` still needs to run, e.g. for a consumer who draws
         // lines entirely on their own and only wants the built-in effects.
-        let default_stroke = self.current_style().line.map(|stroke| {
-            if line_fade >= 1.0 {
-                stroke
-            } else {
-                let mut tup_stroke = stroke.color.to_tuple();
-                tup_stroke.3 = (255.0 * line_fade).round() as u8;
-                let color = Color32::from_rgba_unmultiplied(
-                    tup_stroke.0,
-                    tup_stroke.1,
-                    tup_stroke.2,
-                    tup_stroke.3,
-                );
-                Stroke::new(stroke.width, color)
-            }
-        });
+        let line_width = self.settings.style.line_width;
 
         // Broad-phase: query the segment R-tree with the viewport AABB (in
         // map coordinates), padded by the stroke width -- when there is one
         // -- so lines at the very edge are not clipped prematurely.
         let center = self.current.pos / self.zoom;
-        let padding = default_stroke.map(|s| s.width).unwrap_or(0.0) / self.zoom;
+        let padding = line_width.unwrap_or(0.0) / self.zoom;
         let half = RawPoint::new(
             self.map_area.width() / 2.0 / self.zoom + padding,
             self.map_area.height() / 2.0 / self.zoom + padding,
@@ -1431,10 +1629,32 @@ impl Map {
             // circle, so the base shape painted last only covers the
             // center) but not for segments, where the effect runs along the
             // exact same path as the line underneath it.
+            // The color resolved per segment: its own override if it has
+            // one, otherwise the active theme's segment color -- the same
+            // value handed to a `SegmentTemplate` as `SegmentContext::color`,
+            // and the one the default stroke paints with, so an override
+            // actually shows up.
+            let segment_color = scale_alpha(
+                segment.color.unwrap_or(self.theme_colors().segment),
+                line_fade,
+            );
             if let Some(template) = &self.segment_template {
-                template.segment_ui(painter, pos_a, pos_b, self.zoom, segment);
-            } else if let Some(stroke) = default_stroke {
-                painter.add(Shape::line_segment([pos_a, pos_b], stroke));
+                template.segment_ui(
+                    painter,
+                    SegmentContext {
+                        pos_a,
+                        pos_b,
+                        zoom: self.zoom,
+                        segment,
+                        color: segment_color,
+                        theme: self.theme_colors(),
+                    },
+                );
+            } else if let Some(width) = line_width {
+                painter.add(Shape::line_segment(
+                    [pos_a, pos_b],
+                    Stroke::new(width, segment_color),
+                ));
             }
 
             // Persistent segment state is drawn first so a notification --
@@ -1442,12 +1662,24 @@ impl Map {
             // node effects.
             if let Some(state) = self.segment_states.get(&segment.id) {
                 let color = scale_alpha(
-                    state.color.unwrap_or(self.current_style().alert_color),
+                    state.color.unwrap_or(self.theme_colors().alert),
                     effect_fade,
                 );
+                let time = painter.ctx().input(|i| i.time) as f32;
                 if let Some(template) = &self.segment_template {
-                    let time = painter.ctx().input(|i| i.time) as f32;
-                    template.segment_state_ui(painter, pos_a, pos_b, self.zoom, time, color);
+                    template.segment_state_ui(
+                        painter,
+                        SegmentStateContext {
+                            pos_a,
+                            pos_b,
+                            zoom: self.zoom,
+                            segment,
+                            time,
+                            color,
+                            theme: self.theme_colors(),
+                            kind: state.animation,
+                        },
+                    );
                 } else {
                     let effect = match state.animation {
                         SteadySegmentAnimation::Comet => Animation::comet,
@@ -1455,7 +1687,6 @@ impl Map {
                         SteadySegmentAnimation::GlowBand => Animation::glow_band,
                         SteadySegmentAnimation::Chevrons => Animation::chevrons,
                     };
-                    let time = painter.ctx().input(|i| i.time) as f32;
                     effect(painter, pos_a, pos_b, self.zoom, time, color);
                 }
                 // Persistent effects never finish on their own.
@@ -1464,19 +1695,22 @@ impl Map {
 
             if let Some(notification) = self.segment_notifications.get(&segment.id) {
                 let color = scale_alpha(
-                    notification
-                        .color
-                        .unwrap_or(self.current_style().alert_color),
+                    notification.color.unwrap_or(self.theme_colors().alert),
                     effect_fade,
                 );
                 let still_playing = if let Some(template) = &self.segment_template {
                     template.segment_notification_ui(
                         painter,
-                        pos_a,
-                        pos_b,
-                        self.zoom,
-                        notification.started,
-                        color,
+                        SegmentNotificationContext {
+                            pos_a,
+                            pos_b,
+                            zoom: self.zoom,
+                            segment,
+                            initial_time: notification.started,
+                            color,
+                            theme: self.theme_colors(),
+                            kind: notification.animation,
+                        },
                     )
                 } else {
                     match notification.animation {
@@ -1526,6 +1760,62 @@ impl Map {
             FontId::new(text_settings.size, text_settings.family.clone()),
             text_settings.text_color,
         );
+    }
+
+    /// Paints one [`RegionLabel`] with the built-in renderer.
+    ///
+    /// Lays the text out once per distinct `(text, rounded size, family)`
+    /// triple and caches the resulting `Arc<Galley>` in
+    /// `self.region_label_cache`, then applies `color` fresh every call
+    /// through [`Painter::galley_with_override_text_color`] -- so a cache
+    /// hit skips `fonts_mut` entirely, and a theme or alpha change (which
+    /// only changes `color`) never invalidates the cache. Rounding `size`
+    /// to the nearest pixel before hashing keeps the cache useful while the
+    /// map sits at a steady zoom, at the cost of relaying out on every zoom
+    /// step that crosses a pixel boundary.
+    ///
+    /// Centers the text on `position` the same way [`Painter::text`] does
+    /// internally (`anchor.anchor_size(pos, galley.size())`), since a
+    /// pre-laid-out galley is painted with [`Painter::galley_with_override_text_color`]
+    /// rather than `Painter::text` itself.
+    ///
+    /// Takes `&mut self` (it mutates `self.region_label_cache`), so the
+    /// caller must not still be borrowing `self.region_labels` when this is
+    /// called -- see the call site above. `text` is taken by value rather
+    /// than `&str`: the cache key needs an owned `String` anyway, so the
+    /// caller's clone becomes that key directly instead of being cloned a
+    /// second time here. `font` bundles what used to be two separate
+    /// `size`/`family` parameters -- the caller still needs the raw
+    /// `size: f32` on its own (for `LabelContext::size` in the
+    /// `LabelTemplate` branch), so this doesn't remove any state, it just
+    /// packages what this function receives as the `FontId` it already
+    /// conceptually is.
+    fn paint_region_label(
+        &mut self,
+        paint: &Painter,
+        position: Pos2,
+        text: String,
+        font: FontId,
+        color: Color32,
+    ) {
+        let _span = tracing::info_span!("paint_region_label").entered();
+        // `font.size` is captured before `font.family` is moved into `key`
+        // below, since the cache key rounds the size for hashing but the
+        // actual layout call (on a cache miss) still needs the precise,
+        // unrounded value.
+        let size = font.size;
+        let key = (text, size.round() as i32, font.family);
+        let galley = match self.region_label_cache.get(&key) {
+            Some(galley) => galley.clone(),
+            None => {
+                let galley =
+                    paint.layout_no_wrap(key.0.clone(), FontId::new(size, key.2.clone()), color);
+                self.region_label_cache.insert(key, galley.clone());
+                galley
+            }
+        };
+        let rect = Align2::CENTER_CENTER.anchor_size(position, galley.size());
+        paint.galley_with_override_text_color(rect.min, galley, color);
     }
 
     /// Triggers a pulsing notification on the node `id_node`.
@@ -1704,19 +1994,27 @@ impl Map {
         self.segment_template = Some(template);
     }
 
+    /// Replaces the built-in [`RegionLabel`] rendering with a custom
+    /// [`LabelTemplate`] implementation.
+    ///
+    /// The template takes over drawing every region label installed with
+    /// [`Map::add_region_labels`]. See the [`LabelTemplate`] example for a
+    /// custom look.
+    pub fn set_label_template(&mut self, template: Rc<dyn LabelTemplate>) {
+        self.label_template = Some(template);
+    }
+
     /// Installs the color palette used to paint the map, replacing the
     /// default [`Theme::default`].
     ///
     /// Accepts any [`MapTheme`] implementation, including a built-in
     /// [`Theme`] variant -- e.g. `map.set_theme(Rc::new(Theme::ArticCyan))` --
-    /// or a custom palette. Both the light and dark [`Style`] entries are
-    /// refreshed immediately, so the new colors show up on the very next
-    /// frame regardless of which mode is currently active.
+    /// or a custom palette. The new colors are resolved live from
+    /// `new_theme` on the very next frame, in whichever light/dark mode is
+    /// active then -- there is nothing to eagerly refresh, since
+    /// [`Style`](theme::Style) never caches theme colors.
     pub fn set_theme(&mut self, new_theme: Rc<dyn MapTheme>) {
         self.theme = new_theme;
-        for index in 0..self.settings.styles.len().min(2) {
-            self.apply_theme_colors(index);
-        }
     }
 
     /// Adds the marker `id`, or moves it, so it points to the node `node_id`.
@@ -1749,11 +2047,11 @@ mod tests {
     use std::time::Duration;
 
     fn sample_points() -> Vec<MapPoint> {
-        let mut map = Vec::new();
-        map.push(MapPoint::new(1, [0.0, 0.0]));
-        map.push(MapPoint::new(2, [10.0, 10.0]));
-        map.push(MapPoint::new(3, [-10.0, -10.0]));
-        map
+        vec![
+            MapPoint::new(1, [0.0, 0.0]),
+            MapPoint::new(2, [10.0, 10.0]),
+            MapPoint::new(3, [-10.0, -10.0]),
+        ]
     }
 
     // ---------- construcción ----------
@@ -1776,7 +2074,7 @@ mod tests {
         assert!(map.segment_ids.is_empty());
         assert_eq!(map.min_size, (None, None));
         assert_eq!(map.max_size, (None, None));
-        assert_eq!(map.current_index, 0);
+        assert!(!map.dark_mode);
     }
 
     #[test]
@@ -1884,8 +2182,7 @@ mod tests {
         // needed at all.
         let mut map = Map::new();
         map.set_zoom(1.0);
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((1, 2), [-4000.0, -1.0], [4000.0, 1.0]));
+        let lines = vec![MapSegment::new((1, 2), [-4000.0, -1.0], [4000.0, 1.0])];
         map.add_lines(lines);
         map.set_pos([0.0, 0.0]);
 
@@ -1897,12 +2194,11 @@ mod tests {
     fn segment_outside_viewport_is_not_painted() {
         let mut map = Map::new();
         map.set_zoom(1.0);
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new(
+        let lines = vec![MapSegment::new(
             (1, 2),
             [10_000.0, 10_000.0],
             [10_100.0, 10_100.0],
-        ));
+        )];
         map.add_lines(lines);
         map.set_pos([0.0, 0.0]);
 
@@ -1913,8 +2209,7 @@ mod tests {
     fn add_lines_builds_segment_tree() {
         let mut map = Map::new();
         map.add_points(sample_points());
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]));
+        let lines = vec![MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0])];
         map.add_lines(lines);
 
         let tree = map
@@ -1966,12 +2261,9 @@ mod tests {
         let mut point_b = MapPoint::new(1, [50.0, 50.0]);
         point_b.connections.push((0, 1));
 
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((0, 1), point_a.coords, point_b.coords));
+        let lines = vec![MapSegment::new((0, 1), point_a.coords, point_b.coords)];
 
-        let mut points = Vec::new();
-        points.push(point_a);
-        points.push(point_b);
+        let points = vec![point_a, point_b];
         // Load points before lines — the natural order shown in the examples.
         map.add_points(points);
         map.add_lines(lines);
@@ -2159,10 +2451,192 @@ mod tests {
     }
 
     #[test]
+    fn add_region_labels_stores_labels() {
+        let mut map = Map::new();
+        let label = RegionLabel {
+            text: "Domain".to_string(),
+            center: Pos2::new(3.0, 4.0),
+            color: None
+        };
+        map.add_region_labels(vec![label]);
+        assert_eq!(map.region_labels.len(), 1);
+        assert_eq!(map.region_labels[0].text, "Domain");
+    }
+
+    /// `add_region_labels` clears the built-in renderer's layout cache, so a
+    /// stale `Arc<Galley>` for text that no longer exists in the new label
+    /// set doesn't linger in memory forever.
+    #[test]
+    fn add_region_labels_clears_the_stale_layout_cache() {
+        use egui::{Context, RawInput};
+
+        let mut map = Map::new();
+        map.add_region_labels(vec![RegionLabel {
+            text: "Old".to_string(),
+            center: Pos2::new(0.0, 0.0),
+            color: None,
+        }]);
+
+        let ctx = Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0));
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(screen),
+                ..RawInput::default()
+            },
+            |ui| {
+                ui.add(&mut map);
+            },
+        );
+        output.textures_delta.clear();
+
+        assert_eq!(
+            map.region_label_cache.len(),
+            1,
+            "expected one cached galley after painting one region label"
+        );
+
+        map.add_region_labels(vec![RegionLabel {
+            text: "New".to_string(),
+            center: Pos2::new(0.0, 0.0),
+            color: None,
+        }]);
+
+        assert!(
+            map.region_label_cache.is_empty(),
+            "add_region_labels must clear the previous label set's cached galleys, found {:?}",
+            map.region_label_cache.keys().collect::<Vec<_>>()
+        );
+    }
+
+    /// Region labels whose projected position falls well outside the
+    /// visible rect are skipped before any layout happens -- confirmed
+    /// here via `region_label_cache` staying empty, the same signal
+    /// `add_region_labels_clears_the_stale_layout_cache` uses to prove a
+    /// label *did* get painted. Without this cull, every entry in
+    /// `region_labels` (113 for EVE's regions, in the app this crate
+    /// ships for) is laid out and painted every frame regardless of
+    /// whether it is anywhere near the screen.
+    #[test]
+    fn region_labels_outside_viewport_are_culled() {
+        use egui::{Context, RawInput};
+
+        let mut map = Map::new();
+        map.add_region_labels(vec![RegionLabel {
+            text: "Far Away".to_string(),
+            center: Pos2::new(10_000.0, 10_000.0),
+            color: None,
+        }]);
+
+        let ctx = Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0));
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(screen),
+                ..RawInput::default()
+            },
+            |ui| {
+                ui.add(&mut map);
+            },
+        );
+        output.textures_delta.clear();
+
+        assert!(
+            map.region_label_cache.is_empty(),
+            "a region label far outside the viewport must not be laid out/painted, found {:?}",
+            map.region_label_cache.keys().collect::<Vec<_>>()
+        );
+    }
+
+    /// Positive control for `region_labels_outside_viewport_are_culled`:
+    /// a label at the map's center must still be painted -- the cull
+    /// must not be so aggressive it starts dropping labels that are
+    /// actually visible.
+    #[test]
+    fn region_labels_within_viewport_are_painted() {
+        use egui::{Context, RawInput};
+
+        let mut map = Map::new();
+        map.add_region_labels(vec![RegionLabel {
+            text: "Domain".to_string(),
+            center: Pos2::new(0.0, 0.0),
+            color: None,
+        }]);
+
+        let ctx = Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0));
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(screen),
+                ..RawInput::default()
+            },
+            |ui| {
+                ui.add(&mut map);
+            },
+        );
+        output.textures_delta.clear();
+
+        assert_eq!(
+            map.region_label_cache.len(),
+            1,
+            "expected one cached galley after painting one visible region label"
+        );
+    }
+
+    /// Exact-byte counterpart to `tests/region_labels.rs`'s
+    /// `region_label_color_is_theme_text_faded_by_alpha`, which can only
+    /// assert an approximate color from outside the crate. From in here the
+    /// expected value can go through `scale_alpha` itself, the same way
+    /// `steady_segment_effect_alpha_tracks_the_lines_zoom_fade_with_a_head_start`
+    /// does for segment effects, avoiding a hand-derived byte value that
+    /// would be fragile against `Color32`'s premultiplied-alpha rounding.
+    #[test]
+    fn region_label_color_is_exactly_scale_alpha_of_theme_text() {
+        use egui::{Context, RawInput, Shape};
+
+        let mut map = Map::new();
+        map.settings.region_label_alpha = 0.4;
+        map.add_region_labels(vec![RegionLabel {
+            text: "Domain".to_string(),
+            center: Pos2::new(0.0, 0.0),
+            color: None,
+        }]);
+
+        let ctx = Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0));
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(screen),
+                ..RawInput::default()
+            },
+            |ui| {
+                ui.add(&mut map);
+            },
+        );
+        output.textures_delta.clear();
+
+        // Read *after* the frame ran, once `assign_visual_style` has settled
+        // `dark_mode` to whatever light/dark mode this `Context` actually
+        // painted with -- reading it beforehand would compare against the
+        // wrong mode's text color.
+        let expected = scale_alpha(map.theme_colors().text, 0.4);
+
+        let painted_color = output
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                Shape::Text(t) if t.galley.text() == "Domain" => t.override_text_color,
+                _ => None,
+            })
+            .expect("region label was not painted");
+
+        assert_eq!(painted_color, expected);
+    }
+
+    #[test]
     fn add_lines_stores_lines() {
         let mut map = Map::new();
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [1.0, 1.0]));
+        let lines = vec![MapSegment::new((1, 2), [0.0, 0.0], [1.0, 1.0])];
         map.add_lines(lines);
         let tree = map.segments.as_ref().unwrap();
         assert_eq!(tree.size(), 1);
@@ -2184,9 +2658,10 @@ mod tests {
     fn line_at_returns_closest_line_within_tolerance() {
         let mut map = Map::new();
         map.add_points(sample_points());
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 0.0]));
-        lines.push(MapSegment::new((3, 4), [20.0, -5.0], [20.0, 5.0]));
+        let lines = vec![
+            MapSegment::new((1, 2), [0.0, 0.0], [10.0, 0.0]),
+            MapSegment::new((3, 4), [20.0, -5.0], [20.0, 5.0]),
+        ];
         map.add_lines(lines);
 
         // 1.5 units above the horizontal segment.
@@ -2202,8 +2677,7 @@ mod tests {
     fn line_at_returns_none_beyond_tolerance() {
         let mut map = Map::new();
         map.add_points(sample_points());
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]));
+        let lines = vec![MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0])];
         map.add_lines(lines);
 
         // Distance from (5,4) to the diagonal segment (0,0)-(10,10) is
@@ -2223,8 +2697,7 @@ mod tests {
     fn line_at_negative_tolerance_behaves_like_zero() {
         let mut map = Map::new();
         map.add_points(sample_points());
-        let mut lines = Vec::new();
-        lines.push(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0]));
+        let lines = vec![MapSegment::new((1, 2), [0.0, 0.0], [10.0, 10.0])];
         map.add_lines(lines);
 
         // Exact point on the segment is hit even with tolerance clamped to 0.
@@ -2636,35 +3109,31 @@ mod tests {
     // ---------- theme ----------
 
     #[test]
-    fn set_theme_refreshes_both_style_slots_immediately() {
-        // `assign_visual_style` only refreshes `settings.styles[index]` when
-        // the light/dark mode actually changes, so `set_theme` must apply the
-        // new theme itself -- otherwise a theme swap wouldn't show up until
-        // the app also happened to flip between light and dark mode.
+    fn theme_colors_are_resolved_live_from_the_installed_theme() {
+        // `Style` no longer caches any color (see `theme.rs`), so there is
+        // nothing for `set_theme` to eagerly refresh -- `theme_colors()`
+        // must reflect the newly installed theme immediately, in whichever
+        // light/dark mode is active, without waiting for a mode flip.
         let mut map = Map::new();
         map.set_theme(Rc::new(Theme::ArticCyan));
 
         let light = Theme::ArticCyan.colors(ColorMode::Light);
         let dark = Theme::ArticCyan.colors(ColorMode::Dark);
 
-        let light_style = &map.settings.styles[0];
-        assert_eq!(light_style.fill_color, light.node);
-        assert_eq!(light_style.text_color, light.text);
-        assert_eq!(light_style.alert_color, light.alert);
-        assert_eq!(light_style.line.unwrap().color, light.segment);
+        assert!(!map.dark_mode, "Map::new starts in light mode");
+        assert_eq!(map.theme_colors(), light);
 
-        let dark_style = &map.settings.styles[1];
-        assert_eq!(dark_style.fill_color, dark.node);
-        assert_eq!(dark_style.text_color, dark.text);
-        assert_eq!(dark_style.alert_color, dark.alert);
-        assert_eq!(dark_style.line.unwrap().color, dark.segment);
+        // Simulate the app flipping to dark mode: still the very same
+        // installed theme, resolved for the other `ColorMode`.
+        map.dark_mode = true;
+        assert_eq!(map.theme_colors(), dark);
     }
 
     #[test]
     fn a_custom_map_theme_reaches_the_painted_node() {
         // End-to-end: a `MapTheme` installed through `set_theme` must be the
         // color a plain (un-templated, un-colored) node is actually painted
-        // with, not just a value sitting in `settings.styles`.
+        // with, not just a value sitting in `settings.style`.
         use crate::map::theme::ThemeColors;
         use egui::{Context, RawInput, Shape};
 
@@ -2676,7 +3145,9 @@ mod tests {
                     segment: Color32::from_rgb(4, 5, 6),
                     selected: Color32::from_rgb(7, 8, 9),
                     alert: Color32::from_rgb(10, 11, 12),
+                    marker: Color32::from_rgb(16, 17, 18),
                     text: Color32::from_rgb(13, 14, 15),
+                    background: Color32::from_rgb(19, 20, 21),
                 }
             }
         }
@@ -2712,6 +3183,94 @@ mod tests {
             fill,
             Color32::from_rgb(1, 2, 3),
             "the node fill must come from the installed MapTheme, in either color mode"
+        );
+    }
+
+    #[test]
+    fn a_custom_map_theme_reaches_the_selection_highlight() {
+        // End-to-end: `SelectionContext::color` must be the installed
+        // `MapTheme`'s `selected` color -- previously defined on every
+        // `ThemeColors` but never actually consumed anywhere in painting --
+        // and `SelectionContext::point` must be the node the widget
+        // actually computed as nearest to the pointer.
+        use crate::map::theme::ThemeColors;
+        use egui::{Context, Event, RawInput};
+        use std::cell::RefCell;
+
+        struct FixedPalette;
+        impl MapTheme for FixedPalette {
+            fn colors(&self, _mode: ColorMode) -> ThemeColors {
+                ThemeColors {
+                    node: Color32::from_rgb(1, 2, 3),
+                    segment: Color32::from_rgb(4, 5, 6),
+                    selected: Color32::from_rgb(7, 8, 9),
+                    alert: Color32::from_rgb(10, 11, 12),
+                    marker: Color32::from_rgb(16, 17, 18),
+                    text: Color32::from_rgb(13, 14, 15),
+                    background: Color32::from_rgb(19, 20, 21),
+                }
+            }
+        }
+
+        #[derive(Default)]
+        struct RecordingTemplate {
+            seen: RefCell<Option<(usize, Color32)>>,
+        }
+        impl NodeTemplate for RecordingTemplate {
+            fn node_ui(&self, _ui: &mut Ui, _ctx: NodeContext) {}
+            fn selection_ui(&self, _ui: &mut Ui, ctx: SelectionContext) {
+                *self.seen.borrow_mut() = Some((ctx.point.get_id(), ctx.color));
+            }
+            fn notification_ui(&self, _ui: &mut Ui, _ctx: NotificationContext) -> bool {
+                false
+            }
+            fn marker_ui(&self, _ui: &mut Ui, _ctx: MarkerContext) {}
+        }
+
+        let mut map = Map::new();
+        map.set_theme(Rc::new(FixedPalette));
+        map.settings.node_text_visibility = VisibilitySetting::Hover;
+        map.add_points(vec![MapPoint::new(9, [0.0, 0.0])]);
+        let template = Rc::new(RecordingTemplate::default());
+        map.set_node_template(template.clone());
+
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0));
+        let ctx = Context::default();
+        // Two passes: egui needs a frame to lay the widget out before its
+        // `Response::hovered()` reflects a pointer position landed in the
+        // same frame (same reasoning as `tests/debug_overlay.rs`).
+        for pass in 0..2 {
+            let events = if pass == 1 {
+                vec![Event::PointerMoved(screen.center())]
+            } else {
+                Vec::new()
+            };
+            let mut output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..RawInput::default()
+                },
+                |ui| {
+                    ui.add(&mut map);
+                },
+            );
+            // `TexturesDelta` panics on drop if left unhandled.
+            output.textures_delta.clear();
+        }
+
+        let (id, color) = template
+            .seen
+            .borrow()
+            .expect("selection_ui must be called while the pointer hovers the map");
+        assert_eq!(
+            id, 9,
+            "the highlighted node must be the one under the pointer"
+        );
+        assert_eq!(
+            color,
+            Color32::from_rgb(7, 8, 9),
+            "the highlight color must come from the installed MapTheme's `selected`"
         );
     }
 }
