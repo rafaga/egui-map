@@ -132,6 +132,22 @@ pub mod theme;
 /// lockstep and risking disappearing into it.
 const SEGMENT_EFFECT_ALPHA_BOOST: f32 = 0.2;
 
+/// How far outside the visible rect a [`RegionLabel`]'s *center* point
+/// may still fall and be painted, expressed as a multiple of its current
+/// (zoom-scaled) font size.
+///
+/// The viewport cull below only has each label's projected center point
+/// available -- its actual painted width depends on the region's name
+/// and isn't known until the text is laid out, which is exactly the
+/// cost this cull exists to skip for labels nobody will see. `6.0` is a
+/// generous stand-in for "half the width of a typical region name plus
+/// some slack", picked to avoid visible pop-in at the edge of the
+/// screen rather than computed from an exact bound; it costs nothing to
+/// be generous here since the whole point is discarding the labels far
+/// outside the viewport, and a modest few false positives near the edge
+/// do not undermine that.
+const REGION_LABEL_CULL_MARGIN_FACTOR: f32 = 6.0;
+
 /// Returns `color` with its alpha multiplied by `factor` (clamped to
 /// `0.0..=1.0`), preserving whatever RGB the caller already set rather than
 /// replacing it outright.
@@ -597,11 +613,28 @@ impl Widget for &mut Map {
                     let region_label_size = self.settings.style.region_label_font.size * zoom;
                     let region_label_family = self.settings.style.region_label_font.family.clone();
                     let region_label_font = FontId::new(region_label_size, region_label_family);
+                    // Every label's projected `position` is checked against this
+                    // before any layout/paint work happens. Without it, all of
+                    // `self.region_labels` (113 for the whole-galaxy view this
+                    // type ships for) were laid out and painted every frame
+                    // regardless of whether they were anywhere near the screen --
+                    // and at high zoom `region_label_size` grows right along with
+                    // it (see that field's own doc), making each one of those
+                    // off-screen-but-still-evaluated labels progressively more
+                    // expensive too. See `REGION_LABEL_CULL_MARGIN_FACTOR` for why
+                    // this uses a margin instead of the label's exact (not yet
+                    // known) rendered size.
+                    let visible_rect = resp
+                        .rect
+                        .expand(region_label_size * REGION_LABEL_CULL_MARGIN_FACTOR);
                     let template = self.label_template.clone();
                     if let Some(template) = &template {
                         for label in &self.region_labels {
                             let position: Pos2 =
                                 (RawPoint::from(label.center) * zoom - min_point).into();
+                            if !visible_rect.contains(position) {
+                                continue;
+                            }
                             template.label_ui(
                                 &paint,
                                 LabelContext {
@@ -627,6 +660,9 @@ impl Widget for &mut Map {
                                     (RawPoint::from(label.center) * zoom - min_point).into();
                                 (position, label.text.clone())
                             };
+                            if !visible_rect.contains(position) {
+                                continue;
+                            }
                             self.paint_region_label(
                                 &paint,
                                 position,
@@ -2470,6 +2506,80 @@ mod tests {
             map.region_label_cache.is_empty(),
             "add_region_labels must clear the previous label set's cached galleys, found {:?}",
             map.region_label_cache.keys().collect::<Vec<_>>()
+        );
+    }
+
+    /// Region labels whose projected position falls well outside the
+    /// visible rect are skipped before any layout happens -- confirmed
+    /// here via `region_label_cache` staying empty, the same signal
+    /// `add_region_labels_clears_the_stale_layout_cache` uses to prove a
+    /// label *did* get painted. Without this cull, every entry in
+    /// `region_labels` (113 for EVE's regions, in the app this crate
+    /// ships for) is laid out and painted every frame regardless of
+    /// whether it is anywhere near the screen.
+    #[test]
+    fn region_labels_outside_viewport_are_culled() {
+        use egui::{Context, RawInput};
+
+        let mut map = Map::new();
+        map.add_region_labels(vec![RegionLabel {
+            text: "Far Away".to_string(),
+            center: Pos2::new(10_000.0, 10_000.0),
+            color: None,
+        }]);
+
+        let ctx = Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0));
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(screen),
+                ..RawInput::default()
+            },
+            |ui| {
+                ui.add(&mut map);
+            },
+        );
+        output.textures_delta.clear();
+
+        assert!(
+            map.region_label_cache.is_empty(),
+            "a region label far outside the viewport must not be laid out/painted, found {:?}",
+            map.region_label_cache.keys().collect::<Vec<_>>()
+        );
+    }
+
+    /// Positive control for `region_labels_outside_viewport_are_culled`:
+    /// a label at the map's center must still be painted -- the cull
+    /// must not be so aggressive it starts dropping labels that are
+    /// actually visible.
+    #[test]
+    fn region_labels_within_viewport_are_painted() {
+        use egui::{Context, RawInput};
+
+        let mut map = Map::new();
+        map.add_region_labels(vec![RegionLabel {
+            text: "Domain".to_string(),
+            center: Pos2::new(0.0, 0.0),
+            color: None,
+        }]);
+
+        let ctx = Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 400.0));
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(screen),
+                ..RawInput::default()
+            },
+            |ui| {
+                ui.add(&mut map);
+            },
+        );
+        output.textures_delta.clear();
+
+        assert_eq!(
+            map.region_label_cache.len(),
+            1,
+            "expected one cached galley after painting one visible region label"
         );
     }
 

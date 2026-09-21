@@ -114,7 +114,15 @@ fn map_with_region_label(text: &str, zoom: f32) -> Map {
     map.set_theme(Rc::new(FixedPalette));
     map.add_region_labels(vec![RegionLabel {
         text: text.to_string(),
-        center: egui::pos2(300.0, 200.0),
+        // (0.0, 0.0) projects to the screen's center regardless of zoom
+        // (`Map::current.pos` defaults to the origin, and nothing here
+        // moves it), so the label stays inside the viewport cull across
+        // every zoom level these tests use. An off-center point would
+        // drift outside the visible rect at some zooms and get culled
+        // before painting -- these tests are about size/color/family/paint
+        // order, not position, so keeping it trivially on-screen is what
+        // they actually need.
+        center: egui::pos2(0.0, 0.0),
         color: None,
     }]);
     map.set_zoom(zoom);
@@ -223,7 +231,8 @@ fn region_labels_paint_before_lines_and_nodes() {
     map.add_lines(vec![MapSegment::new((1, 2), [0.0, 0.0], [50.0, 0.0])]);
     map.add_region_labels(vec![RegionLabel {
         text: "Domain".to_string(),
-        center: egui::pos2(300.0, 200.0),
+        // See the identical comment in `map_with_region_label` above.
+        center: egui::pos2(0.0, 0.0),
         color: None,
     }]);
     map.set_zoom(1.0);
