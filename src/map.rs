@@ -2473,7 +2473,7 @@ mod tests {
         let label = RegionLabel {
             text: "Domain".to_string(),
             center: Pos2::new(3.0, 4.0),
-            color: None
+            color: None,
         };
         map.add_region_labels(vec![label]);
         assert_eq!(map.region_labels.len(), 1);

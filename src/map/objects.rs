@@ -510,8 +510,8 @@ pub struct RegionLabel {
     /// [`MapPoint::coords`]. It is projected to the screen with the map's
     /// own pan/zoom (`coords * zoom - min_point`), exactly like a node.
     pub center: Pos2,
-    /// The color that user want to display for this particular region label. 
-    /// The default is the Theme text color with alpha multiplied by 
+    /// The color that user want to display for this particular region label.
+    /// The default is the Theme text color with alpha multiplied by
     /// [`MapSettings::region_label_alpha`].
     pub color: Option<Color32>,
 }
