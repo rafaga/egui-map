@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/) (pre-1.0:
 any minor bump may include breaking changes, called out below as such).
 
+## [0.9.1] - 2026-09-23
+
+### Added
+
+- `Map::remove_marker`, the counterpart of `Map::update_marker`: removes a
+  marker and returns the node it pointed to (`None` if there was none).
+
+### Fixed
+
+- Custom `NodeTemplate` hooks and the built-in marker effects paint through
+  the `Ui` they get (`ui.painter()`), which wasn't clipped to the map's
+  drawable area: nodes near the edge were drawn over the widget's frame and
+  onto whatever was next to it. That `Ui` is now clipped like the map's own
+  painter.
+
 ## [0.9.0] - 2026-09-20
 
 Breaking release: `ThemeColors` gains a required field, `Style` loses one field
@@ -372,6 +387,7 @@ and gains another mandatory one, and `MapSettings` drops its two-slot style vect
 Earliest tagged release in this repository's history — there is no prior
 tag to diff against, so no entry is derived here.
 
+[0.9.1]: https://github.com/rafaga/egui-map/compare/0.9.0...0.9.1
 [0.9.0]: https://github.com/rafaga/egui-map/compare/0.8.0...0.9.0
 [0.8.0]: https://github.com/rafaga/egui-map/compare/0.7.0...0.8.0
 [0.7.0]: https://github.com/rafaga/egui-map/compare/0.6.1...0.7.0

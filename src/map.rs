@@ -568,6 +568,12 @@ impl Widget for &mut Map {
             if ui.is_rect_visible(self.map_area) {
                 let (resp, paint) =
                     ui.allocate_painter(painter_size, egui::Sense::click_and_drag());
+                // `paint` is already clipped to the drawable area, but custom
+                // templates (and the built-in marker effects) paint through
+                // `ui.painter()`, whose clip was still the parent's -- so a
+                // node near the edge was drawn over the frame and past the
+                // widget. Clip the whole content `Ui` the same way.
+                ui.set_clip_rect(paint.clip_rect());
                 let vec = resp.drag_delta();
                 if vec.length() != 0.0 {
                     let _span = tracing::info_span!("calculating_points_in_visible_area").entered();
@@ -2028,6 +2034,12 @@ impl Map {
             .or_insert(node_id);
     }
 
+    /// Removes the marker `id`, if there is one, and returns the node it
+    /// pointed to. Removing a marker that doesn't exist does nothing.
+    pub fn remove_marker(&mut self, id: usize) -> Option<usize> {
+        self.markers.remove(&id)
+    }
+
     /// Sets the minimum width and/or height the widget should occupy, in egui
     /// points. `None` leaves the corresponding dimension unconstrained.
     pub fn allocate_at_least(&mut self, width: Option<f32>, height: Option<f32>) {
@@ -3069,6 +3081,20 @@ mod tests {
         assert_eq!(map.markers.get(&1), Some(&100));
         map.update_marker(1, 200);
         assert_eq!(map.markers.get(&1), Some(&200));
+        assert_eq!(map.markers.len(), 1);
+    }
+
+    #[test]
+    fn remove_marker_removes_only_that_marker() {
+        let mut map = Map::new();
+        map.update_marker(1, 100);
+        map.update_marker(2, 200);
+        assert_eq!(map.remove_marker(1), Some(100));
+        assert_eq!(map.markers.get(&1), None);
+        assert_eq!(map.markers.get(&2), Some(&200));
+        // Removing it again, or a marker that never existed, is a no-op.
+        assert_eq!(map.remove_marker(1), None);
+        assert_eq!(map.remove_marker(99), None);
         assert_eq!(map.markers.len(), 1);
     }
 
