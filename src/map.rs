@@ -736,7 +736,12 @@ impl Widget for &mut Map {
                 }
 
                 for marker in &self.markers {
-                    if let Some(point) = self.points.as_ref().unwrap().get(marker.1) {
+                    // A marker can arrive before its node does (the nodes
+                    // aren't loaded yet, or never will be): it is kept and
+                    // drawn once the node exists.
+                    if let Some(point) =
+                        self.points.as_ref().and_then(|points| points.get(marker.1))
+                    {
                         let adjusted_point = RawPoint::from(point.coords) * self.zoom - min_point;
                         // Plain markers have no color setting of their own to
                         // override, unlike a node's lasting state -- both

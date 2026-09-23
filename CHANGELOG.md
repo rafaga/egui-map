@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/) (pre-1.0:
 any minor bump may include breaking changes, called out below as such).
 
+## [0.9.2] - 2026-09-23
+
+### Fixed
+
+- Drawing a map with a marker when its nodes weren't loaded (no
+  `add_points`/`add_hashmap_points` yet, for example while the data source is
+  still being built) panicked on an `unwrap` of the missing nodes. The marker
+  is now skipped until its node exists, like a marker on a node id that isn't
+  loaded already was.
+
 ## [0.9.1] - 2026-09-23
 
 ### Added

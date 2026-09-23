@@ -1,6 +1,6 @@
 [package]
 name = "egui-map"
-version = "0.9.1"
+version = "0.9.2"
 edition = "2024"
 authors = ["Rafael Amador <rafaga@duck.com"]
 description = "Visual component to draw a map on screen."
@@ -47,7 +47,7 @@ debug_overlay = []
 profile = ["dep:tracing-subscriber", "dep:tracing-tracy"]
 
 [dependencies]
-egui = { version = "0.36.1", features = ["bytemuck"]}
+egui = { version = "0.36", features = ["bytemuck"]}
 kdtree = { version = "0.8.0" }
 rstar = "0.13.0"
 tracing = "0.1"
@@ -55,8 +55,8 @@ tracing-subscriber = { version = "0.3.23", optional = true }
 tracing-tracy = { version = "0.12", optional = true }
 
 [dev-dependencies]
-eframe = "0.36.1"
-egui_extras = { version = "0.36.1", features = ["svg"] }
+eframe = "0.36"
+egui_extras = { version = "0.36", features = ["svg"] }
 
 [[example]]
 name = "tracy_profile"
