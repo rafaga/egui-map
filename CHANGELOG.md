@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/) (pre-1.0:
 any minor bump may include breaking changes, called out below as such).
 
+## [0.9.4] - 2026-09-24
+
+### Added
+
+- `Map::hovered_node`: the node under the pointer in the last frame, worked
+  out in every `VisibilitySetting` -- e.g. to attach a tooltip to some nodes
+  only, from the `Response` the widget returns.
+- `NodeTemplate::contains` (with a default) and `HitContext`: a template's own
+  hit area for `hovered_node`; the default, `HitContext::within_default_radius`,
+  is a circle of `4 * zoom`, at least `NODE_HIT_MIN_RADIUS` screen points.
+  `NodeTemplate::hit_extent` (with a default, `objects::default_hit_extent`)
+  tells the widget how far that area reaches, so every node whose area could
+  contain the pointer is tested, however large it is; where areas overlap,
+  the node painted last (on top) wins.
+- `NodeHandle::lasting(duration)`: an event effect (`pulse`, `ripple`, ...)
+  that repeats every cycle for `duration` instead of playing once, fading out
+  progressively over that time. `NotificationContext::until` tells a template
+  when it ends, and `NotificationContext::color` arrives already faded.
+
+### Fixed
+
+- With a `NodeTemplate` installed, the `bool` returned by `notification_ui`
+  was ignored, so a notification was never removed and kept the map
+  repainting forever. Returning `false` now ends it, as documented.
+- The built-in effects replaced a color's alpha instead of scaling it, so a
+  translucent color (e.g. a fading lasting notification) came out darker
+  rather than more transparent.
+
 ## [0.9.3] - 2026-09-24
 
 ### Added

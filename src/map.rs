@@ -103,10 +103,11 @@
 
 use crate::map::animation::Animation;
 use crate::map::objects::{
-    CometDirection, ContextMenuManager, LabelContext, MapBounds, MapLabel, MapPoint, MapSegment,
-    MapSettings, MarkerContext, NodeAnimation, NodeContext, NotificationContext, RawLine, RawPoint,
-    RegionLabel, SegmentAnimation, SegmentContext, SegmentNotificationContext, SegmentStateContext,
-    SelectionContext, SteadyAnimation, SteadySegmentAnimation, TextSettings, VisibilitySetting,
+    CometDirection, ContextMenuManager, HitContext, LabelContext, MapBounds, MapLabel, MapPoint,
+    MapSegment, MapSettings, MarkerContext, NodeAnimation, NodeContext, NotificationContext,
+    RawLine, RawPoint, RegionLabel, SegmentAnimation, SegmentContext, SegmentNotificationContext,
+    SegmentStateContext, SelectionContext, SteadyAnimation, SteadySegmentAnimation, TextSettings,
+    VisibilitySetting,
 };
 use crate::map::theme::{ColorMode, MapTheme, Theme, ThemeColors};
 use egui::text::Galley;
@@ -248,6 +249,9 @@ pub struct Map {
     /// Fade of [`NodeContext::marker`](objects::NodeContext::marker), keyed
     /// by node id. An entry stays after fading out (at most one per node).
     marker_presence: HashMap<usize, MarkerPresence>,
+    /// The node under the pointer in the last frame; see
+    /// [`Map::hovered_node`].
+    hovered_node: Option<usize>,
     /// The active color palette. See [`Map::set_theme`].
     theme: Rc<dyn MapTheme>,
 }
@@ -259,6 +263,51 @@ struct Notification {
     animation: NodeAnimation,
     /// `None` falls back to the active theme's `ThemeColors::alert`.
     color: Option<Color32>,
+    /// When a lasting notification ([`NodeHandle::lasting`]) ends; `None`
+    /// plays the effect once.
+    until: Option<Instant>,
+}
+
+impl Notification {
+    /// Whether a lasting notification has run its course at `now`.
+    fn expired(&self, now: Instant) -> bool {
+        self.until.is_some_and(|until| now >= until)
+    }
+
+    /// How much of a lasting notification is left at `now`, from `1.0` (just
+    /// triggered) to `0.0` (over); always `1.0` for a one-off one. Its color
+    /// fades by this factor, so a lasting alert grows fainter as it ages.
+    fn remaining(&self, now: Instant) -> f32 {
+        let Some(until) = self.until else {
+            return 1.0;
+        };
+        let total = until.saturating_duration_since(self.started).as_secs_f32();
+        if total <= 0.0 {
+            return 0.0;
+        }
+        (until.saturating_duration_since(now).as_secs_f32() / total).clamp(0.0, 1.0)
+    }
+}
+
+/// Length of one cycle of a node event effect, in seconds -- how long it
+/// plays once, and how often a lasting notification restarts it.
+fn node_animation_cycle(animation: NodeAnimation) -> f32 {
+    match animation {
+        NodeAnimation::Pulse => animation::PULSE_DURATION,
+        NodeAnimation::Ripple => animation::RIPPLE_DURATION,
+        NodeAnimation::CountdownArc => animation::COUNTDOWN_DURATION,
+        NodeAnimation::ScaleIn => animation::SCALE_IN_DURATION,
+        NodeAnimation::Crosshair => animation::CROSSHAIR_DURATION,
+    }
+}
+
+/// The start of the cycle a lasting notification that `started` is in at
+/// `now`, so the effect can be drawn as if it had just been triggered then.
+fn current_cycle_start(started: Instant, now: Instant, cycle: f32) -> Instant {
+    let elapsed = now.saturating_duration_since(started).as_secs_f32();
+    let into_cycle = if cycle > 0.0 { elapsed % cycle } else { 0.0 };
+    now.checked_sub(std::time::Duration::from_secs_f32(into_cycle))
+        .unwrap_or(now)
 }
 
 /// Lasting state attached to a node, drawn until it is cleared.
@@ -350,6 +399,7 @@ pub struct NodeHandle<'a> {
     map: &'a mut Map,
     id: usize,
     color: Option<Color32>,
+    lasting: Option<std::time::Duration>,
 }
 
 impl NodeHandle<'_> {
@@ -364,6 +414,30 @@ impl NodeHandle<'_> {
         self
     }
 
+    /// Makes the event effect about to be attached (`pulse`, `ripple`, ...)
+    /// last `duration` from the moment it is triggered, repeating it every
+    /// cycle, instead of playing it once. Its color fades progressively over
+    /// that time, so a recent notification stands out from an old one (a
+    /// [`NodeTemplate`] gets it already faded in
+    /// [`NotificationContext::color`](objects::NotificationContext::color)).
+    /// Lasting state (`halo`, `blink`, `orbit`) ignores it: it already runs
+    /// until cleared.
+    ///
+    /// ```
+    /// # use egui_map::map::Map;
+    /// # use egui_map::map::objects::MapPoint;
+    /// # use std::time::{Duration, Instant};
+    /// # let mut map = Map::new();
+    /// # map.add_points(vec![MapPoint::new(1, [0.0, 0.0])]);
+    /// if let Some(node) = map.node(1) {
+    ///     node.lasting(Duration::from_secs(240)).pulse(Instant::now());
+    /// }
+    /// ```
+    pub fn lasting(mut self, duration: std::time::Duration) -> Self {
+        self.lasting = Some(duration);
+        self
+    }
+
     fn notify_with(self, animation: NodeAnimation, at: Instant) {
         self.map.notifications.insert(
             self.id,
@@ -371,6 +445,7 @@ impl NodeHandle<'_> {
                 started: at,
                 animation,
                 color: self.color,
+                until: self.lasting.map(|duration| at + duration),
             },
         );
     }
@@ -760,14 +835,18 @@ impl Widget for &mut Map {
                 // segment is outside the viewport and never finishes its
                 // animation.
                 let now = Instant::now();
-                self.notifications
-                    .retain(|_, n| now.duration_since(n.started).as_secs_f32() < 10.0);
+                self.notifications.retain(|_, n| match n.until {
+                    Some(until) => now < until,
+                    None => now.duration_since(n.started).as_secs_f32() < 10.0,
+                });
                 self.segment_notifications
                     .retain(|_, n| now.duration_since(n.started).as_secs_f32() < 10.0);
 
                 for segment in self.paint_map_lines(&paint, &min_point) {
                     self.segment_notifications.remove(&segment);
                 }
+
+                self.hovered_node = self.find_hovered_node(&resp, &min_point);
 
                 if let Ok(nodes_to_remove) =
                     self.paint_map_points(vec_points, hashm, &paint, ui, &min_point, &resp)
@@ -884,6 +963,7 @@ impl Map {
             label_template: None,
             markers: HashMap::new(),
             marker_presence: HashMap::new(),
+            hovered_node: None,
             segments: None,
             theme: Rc::new(Theme::default()),
         }
@@ -1559,9 +1639,14 @@ impl Map {
                 }
 
                 if let Some(notification) = self.notifications.get(&system_id) {
-                    let color = notification.color.unwrap_or(theme.alert);
-                    if let Some(template) = &self.node_template {
-                        template.notification_ui(
+                    let color = notification
+                        .color
+                        .unwrap_or(theme.alert)
+                        .gamma_multiply(notification.remaining(now));
+                    if notification.expired(now) {
+                        nodes_to_remove.push(system_id);
+                    } else if let Some(template) = &self.node_template {
+                        let running = template.notification_ui(
                             ui_obj,
                             NotificationContext {
                                 position: viewport_point.into(),
@@ -1569,10 +1654,14 @@ impl Map {
                                 initial_time: notification.started,
                                 color,
                                 kind: notification.animation,
+                                until: notification.until,
                                 node_id: system_id,
                                 theme,
                             },
                         );
+                        if !running {
+                            nodes_to_remove.push(system_id);
+                        }
                     } else {
                         let effect = match notification.animation {
                             NodeAnimation::Pulse => Animation::pulse,
@@ -1581,13 +1670,20 @@ impl Map {
                             NodeAnimation::ScaleIn => Animation::scale_in,
                             NodeAnimation::Crosshair => Animation::crosshair,
                         };
-                        if effect(
-                            paint,
-                            viewport_point.into(),
-                            self.zoom,
-                            notification.started,
-                            color,
-                        ) {
+                        // A lasting notification restarts the effect every
+                        // cycle until `until`; a plain one plays it once.
+                        let started = if notification.until.is_some() {
+                            current_cycle_start(
+                                notification.started,
+                                now,
+                                node_animation_cycle(notification.animation),
+                            )
+                        } else {
+                            notification.started
+                        };
+                        let running =
+                            effect(paint, viewport_point.into(), self.zoom, started, color);
+                        if running || notification.until.is_some() {
                             ui_obj.ctx().request_repaint();
                         } else {
                             nodes_to_remove.push(system_id);
@@ -1913,6 +2009,7 @@ impl Map {
                 started: time,
                 animation: NodeAnimation::Pulse,
                 color: None,
+                until: None,
             },
         );
     }
@@ -1957,6 +2054,7 @@ impl Map {
             map: self,
             id,
             color: None,
+            lasting: None,
         })
     }
 
@@ -2100,6 +2198,83 @@ impl Map {
             self.refresh_marker_presence(node_id);
         }
         removed
+    }
+
+    /// The node under the pointer in the last frame the widget was drawn, or
+    /// `None` if the pointer isn't over the map or over any node.
+    ///
+    /// A node counts as under the pointer when the pointer is inside its hit
+    /// area: [`NodeTemplate::contains`] with
+    /// a template installed, a small circle around the node without one.
+    /// Worked out in every [`VisibilitySetting`].
+    ///
+    /// Useful to attach a tooltip to some nodes only, from the `Response` the
+    /// widget returns:
+    ///
+    /// ```no_run
+    /// # use egui_map::map::Map;
+    /// # fn show(ui: &mut egui::Ui, map: &mut Map) {
+    /// let response = ui.add(&mut *map);
+    /// if let Some(id) = map.hovered_node()
+    ///     && id == 30000142
+    /// {
+    ///     response.on_hover_text_at_pointer("Jita");
+    /// }
+    /// # }
+    /// ```
+    pub fn hovered_node(&self) -> Option<usize> {
+        self.hovered_node
+    }
+
+    /// Finds the node under the pointer. Candidates are every node whose
+    /// center lies within the largest hit area a node can have
+    /// ([`NodeTemplate::hit_extent`](objects::NodeTemplate::hit_extent), or
+    /// the default radius without a template) of the pointer -- so a large
+    /// area (a template drawing boxes) is never missed because other centers
+    /// are nearer. Among the candidates whose hit area contains the pointer,
+    /// the one painted last -- the one on top -- wins.
+    fn find_hovered_node(&self, resp: &Response, min_point: &RawPoint) -> Option<usize> {
+        if !resp.hovered() {
+            return None;
+        }
+        let pointer = resp.hover_pos()?;
+        let points = self.points.as_ref()?;
+        let tree = self.tree.as_ref()?;
+        let extent = match &self.node_template {
+            Some(template) => template.hit_extent(self.zoom),
+            None => objects::default_hit_extent(self.zoom),
+        };
+        let map_point = (*min_point + RawPoint::from(pointer)) / self.zoom;
+        // The tree measures squared map units.
+        let radius = extent.max(0.0) / self.zoom;
+        let candidates = tree
+            .within(&map_point.components, radius * radius, &squared_euclidean)
+            .ok()?;
+        candidates
+            .into_iter()
+            .filter_map(|(_, id)| {
+                let point = points.get(id)?;
+                let position: Pos2 = (RawPoint::from(point.coords) * self.zoom - *min_point).into();
+                let ctx = HitContext {
+                    position,
+                    zoom: self.zoom,
+                    point,
+                };
+                let hit = match &self.node_template {
+                    Some(template) => template.contains(ctx, pointer),
+                    None => ctx.within_default_radius(pointer),
+                };
+                hit.then_some(*id)
+            })
+            .max_by_key(|id| self.paint_order(*id))
+    }
+
+    /// Where `id` falls in this frame's painting order (later is on top);
+    /// `None` for a node that isn't painted (outside the viewport).
+    fn paint_order(&self, id: usize) -> Option<usize> {
+        self.visible_points
+            .iter()
+            .rposition(|visible| visible.cast_unsigned() == id)
     }
 
     /// Starts fading `node_id`'s [`NodeContext::marker`](objects::NodeContext::marker)
@@ -3168,6 +3343,34 @@ mod tests {
         map.update_marker(1, 200);
         assert_eq!(map.markers.get(&1), Some(&200));
         assert_eq!(map.markers.len(), 1);
+    }
+
+    #[test]
+    fn lasting_notifications_cycle_and_fade() {
+        let started = Instant::now();
+        let at = |secs: f32| started + std::time::Duration::from_secs_f32(secs);
+        // 7.5 s into a 3.5 s cycle: the third cycle began 0.5 s ago.
+        let cycle = current_cycle_start(started, at(7.5), 3.5);
+        assert!((at(7.5).duration_since(cycle).as_secs_f32() - 0.5).abs() < 1e-3);
+
+        let lasting = Notification {
+            started,
+            animation: NodeAnimation::Pulse,
+            color: None,
+            until: Some(at(100.0)),
+        };
+        assert_eq!(lasting.remaining(started), 1.0);
+        assert!((lasting.remaining(at(25.0)) - 0.75).abs() < 1e-3);
+        assert_eq!(lasting.remaining(at(200.0)), 0.0);
+        assert!(!lasting.expired(at(99.0)));
+        assert!(lasting.expired(at(100.0)));
+
+        let once = Notification {
+            until: None,
+            ..lasting
+        };
+        assert_eq!(once.remaining(at(50.0)), 1.0);
+        assert!(!once.expired(at(1000.0)));
     }
 
     #[test]

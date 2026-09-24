@@ -103,14 +103,13 @@ pub const CHEVRON_SPEED: f32 = 0.5;
 /// paints.
 pub const CHEVRON_WIDTH: f32 = 10.0;
 
-/// Returns `color` with its alpha replaced by `alpha` (clamped to `0.0..=1.0`).
+/// Returns `color` with its opacity multiplied by `alpha` (clamped to
+/// `0.0..=1.0`): an opaque `color` ends up with exactly that alpha, and a
+/// translucent one (e.g. a lasting notification already fading out) keeps
+/// its own transparency on top. `Color32` is premultiplied, so this has to
+/// scale every channel, not just replace the alpha byte.
 fn with_alpha(color: Color32, alpha: f32) -> Color32 {
-    Color32::from_rgba_unmultiplied(
-        color.r(),
-        color.g(),
-        color.b(),
-        (255.0 * alpha.clamp(0.0, 1.0)).round() as u8,
-    )
+    color.gamma_multiply(alpha.clamp(0.0, 1.0))
 }
 
 /// Seconds elapsed since `initial_time`.

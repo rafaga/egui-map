@@ -1160,6 +1160,63 @@ pub trait NodeTemplate {
     /// draw a marker as part of its node instead, leave this empty and use
     /// [`NodeContext::marker`] in [`NodeTemplate::node_ui`].
     fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext);
+
+    /// Whether `pointer` (screen coordinates) is over the node described by
+    /// `ctx` -- the node's hit area, used by
+    /// [`Map::hovered_node`](super::Map::hovered_node). Override it to match
+    /// the shape [`NodeTemplate::node_ui`] draws (e.g. a box around a label),
+    /// together with [`NodeTemplate::hit_extent`].
+    /// The default is [`HitContext::within_default_radius`], a small circle
+    /// around the node's position.
+    fn contains(&self, ctx: HitContext, pointer: Pos2) -> bool {
+        ctx.within_default_radius(pointer)
+    }
+
+    /// The farthest a node's hit area ([`NodeTemplate::contains`]) reaches
+    /// from its position, in screen points, at `zoom`. The widget only tests
+    /// nodes whose center is at most this far from the pointer, so it must
+    /// cover the whole area (for a box: half its diagonal). The default,
+    /// [`default_hit_extent`], matches the default `contains`; override both
+    /// together.
+    fn hit_extent(&self, zoom: f32) -> f32 {
+        default_hit_extent(zoom)
+    }
+}
+
+/// Reach of the default node hit area ([`HitContext::within_default_radius`]),
+/// in screen points: `4 * zoom`, at least [`NODE_HIT_MIN_RADIUS`].
+pub fn default_hit_extent(zoom: f32) -> f32 {
+    (4.0 * zoom).max(NODE_HIT_MIN_RADIUS)
+}
+
+/// Radius, in screen points, of the default node hit area
+/// ([`HitContext::within_default_radius`]) when the map is zoomed out far
+/// enough that the node itself is smaller.
+pub const NODE_HIT_MIN_RADIUS: f32 = 8.0;
+
+/// The context passed to [`NodeTemplate::contains`].
+///
+/// `#[non_exhaustive]`, like the other contexts, so a future field can be
+/// added without a breaking change.
+#[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
+pub struct HitContext<'a> {
+    /// The node's screen position: already scaled by `zoom` and translated
+    /// to the viewport origin.
+    pub position: Pos2,
+    /// The map's zoom, to scale the hit area with the node.
+    pub zoom: f32,
+    /// The node being tested.
+    pub point: &'a MapPoint,
+}
+
+impl HitContext<'_> {
+    /// The hit area of the built-in node (a circle of radius `4 * zoom`),
+    /// never smaller than [`NODE_HIT_MIN_RADIUS`] so a node stays easy to
+    /// point at when the map is zoomed out.
+    pub fn within_default_radius(&self, pointer: Pos2) -> bool {
+        self.position.distance(pointer) <= default_hit_extent(self.zoom)
+    }
 }
 
 /// The context passed to [`NodeTemplate::node_ui`].
@@ -1268,13 +1325,24 @@ pub struct NotificationContext {
     pub initial_time: Instant,
     /// The color requested for this notification: the node's own override
     /// if it was given one when triggered, otherwise the active theme's
-    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert).
+    /// [`ThemeColors::alert`](super::theme::ThemeColors::alert). For a
+    /// lasting notification (see `until`) it is already faded in proportion
+    /// to the time left, from full at the start to transparent at `until`,
+    /// so draw with it (scaling it with `gamma_multiply`, not replacing its
+    /// alpha) to keep that fade.
     pub color: Color32,
     /// Which built-in event effect was requested (`pulse`, `ripple`, ...).
     /// Match on this to dispatch to the corresponding
     /// [`Animation`](crate::map::animation::Animation) function instead of
     /// reimplementing the lookup yourself.
     pub kind: NodeAnimation,
+    /// When the notification must end, if it was given a lasting duration
+    /// ([`NodeHandle::lasting`](super::NodeHandle::lasting)): until then,
+    /// repeat the effect (e.g. restart it every cycle) and keep returning
+    /// `true`. `None`: the effect plays once, for as long as it naturally
+    /// lasts. The widget drops the notification once this moment passes,
+    /// whatever the hook returns.
+    pub until: Option<Instant>,
     /// The id of the node this notification belongs to.
     pub node_id: usize,
     /// The active [`MapTheme`](super::theme::MapTheme)'s full
