@@ -10,8 +10,9 @@
 //!   while still playing and `false` once finished, so the caller can drop
 //!   the entry and stop repainting.
 //! - **Persistent** effects ([`Animation::halo`], [`Animation::blink`],
-//!   [`Animation::orbit`], [`Animation::comet`], [`Animation::dash`],
-//!   [`Animation::glow_band`], [`Animation::chevrons`]) never end. They take
+//!   [`Animation::orbit`], [`Animation::glow`], [`Animation::comet`],
+//!   [`Animation::dash`], [`Animation::glow_band`], [`Animation::chevrons`])
+//!   never end. They take
 //!   the **frame time** in seconds (`ui.input(|i| i.time)`) rather than an
 //!   `Instant`, so every element animated in the same frame shares one clock
 //!   and cannot drift apart.
@@ -39,8 +40,8 @@
 
 use super::objects::CometDirection;
 use egui::{
-    Color32, ColorImage, Context, Id, Mesh, Painter, Pos2, Shape, Stroke, TextureFilter,
-    TextureHandle, TextureOptions, TextureWrapMode, Vec2,
+    Color32, ColorImage, Context, CornerRadius, Id, Mesh, Painter, Pos2, Rect, Shape, Stroke,
+    TextureFilter, TextureHandle, TextureOptions, TextureWrapMode, Vec2,
     epaint::{CircleShape, PathShape, Vertex},
     pos2,
 };
@@ -88,6 +89,9 @@ pub const GLOW_BAND_LENGTH_PX: f32 = 40.0;
 /// Width, before the `zoom` multiplier, of the ribbon [`Animation::glow_band`]
 /// paints.
 pub const GLOW_BAND_THICKNESS: f32 = 5.0;
+/// How long one full pulse of [`Animation::glow`] takes (dim, bright, dim),
+/// in seconds.
+pub const GLOW_PERIOD: f32 = 2.5;
 /// Length, in **screen pixels**, of one chevron repeat of
 /// [`Animation::chevrons`]. Deliberately not scaled by zoom, same reasoning
 /// as [`DASH_PERIOD_PX`].
@@ -118,6 +122,13 @@ fn elapsed(initial_time: Instant) -> f32 {
 fn triangle_wave(time: f32, period: f32) -> f32 {
     let phase = (time / period).rem_euclid(1.0);
     1.0 - (2.0 * phase - 1.0).abs()
+}
+
+/// Opacity factor of [`Animation::glow`] at `time`: a smooth `0 -> 1 -> 0`
+/// pulse of [`GLOW_PERIOD`], scaled by `strength` (clamped to `0.0..=1.0`).
+fn glow_level(time: f32, strength: f32) -> f32 {
+    let pulse = 0.5 - 0.5 * (TAU * time / GLOW_PERIOD).cos();
+    strength.clamp(0.0, 1.0) * pulse
 }
 
 /// Overshooting ease-out, so a scale-in settles with a small bounce.
@@ -733,6 +744,40 @@ impl Animation {
         )));
     }
 
+    /// One frame of a tint breathing in and out over a rounded rectangle.
+    ///
+    /// For a custom [`NodeTemplate`](crate::map::objects::NodeTemplate) that
+    /// draws its node as a box: paint it over the node's background and
+    /// before its label, with the same `rect` and `corner_radius`, and the
+    /// node itself pulses in `color` without covering its text -- unlike
+    /// [`marker_ui`](crate::map::objects::NodeTemplate::marker_ui), which is
+    /// drawn over every node. `color`'s own alpha is the peak opacity (e.g.
+    /// `theme.marker.gamma_multiply(0.6)` to keep the label readable).
+    ///
+    /// `strength` (`0.0..=1.0`) scales the whole effect: pass
+    /// [`NodeContext::marker`](crate::map::objects::NodeContext::marker) and
+    /// the glow fades in and out with the node's markers. Nothing is drawn at
+    /// `0.0`. `time` is the frame time in seconds; request repaints while
+    /// `strength` is above zero.
+    pub fn glow(
+        painter: &Painter,
+        rect: Rect,
+        corner_radius: CornerRadius,
+        time: f32,
+        color: Color32,
+        strength: f32,
+    ) {
+        let level = glow_level(time, strength);
+        if level <= 0.0 {
+            return;
+        }
+        painter.add(Shape::rect_filled(
+            rect,
+            corner_radius,
+            color.gamma_multiply(level),
+        ));
+    }
+
     /// One frame of a dot orbiting the node, with a faint guide ring.
     ///
     /// Reads as *"under observation"*. `time` is the frame time in seconds.
@@ -762,7 +807,7 @@ impl Animation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui::{Context, LayerId, Rect, Vec2};
+    use egui::{Context, LayerId, Vec2};
     use std::time::Duration;
 
     fn headless_painter() -> Painter {
@@ -791,6 +836,30 @@ mod tests {
             ("scale_in", Animation::scale_in, SCALE_IN_DURATION),
             ("crosshair", Animation::crosshair, CROSSHAIR_DURATION),
         ]
+    }
+
+    #[test]
+    fn glow_pulses_and_scales_with_strength() {
+        assert_eq!(glow_level(0.0, 1.0), 0.0);
+        assert!((glow_level(GLOW_PERIOD / 2.0, 1.0) - 1.0).abs() < 1e-5);
+        assert!((glow_level(GLOW_PERIOD / 2.0, 0.5) - 0.5).abs() < 1e-5);
+        assert_eq!(glow_level(GLOW_PERIOD / 2.0, 0.0), 0.0);
+        // Out-of-range strengths are clamped.
+        assert!((glow_level(GLOW_PERIOD / 2.0, 3.0) - 1.0).abs() < 1e-5);
+        assert_eq!(glow_level(GLOW_PERIOD / 2.0, -1.0), 0.0);
+        // Drawing it, at any strength, never panics.
+        let painter = headless_painter();
+        let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(90.0, 35.0));
+        for strength in [0.0, 0.5, 1.0] {
+            Animation::glow(
+                &painter,
+                rect,
+                CornerRadius::same(10),
+                GLOW_PERIOD / 2.0,
+                Color32::GREEN,
+                strength,
+            );
+        }
     }
 
     #[test]

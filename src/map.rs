@@ -245,6 +245,9 @@ pub struct Map {
     segment_template: Option<Rc<dyn SegmentTemplate>>,
     label_template: Option<Rc<dyn LabelTemplate>>,
     markers: HashMap<usize, usize>,
+    /// Fade of [`NodeContext::marker`](objects::NodeContext::marker), keyed
+    /// by node id. An entry stays after fading out (at most one per node).
+    marker_presence: HashMap<usize, MarkerPresence>,
     /// The active color palette. See [`Map::set_theme`].
     theme: Rc<dyn MapTheme>,
 }
@@ -266,6 +269,45 @@ struct NodeState {
     /// is the persistent "flagged" state `marker_ui` paints, not a one-off
     /// event, so it uses `marker` rather than `alert`.
     color: Option<Color32>,
+}
+
+/// Fade of a node's [`NodeContext::marker`](objects::NodeContext::marker):
+/// in while `on`, out otherwise, since `since`. Turning it around halfway
+/// shifts `since` back so the level carries on from where it was.
+#[derive(Clone, Copy, Debug)]
+struct MarkerPresence {
+    on: bool,
+    since: Instant,
+}
+
+impl MarkerPresence {
+    /// `0.0` (no marker) to `1.0` (fully in) at `now`.
+    fn level(&self, now: Instant) -> f32 {
+        let progress =
+            now.saturating_duration_since(self.since).as_secs_f32() / objects::MARKER_FADE_SECS;
+        if self.on {
+            progress.min(1.0)
+        } else {
+            (1.0 - progress).max(0.0)
+        }
+    }
+
+    /// The fade after switching to `on` at `now`, starting from the level
+    /// `previous` had reached.
+    fn switch(previous: Option<MarkerPresence>, on: bool, now: Instant) -> Self {
+        let level = previous.map_or(0.0, |presence| presence.level(now));
+        let head_start = if on { level } else { 1.0 - level } * objects::MARKER_FADE_SECS;
+        let since = now
+            .checked_sub(std::time::Duration::from_secs_f32(head_start))
+            .unwrap_or(now);
+        Self { on, since }
+    }
+
+    /// Whether the level is still changing at `now`.
+    fn fading(&self, now: Instant) -> bool {
+        let level = self.level(now);
+        if self.on { level < 1.0 } else { level > 0.0 }
+    }
 }
 
 /// A one-off effect attached to a segment, with the moment it started.
@@ -841,6 +883,7 @@ impl Map {
             segment_template: None,
             label_template: None,
             markers: HashMap::new(),
+            marker_presence: HashMap::new(),
             segments: None,
             theme: Rc::new(Theme::default()),
         }
@@ -1427,6 +1470,8 @@ impl Map {
         // node to node either.
         let theme = self.theme_colors();
         let background_color = ui_obj.ctx().theme().default_visuals().extreme_bg_color;
+        // One clock for every node's marker fade this frame.
+        let now = Instant::now();
 
         // filling text settings
         let mut text_settings = TextSettings {
@@ -1558,6 +1603,10 @@ impl Map {
                 // two apart.
                 let node_color = system.color.unwrap_or(theme.node);
                 if let Some(node_template) = &self.node_template {
+                    let (marker, marker_fading) = self.marker_level(system_id, now);
+                    if marker_fading {
+                        ui_obj.ctx().request_repaint();
+                    }
                     node_template.node_ui(
                         ui_obj,
                         NodeContext {
@@ -1567,6 +1616,7 @@ impl Map {
                             color: node_color,
                             background_color,
                             theme,
+                            marker,
                         },
                     );
                 } else {
@@ -2033,16 +2083,47 @@ impl Map {
     /// Markers are drawn as a blinking ring around the target node unless a
     /// custom [`objects::NodeTemplate::marker_ui`] is installed.
     pub fn update_marker(&mut self, id: usize, node_id: usize) {
-        self.markers
-            .entry(id)
-            .and_modify(|value| *value = node_id)
-            .or_insert(node_id);
+        let previous = self.markers.insert(id, node_id);
+        if let Some(previous) = previous
+            && previous != node_id
+        {
+            self.refresh_marker_presence(previous);
+        }
+        self.refresh_marker_presence(node_id);
     }
 
     /// Removes the marker `id`, if there is one, and returns the node it
     /// pointed to. Removing a marker that doesn't exist does nothing.
     pub fn remove_marker(&mut self, id: usize) -> Option<usize> {
-        self.markers.remove(&id)
+        let removed = self.markers.remove(&id);
+        if let Some(node_id) = removed {
+            self.refresh_marker_presence(node_id);
+        }
+        removed
+    }
+
+    /// Starts fading `node_id`'s [`NodeContext::marker`](objects::NodeContext::marker)
+    /// in or out to match whether any marker still points at it.
+    fn refresh_marker_presence(&mut self, node_id: usize) {
+        let on = self.markers.values().any(|node| *node == node_id);
+        let previous = self.marker_presence.get(&node_id).copied();
+        if previous.is_some_and(|presence| presence.on == on) || (previous.is_none() && !on) {
+            return;
+        }
+        self.marker_presence.insert(
+            node_id,
+            MarkerPresence::switch(previous, on, Instant::now()),
+        );
+    }
+
+    /// Current [`NodeContext::marker`](objects::NodeContext::marker) level
+    /// of `node_id`, and whether it is still fading.
+    fn marker_level(&self, node_id: usize, now: Instant) -> (f32, bool) {
+        self.marker_presence
+            .get(&node_id)
+            .map_or((0.0, false), |presence| {
+                (presence.level(now), presence.fading(now))
+            })
     }
 
     /// Sets the minimum width and/or height the widget should occupy, in egui
@@ -3087,6 +3168,42 @@ mod tests {
         map.update_marker(1, 200);
         assert_eq!(map.markers.get(&1), Some(&200));
         assert_eq!(map.markers.len(), 1);
+    }
+
+    #[test]
+    fn marker_presence_fades_in_and_out() {
+        let start = Instant::now();
+        let fade = std::time::Duration::from_secs_f32(objects::MARKER_FADE_SECS);
+        let presence = MarkerPresence::switch(None, true, start);
+        assert_eq!(presence.level(start), 0.0);
+        assert!((presence.level(start + fade / 2) - 0.5).abs() < 0.01);
+        assert_eq!(presence.level(start + fade * 2), 1.0);
+        assert!(presence.fading(start + fade / 2));
+        assert!(!presence.fading(start + fade * 2));
+
+        // Turned off halfway: it fades out from where it was, not from 1.0.
+        let half = start + fade / 2;
+        let off = MarkerPresence::switch(Some(presence), false, half);
+        assert!((off.level(half) - 0.5).abs() < 0.01);
+        assert_eq!(off.level(half + fade), 0.0);
+    }
+
+    #[test]
+    fn marker_presence_follows_the_markers() {
+        let later = || Instant::now() + std::time::Duration::from_secs(10);
+        let mut map = Map::new();
+        map.update_marker(1, 100);
+        map.update_marker(2, 100);
+        assert_eq!(map.marker_level(100, later()).0, 1.0);
+
+        // One of two markers moves away: the node still has one.
+        map.update_marker(1, 200);
+        assert_eq!(map.marker_level(100, later()).0, 1.0);
+        assert_eq!(map.marker_level(200, later()).0, 1.0);
+
+        map.remove_marker(2);
+        assert_eq!(map.marker_level(100, later()).0, 0.0);
+        assert_eq!(map.marker_level(300, later()), (0.0, false));
     }
 
     #[test]

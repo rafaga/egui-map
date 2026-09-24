@@ -1155,6 +1155,10 @@ pub trait NodeTemplate {
     /// markers (e.g. a blinking light), drive the effect from the system
     /// clock and call
     /// [`ui.ctx().request_repaint()`](egui::Context::request_repaint).
+    ///
+    /// Markers are painted after every node, so over the nodes' labels. To
+    /// draw a marker as part of its node instead, leave this empty and use
+    /// [`NodeContext::marker`] in [`NodeTemplate::node_ui`].
     fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext);
 }
 
@@ -1199,7 +1203,23 @@ pub struct NodeContext<'a> {
     /// label in the theme's text color -- the same color the built-in label
     /// painting uses when no template is installed.
     pub theme: ThemeColors,
+    /// How present a marker ([`Map::update_marker`](super::Map::update_marker))
+    /// is on this node, from `0.0` (none) to `1.0`: `1.0` while at least one
+    /// marker points here, fading in over [`MARKER_FADE_SECS`] when the first
+    /// one arrives and out when the last one leaves (turned around halfway,
+    /// the fade carries on from where it was). The widget repaints while a
+    /// fade is running.
+    ///
+    /// Lets a template draw markers as part of the node itself -- e.g.
+    /// [`Animation::glow`](super::animation::Animation::glow) between the
+    /// node's background and its label, with this value as its `strength` --
+    /// instead of in [`NodeTemplate::marker_ui`], which is drawn over every
+    /// node and so over the node's label.
+    pub marker: f32,
 }
+
+/// How long [`NodeContext::marker`] takes to fade in or out, in seconds.
+pub const MARKER_FADE_SECS: f32 = 0.6;
 
 /// The context passed to [`NodeTemplate::selection_ui`].
 ///

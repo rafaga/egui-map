@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/) (pre-1.0:
 any minor bump may include breaking changes, called out below as such).
 
+## [0.9.3] - 2026-09-24
+
+### Added
+
+- `NodeContext::marker`: how present a marker (`Map::update_marker`) is on
+  the node being painted, from `0.0` to `1.0`. It fades in over the new
+  `objects::MARKER_FADE_SECS` when the first marker arrives and out when the
+  last one leaves (turned around halfway, it carries on from where it was),
+  and the widget repaints while it fades. A `NodeTemplate` can use it to
+  draw markers as part of the node -- e.g. a tint between the node's
+  background and its label -- instead of in `marker_ui`, which is painted
+  over every node and so over the node's label.
+- `Animation::glow`: a persistent effect that breathes a tint in and out over
+  a rounded rectangle (period `GLOW_PERIOD`), scaled by a `strength` -- made
+  for a box-shaped `NodeTemplate` to paint between the node's background and
+  its label, with `NodeContext::marker` as the strength.
+
 ## [0.9.2] - 2026-09-23
 
 ### Fixed
