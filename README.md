@@ -114,7 +114,30 @@ impl NodeTemplate for MyTemplate {
 map.set_node_template(std::rc::Rc::new(MyTemplate));
 ```
 
-See the `NodeTemplate` rustdoc for a complete example with a custom node shape and an animated notification.
+`NodeContext` also carries `marker: f32` — how present a `Map::update_marker` marker is on this node, from `0.0` (none) to `1.0` (fully in), fading in and out on its own instead of switching instantly (see `MARKER_FADE_SECS` in the `objects` module). Paired with `Animation::glow` (a tint that breathes in and out over a rounded rectangle, scaled by that strength), it lets a box-shaped `NodeTemplate` paint markers as part of the node itself — between its background and its label — instead of in `marker_ui`, which draws over every node and so over its label too:
+
+```rust
+# use egui_map::map::animation::Animation;
+# use egui::{CornerRadius, Rect, Ui, Vec2};
+# use egui_map::map::objects::NodeContext;
+# fn node_ui(ui: &mut Ui, ctx: NodeContext) {
+if ctx.marker > 0.0 {
+    let time = ui.input(|i| i.time) as f32;
+    let rect = Rect::from_center_size(ctx.position, Vec2::splat(30.0 * ctx.zoom));
+    Animation::glow(
+        ui.painter(),
+        rect,
+        CornerRadius::same((10.0 * ctx.zoom) as u8),
+        time,
+        ctx.theme.marker.gamma_multiply(0.6),
+        ctx.marker,
+    );
+    ui.ctx().request_repaint();
+}
+# }
+```
+
+See the `NodeTemplate` rustdoc for a complete example with a custom node shape and an animated notification, and `examples/node_template_animations.rs` for this glow paired with the ring `marker_ui` already draws.
 
 ### Custom segment rendering and animations
 
@@ -173,8 +196,11 @@ let mut map = Map::new();
 map.add_region_labels(vec![RegionLabel {
     text: "Domain".to_string(),
     center: egui::pos2(300.0, 200.0), // map coordinates, like MapPoint::coords
+    color: None, // default: the active theme's text color, faded by `region_label_alpha`
 }]);
 ```
+
+`examples/svg_template.rs` shows one in a small running example.
 
 Install a `LabelTemplate` with `Map::set_label_template` to take over the drawing entirely — see its rustdoc for the `LabelContext` fields (`position`, `zoom`, `label`, `size` already scaled by zoom, `color` already faded, and the full theme `ThemeColors` palette).
 
@@ -227,7 +253,7 @@ impl MapTheme for HighContrast {
 map.set_theme(std::rc::Rc::new(HighContrast));
 ```
 
-`ColorMode` is `egui::Theme` re-exported under this crate's name, so the same map picks up the right palette automatically when the surrounding app's mode changes. Non-palette visual settings (stroke width, font, background) stay on `MapSettings::styles` — see the `theme` module rustdoc.
+`ColorMode` is `egui::Theme` re-exported under this crate's name, so the same map picks up the right palette automatically when the surrounding app's mode changes. Non-palette visual settings (stroke width, font) stay on `MapSettings::style` — see the `theme` module rustdoc.
 
 ## Crate features
 

@@ -1034,6 +1034,7 @@ pub trait ContextMenuManager {
 /// the other hooks keep their default implementations.
 ///
 /// ```
+/// use egui_map::map::animation::Animation;
 /// use egui_map::map::objects::{HitContext, NodeContext, NodeOutline, NodeTemplate};
 /// use egui::{Align2, Color32, CornerRadius, FontId, Rect, Stroke, Ui, Vec2};
 ///
@@ -1049,6 +1050,24 @@ pub trait ContextMenuManager {
 ///         let rect = node_box(ctx.position, ctx.zoom);
 ///         let rounding = CornerRadius::same((10.0 * ctx.zoom) as u8);
 ///         let painter = ui.painter();
+///         // A soft glow under the box while a `Map::update_marker` marker
+///         // points here, scaled by how present it is (`ctx.marker`, fading
+///         // in/out on its own) instead of a fixed-opacity ring -- painted
+///         // first so it sits behind the fill and the name, unlike the
+///         // default `marker_ui`, which is drawn over every node.
+///         if ctx.marker > 0.0 {
+///             let time = ui.input(|i| i.time) as f32;
+///             let glow_rect = rect.expand(6.0 * ctx.zoom);
+///             Animation::glow(
+///                 painter,
+///                 glow_rect,
+///                 CornerRadius::same((14.0 * ctx.zoom) as u8),
+///                 time,
+///                 ctx.theme.marker.gamma_multiply(0.6),
+///                 ctx.marker,
+///             );
+///             ui.ctx().request_repaint();
+///         }
 ///         // `ctx.color` is already resolved: `ctx.point.color` if the node has
 ///         // its own override, otherwise the active theme's node color.
 ///         painter.rect_filled(rect, rounding, ctx.color);

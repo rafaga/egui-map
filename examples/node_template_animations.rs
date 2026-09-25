@@ -31,6 +31,15 @@
 //! workaround is gone now that `kind` is passed directly; the per-effect
 //! colors below are kept only for visual variety, not for dispatch.)
 //!
+//! As of egui-map 0.9.3, `NodeContext` also carries `marker`: how present a
+//! `Map::update_marker` marker is on this node, `0.0..=1.0`, fading in and
+//! out on its own instead of switching on/off instantly. `DiamondNodes`
+//! passes it straight to the new `Animation::glow`, painted behind the
+//! diamond -- a second, independent way to show a marker, layered under
+//! `marker_ui`'s own ring rather than replacing it (see that method's doc
+//! comment for why it still cannot tell a marker call from a persistent
+//! `halo`/`blink`/`orbit` one).
+//!
 //! Segments are not templated here -- they use the widget's default segment
 //! rendering and animation dispatch, same as `examples/animations.rs` (which
 //! already showcases the full segment catalog on its own). This example just
@@ -42,7 +51,7 @@
 //!
 //! Run with: cargo run --example node_template_animations
 
-use eframe::egui::{self, Align2, Color32, Pos2, Shape, Stroke, Ui, Vec2};
+use eframe::egui::{self, Align2, Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2};
 use egui_map::map::Map;
 use egui_map::map::animation::Animation;
 use egui_map::map::objects::{
@@ -75,9 +84,30 @@ impl NodeTemplate for DiamondNodes {
     /// Custom node shape: a diamond with the node name above it, outlined in
     /// `ctx.color` -- the node's own color override if it set one, otherwise
     /// the active theme's node color -- over a fixed dark body.
+    ///
+    /// As of egui-map 0.9.3, also paints a soft glow behind the diamond
+    /// while a `Map::update_marker` marker points here (`MarkerA`/`MarkerB`
+    /// below), using `ctx.marker` -- `0.0..=1.0`, fading in and out on its
+    /// own as the marker is set/cleared -- as the effect's strength. Unlike
+    /// `marker_ui`, which still draws its own ring for the same markers (see
+    /// its doc comment below), this layer is painted *before* the diamond,
+    /// so it never covers the name label.
     fn node_ui(&self, ui: &mut Ui, ctx: NodeContext) {
         let size = 9.0 * ctx.zoom;
         let position = ctx.position;
+        if ctx.marker > 0.0 {
+            let time = ui.input(|i| i.time) as f32;
+            let glow_rect = Rect::from_center_size(position, Vec2::splat(3.4 * size));
+            Animation::glow(
+                ui.painter(),
+                glow_rect,
+                egui::CornerRadius::same((0.5 * size) as u8),
+                time,
+                ctx.theme.marker.gamma_multiply(0.6),
+                ctx.marker,
+            );
+            ui.ctx().request_repaint();
+        }
         let diamond = vec![
             Pos2::new(position.x, position.y - size),
             Pos2::new(position.x + size, position.y),

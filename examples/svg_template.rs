@@ -2,13 +2,19 @@
 //! using egui's image loader pipeline (which rasterizes and caches the
 //! textures automatically), plus a marker and a repeating notification pulse.
 //!
+//! Also adds a `RegionLabel` behind the network (`Map::add_region_labels`):
+//! unlike node names, its size scales *with* zoom instead of staying a fixed
+//! screen size, and it is always painted first, so it reads as a backdrop
+//! naming the whole rack rather than competing with the icons and lines
+//! drawn over it.
+//!
 //! Run with: cargo run --example svg_template
 
 use eframe::egui::{self, Align2, Color32, Stroke, Ui, Vec2};
 use egui_map::map::Map;
 use egui_map::map::objects::{
     MapPoint, MapSegment, MarkerContext, NodeContext, NodeTemplate, NotificationContext,
-    SelectionContext, VisibilitySetting,
+    RegionLabel, SelectionContext, VisibilitySetting,
 };
 use std::rc::Rc;
 use std::time::Instant;
@@ -109,6 +115,11 @@ fn main() -> eframe::Result<()> {
     let mut map = Map::new();
     map.add_points(points);
     map.add_lines(vec_segmnents);
+    map.add_region_labels(vec![RegionLabel {
+        text: "Rack A".to_string(),
+        center: egui::pos2(60.0, 60.0), // roughly the centroid of the three nodes above
+        color: None,                    // default: the active theme's text color, faded
+    }]);
     map.set_node_template(Rc::new(SvgNodes));
     // Show node names on hover so selection_ui gets called.
     map.settings.node_text_visibility = VisibilitySetting::Hover;
