@@ -123,6 +123,7 @@ use self::objects::{LabelTemplate, NodeTemplate, SegmentTemplate};
 
 pub mod animation;
 pub mod objects;
+pub mod outline;
 pub mod theme;
 
 /// How much more opaque a segment effect (`comet`, `dash`, `flash`, ...)
@@ -252,6 +253,10 @@ pub struct Map {
     /// The node under the pointer in the last frame; see
     /// [`Map::hovered_node`].
     hovered_node: Option<usize>,
+    /// The farthest a drawn node's template outline has reached from its
+    /// position, in map units: part of `find_hovered_node`'s search radius.
+    /// Reset when the template changes.
+    outline_reach: std::cell::Cell<f32>,
     /// The active color palette. See [`Map::set_theme`].
     theme: Rc<dyn MapTheme>,
 }
@@ -287,27 +292,6 @@ impl Notification {
         }
         (until.saturating_duration_since(now).as_secs_f32() / total).clamp(0.0, 1.0)
     }
-}
-
-/// Length of one cycle of a node event effect, in seconds -- how long it
-/// plays once, and how often a lasting notification restarts it.
-fn node_animation_cycle(animation: NodeAnimation) -> f32 {
-    match animation {
-        NodeAnimation::Pulse => animation::PULSE_DURATION,
-        NodeAnimation::Ripple => animation::RIPPLE_DURATION,
-        NodeAnimation::CountdownArc => animation::COUNTDOWN_DURATION,
-        NodeAnimation::ScaleIn => animation::SCALE_IN_DURATION,
-        NodeAnimation::Crosshair => animation::CROSSHAIR_DURATION,
-    }
-}
-
-/// The start of the cycle a lasting notification that `started` is in at
-/// `now`, so the effect can be drawn as if it had just been triggered then.
-fn current_cycle_start(started: Instant, now: Instant, cycle: f32) -> Instant {
-    let elapsed = now.saturating_duration_since(started).as_secs_f32();
-    let into_cycle = if cycle > 0.0 { elapsed % cycle } else { 0.0 };
-    now.checked_sub(std::time::Duration::from_secs_f32(into_cycle))
-        .unwrap_or(now)
 }
 
 /// Lasting state attached to a node, drawn until it is cleared.
@@ -879,6 +863,7 @@ impl Widget for &mut Map {
                                     zoom: self.zoom,
                                     kind: self.settings.marker_animation,
                                     node_id: *marker.1,
+                                    point,
                                     color,
                                     theme: self.theme_colors(),
                                 },
@@ -964,6 +949,7 @@ impl Map {
             markers: HashMap::new(),
             marker_presence: HashMap::new(),
             hovered_node: None,
+            outline_reach: std::cell::Cell::new(0.0),
             segments: None,
             theme: Rc::new(Theme::default()),
         }
@@ -1619,6 +1605,7 @@ impl Map {
                                 zoom: self.zoom,
                                 kind: state.animation,
                                 node_id: system_id,
+                                point: system,
                                 color,
                                 theme,
                             },
@@ -1656,6 +1643,7 @@ impl Map {
                                 kind: notification.animation,
                                 until: notification.until,
                                 node_id: system_id,
+                                point: system,
                                 theme,
                             },
                         );
@@ -1673,10 +1661,10 @@ impl Map {
                         // A lasting notification restarts the effect every
                         // cycle until `until`; a plain one plays it once.
                         let started = if notification.until.is_some() {
-                            current_cycle_start(
+                            animation::cycle_start(
                                 notification.started,
                                 now,
-                                node_animation_cycle(notification.animation),
+                                animation::event_duration(notification.animation),
                             )
                         } else {
                             notification.started
@@ -1703,18 +1691,25 @@ impl Map {
                     if marker_fading {
                         ui_obj.ctx().request_repaint();
                     }
-                    node_template.node_ui(
-                        ui_obj,
-                        NodeContext {
-                            position: viewport_point.into(),
-                            zoom: self.zoom,
-                            point: system,
-                            color: node_color,
-                            background_color,
-                            theme,
-                            marker,
-                        },
-                    );
+                    let node_context = NodeContext {
+                        position: viewport_point.into(),
+                        zoom: self.zoom,
+                        point: system,
+                        color: node_color,
+                        background_color,
+                        theme,
+                        marker,
+                    };
+                    // Learn how far this template's nodes reach, in map
+                    // units, for `find_hovered_node`'s search radius.
+                    let reach = node_template
+                        .outline(node_context.hit())
+                        .extent_from(node_context.position)
+                        / self.zoom;
+                    if reach > self.outline_reach.get() {
+                        self.outline_reach.set(reach);
+                    }
+                    node_template.node_ui(ui_obj, node_context);
                 } else {
                     shape_vec.push(Shape::circle_filled(
                         viewport_point.into(),
@@ -2142,6 +2137,7 @@ impl Map {
     /// [`NodeTemplate`] examples for custom shapes and animations.
     pub fn set_node_template(&mut self, template: Rc<dyn NodeTemplate>) {
         self.node_template = Some(template);
+        self.outline_reach.set(0.0);
     }
 
     /// Replaces the built-in segment rendering with a custom
@@ -2241,7 +2237,9 @@ impl Map {
         let points = self.points.as_ref()?;
         let tree = self.tree.as_ref()?;
         let extent = match &self.node_template {
-            Some(template) => template.hit_extent(self.zoom),
+            Some(template) => template
+                .hit_extent(self.zoom)
+                .max(self.outline_reach.get() * self.zoom),
             None => objects::default_hit_extent(self.zoom),
         };
         let map_point = (*min_point + RawPoint::from(pointer)) / self.zoom;
@@ -3350,7 +3348,7 @@ mod tests {
         let started = Instant::now();
         let at = |secs: f32| started + std::time::Duration::from_secs_f32(secs);
         // 7.5 s into a 3.5 s cycle: the third cycle began 0.5 s ago.
-        let cycle = current_cycle_start(started, at(7.5), 3.5);
+        let cycle = animation::cycle_start(started, at(7.5), 3.5);
         assert!((at(7.5).duration_since(cycle).as_secs_f32() - 0.5).abs() < 1e-3);
 
         let lasting = Notification {

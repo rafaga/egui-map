@@ -29,6 +29,15 @@
 //! you do, remember to call `ui.ctx().request_repaint()` yourself — the widget
 //! only does that for its own built-in path.
 //!
+//! Every node effect also has an `*_outline` variant ([`Animation::pulse_outline`],
+//! [`Animation::halo_outline`], ...) that follows a
+//! [`NodeOutline`] -- the shape a [`NodeTemplate`](crate::map::objects::NodeTemplate)
+//! declares in `outline` -- instead of a circle around a point. The
+//! templates' default `notification_ui`/`marker_ui` use them, so a template
+//! drawing boxes (or any convex shape) gets effects that keep that shape.
+//! [`Animation::node_event_outline`]/[`Animation::node_state_outline`] pick
+//! the variant for a requested kind.
+//!
 //! The segment effects ([`Animation::flash_decay`], [`Animation::comet_once`],
 //! [`Animation::wipe`], [`Animation::comet`], [`Animation::dash`],
 //! [`Animation::glow_band`], [`Animation::chevrons`]) are reached the same way, through
@@ -38,7 +47,8 @@
 //! `segment_notification_ui` / `segment_state_ui`, remembering to call
 //! `painter.ctx().request_repaint()` itself.
 
-use super::objects::CometDirection;
+use super::objects::{CometDirection, NodeAnimation, SteadyAnimation};
+use super::outline::{NodeOutline, partial_perimeter, point_along};
 use egui::{
     Color32, ColorImage, Context, CornerRadius, Id, Mesh, Painter, Pos2, Rect, Shape, Stroke,
     TextureFilter, TextureHandle, TextureOptions, TextureWrapMode, Vec2,
@@ -122,6 +132,34 @@ fn triangle_wave(time: f32, period: f32) -> f32 {
     let phase = (time / period).rem_euclid(1.0);
     1.0 - (2.0 * phase - 1.0).abs()
 }
+
+/// Length of one cycle of a node event effect, in seconds: how long it plays
+/// once, and how often a lasting notification
+/// ([`NodeHandle::lasting`](crate::map::NodeHandle::lasting)) restarts it.
+pub fn event_duration(kind: NodeAnimation) -> f32 {
+    match kind {
+        NodeAnimation::Pulse => PULSE_DURATION,
+        NodeAnimation::Ripple => RIPPLE_DURATION,
+        NodeAnimation::CountdownArc => COUNTDOWN_DURATION,
+        NodeAnimation::ScaleIn => SCALE_IN_DURATION,
+        NodeAnimation::Crosshair => CROSSHAIR_DURATION,
+    }
+}
+
+/// When the cycle a notification that started at `started` is in at `now`
+/// began: `started` itself for the first cycle, then every `cycle` seconds.
+/// Drawing an event effect from this instant repeats it.
+pub fn cycle_start(started: Instant, now: Instant, cycle: f32) -> Instant {
+    let elapsed = now.saturating_duration_since(started).as_secs_f32();
+    let into_cycle = if cycle > 0.0 { elapsed % cycle } else { 0.0 };
+    now.checked_sub(std::time::Duration::from_secs_f32(into_cycle))
+        .unwrap_or(now)
+}
+
+/// Signature of the `*_outline` event effects.
+pub type OutlineEventEffect = fn(&Painter, &NodeOutline, f32, Instant, Color32) -> bool;
+/// Signature of the `*_outline` persistent effects.
+pub type OutlineStateEffect = fn(&Painter, &NodeOutline, f32, f32, Color32);
 
 /// Opacity factor of [`Animation::glow`] at `time`: a smooth `0 -> 1 -> 0`
 /// pulse of [`GLOW_PERIOD`], scaled by `strength` (clamped to `0.0..=1.0`).
@@ -299,6 +337,222 @@ impl Animation {
         }
         painter.extend(shapes);
         secs < CROSSHAIR_DURATION
+    }
+
+    // ------------------------------------------------------- outline effects
+
+    /// The `*_outline` event effect for `kind`.
+    pub fn node_event_outline(kind: NodeAnimation) -> OutlineEventEffect {
+        match kind {
+            NodeAnimation::Pulse => Animation::pulse_outline,
+            NodeAnimation::Ripple => Animation::ripple_outline,
+            NodeAnimation::CountdownArc => Animation::countdown_outline,
+            NodeAnimation::ScaleIn => Animation::scale_in_outline,
+            NodeAnimation::Crosshair => Animation::crosshair_outline,
+        }
+    }
+
+    /// The `*_outline` persistent effect for `kind`.
+    pub fn node_state_outline(kind: SteadyAnimation) -> OutlineStateEffect {
+        match kind {
+            SteadyAnimation::Blink => Animation::blink_outline,
+            SteadyAnimation::Halo => Animation::halo_outline,
+            SteadyAnimation::Orbit => Animation::orbit_outline,
+        }
+    }
+
+    /// [`Animation::pulse`] following `outline`: the node's own shape grows
+    /// outwards and fades. Painted before the node (as `notification_ui`
+    /// is), the node covers the middle and it reads as a spreading halo.
+    pub fn pulse_outline(
+        painter: &Painter,
+        outline: &NodeOutline,
+        zoom: f32,
+        initial_time: Instant,
+        color: Color32,
+    ) -> bool {
+        let secs = elapsed(initial_time);
+        let transparency = (1.0 - secs / PULSE_DURATION).max(0.0);
+        painter.add(
+            outline
+                .grown(40.0 * secs * zoom)
+                .fill_shape(with_alpha(color, transparency)),
+        );
+        secs < PULSE_DURATION
+    }
+
+    /// [`Animation::ripple`] following `outline`: three staggered rings in
+    /// the node's shape, spreading out.
+    pub fn ripple_outline(
+        painter: &Painter,
+        outline: &NodeOutline,
+        zoom: f32,
+        initial_time: Instant,
+        color: Color32,
+    ) -> bool {
+        const RINGS: usize = 3;
+        let secs = elapsed(initial_time);
+        let stagger = RIPPLE_DURATION / RINGS as f32;
+        let mut shapes = Vec::with_capacity(RINGS);
+        for ring in 0..RINGS {
+            let local = secs - ring as f32 * stagger;
+            if !(0.0..RIPPLE_DURATION).contains(&local) {
+                continue;
+            }
+            let progress = local / RIPPLE_DURATION;
+            shapes.push(
+                outline
+                    .grown(36.0 * progress * zoom)
+                    .stroke_shape(Stroke::new(2.0 * zoom, with_alpha(color, 1.0 - progress))),
+            );
+        }
+        painter.extend(shapes);
+        secs < RIPPLE_DURATION
+    }
+
+    /// [`Animation::countdown_arc`] following `outline`: a line just outside
+    /// the node's edge that empties clockwise from the top.
+    pub fn countdown_outline(
+        painter: &Painter,
+        outline: &NodeOutline,
+        zoom: f32,
+        initial_time: Instant,
+        color: Color32,
+    ) -> bool {
+        let secs = elapsed(initial_time);
+        let remaining = (1.0 - secs / COUNTDOWN_DURATION).clamp(0.0, 1.0);
+        let points = partial_perimeter(&outline.grown(4.0 * zoom).perimeter(), remaining);
+        if points.len() >= 2 {
+            painter.add(Shape::Path(PathShape::line(
+                points,
+                Stroke::new(2.0 * zoom, with_alpha(color, 1.0)),
+            )));
+        }
+        secs < COUNTDOWN_DURATION
+    }
+
+    /// [`Animation::scale_in`] following `outline`: the node's shape grows
+    /// from nothing past its size and settles back, fading.
+    pub fn scale_in_outline(
+        painter: &Painter,
+        outline: &NodeOutline,
+        _zoom: f32,
+        initial_time: Instant,
+        color: Color32,
+    ) -> bool {
+        let secs = elapsed(initial_time);
+        let progress = (secs / SCALE_IN_DURATION).clamp(0.0, 1.0);
+        painter.add(
+            outline
+                .scaled(ease_out_back(progress).max(0.0))
+                .fill_shape(with_alpha(color, 1.0 - progress)),
+        );
+        secs < SCALE_IN_DURATION
+    }
+
+    /// [`Animation::crosshair`] following `outline`: four ticks converging on
+    /// the middle of each side of the node's bounding box.
+    pub fn crosshair_outline(
+        painter: &Painter,
+        outline: &NodeOutline,
+        zoom: f32,
+        initial_time: Instant,
+        color: Color32,
+    ) -> bool {
+        let secs = elapsed(initial_time);
+        let progress = (secs / CROSSHAIR_DURATION).clamp(0.0, 1.0);
+        // Same travel as the circular version, measured from the box's edge.
+        let far = (22.0 - 18.0 * progress) * zoom;
+        let near = far - 8.0 * zoom;
+        let alpha = if progress < 0.66 {
+            1.0
+        } else {
+            1.0 - (progress - 0.66) / 0.34
+        };
+        let stroke = Stroke::new(2.0 * zoom, with_alpha(color, alpha));
+        let bounds = outline.bounding_rect();
+        let ticks = [
+            (bounds.center_top(), Vec2::new(0.0, -1.0)),
+            (bounds.center_bottom(), Vec2::new(0.0, 1.0)),
+            (bounds.left_center(), Vec2::new(-1.0, 0.0)),
+            (bounds.right_center(), Vec2::new(1.0, 0.0)),
+        ];
+        painter.extend(ticks.map(|(edge, direction)| {
+            Shape::line_segment([edge + direction * far, edge + direction * near], stroke)
+        }));
+        secs < CROSSHAIR_DURATION
+    }
+
+    /// [`Animation::halo`] following `outline`: a ring in the node's shape,
+    /// just outside it, whose opacity breathes. `time` is the frame time.
+    pub fn halo_outline(
+        painter: &Painter,
+        outline: &NodeOutline,
+        zoom: f32,
+        time: f32,
+        color: Color32,
+    ) {
+        const PERIOD: f32 = 2.0;
+        let alpha = 0.30 + 0.45 * triangle_wave(time, PERIOD);
+        painter.add(
+            outline
+                .grown(5.0 * zoom)
+                .stroke_shape(Stroke::new((2.0 * zoom).max(1.5), with_alpha(color, alpha))),
+        );
+    }
+
+    /// [`Animation::blink`] following `outline`: a thick ring in the node's
+    /// shape blinking on and off. `time` is the frame time.
+    pub fn blink_outline(
+        painter: &Painter,
+        outline: &NodeOutline,
+        zoom: f32,
+        time: f32,
+        color: Color32,
+    ) {
+        const PERIOD: f32 = 2.55;
+        painter.add(outline.grown(2.0 * zoom).stroke_shape(Stroke::new(
+            4.0 * zoom,
+            with_alpha(color, triangle_wave(time, PERIOD)),
+        )));
+    }
+
+    /// [`Animation::orbit`] following `outline`: a dot travelling around the
+    /// node's shape, with a faint guide. `time` is the frame time.
+    pub fn orbit_outline(
+        painter: &Painter,
+        outline: &NodeOutline,
+        zoom: f32,
+        time: f32,
+        color: Color32,
+    ) {
+        const PERIOD: f32 = 3.0;
+        let path = outline.grown(8.0 * zoom);
+        painter.add(path.stroke_shape(Stroke::new(1.0, with_alpha(color, 0.25))));
+        if let Some(dot) = point_along(&path.perimeter(), time / PERIOD) {
+            painter.add(Shape::Circle(CircleShape::filled(
+                dot,
+                (2.5 * zoom).max(2.0),
+                with_alpha(color, 1.0),
+            )));
+        }
+    }
+
+    /// [`Animation::glow`] following `outline`: the node's shape filled with a
+    /// tint breathing in and out, scaled by `strength` (e.g.
+    /// [`NodeContext::marker`](crate::map::objects::NodeContext::marker)).
+    /// Paint it over the node's background and before its label.
+    pub fn glow_outline(
+        painter: &Painter,
+        outline: &NodeOutline,
+        time: f32,
+        color: Color32,
+        strength: f32,
+    ) {
+        let level = glow_level(time, strength);
+        if level > 0.0 {
+            painter.add(outline.fill_shape(color.gamma_multiply(level)));
+        }
     }
 
     // -------------------------------------------------------- events/segment

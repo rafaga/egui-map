@@ -6,6 +6,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/) (pre-1.0:
 any minor bump may include breaking changes, called out below as such).
 
+## [0.9.5] - 2026-09-25
+
+### Added
+
+- `objects::NodeOutline` (in the new `outline` module): the shape of a node
+  -- a circle, a rounded rectangle or a convex polygon, in screen
+  coordinates -- with `grown`, `scaled`, `contains`, `extent_from`,
+  `perimeter`, `fill_shape` and `stroke_shape`. Its strokes are drawn outside
+  the shape with a constant width, and corner radii too large for egui's
+  `CornerRadius` fall back to a polygon, so a growing outline keeps its
+  shape at any size.
+- `NodeTemplate::outline`: a template declares its node's shape once; the
+  default is the built-in node's circle.
+- `*_outline` variants of every node effect in `Animation` (`pulse_outline`,
+  `ripple_outline`, `countdown_outline`, `scale_in_outline`,
+  `crosshair_outline`, `halo_outline`, `blink_outline`, `orbit_outline`,
+  `glow_outline`) that follow a `NodeOutline` instead of a circle, plus
+  `Animation::node_event_outline`/`node_state_outline` to pick one by kind,
+  `animation::event_duration`, `animation::cycle_start` and
+  `NotificationContext::effect_start` for lasting notifications.
+- `hit()` on `NodeContext`, `SelectionContext`, `NotificationContext` and
+  `MarkerContext`, and a `point` field on `NotificationContext` and
+  `MarkerContext`, so every hook can ask for the node's outline.
+- `objects::SELECTION_GAP`.
+
+### Changed
+
+- Only `NodeTemplate::node_ui` is required now. `selection_ui`,
+  `notification_ui` and `marker_ui` gained default implementations drawn
+  along the node's `outline` (a selection ring, the requested event effect,
+  repeated while a lasting notification runs, and the requested lasting
+  effect), and the default `contains` tests the outline. Templates that
+  implement those hooks keep their own behavior.
+- `Map::hovered_node` also learns how far the drawn nodes' outlines reach,
+  so a template that only declares `outline` doesn't need `hit_extent`.
+- `NotificationContext` and `MarkerContext` now carry a lifetime (for their
+  new `point` field). Implementations written as
+  `fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext)` compile
+  unchanged.
+
 ## [0.9.4] - 2026-09-24
 
 ### Added

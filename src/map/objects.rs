@@ -8,8 +8,10 @@
 //! [`LabelTemplate`]. The color palette a `Style` paints with lives in
 //! [`super::theme`], via [`MapTheme`](super::theme::MapTheme).
 
+use crate::map::animation::{self, Animation};
+pub use crate::map::outline::NodeOutline;
 use crate::map::theme::{Style, ThemeColors};
-use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Ui};
+use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Stroke, Ui};
 use rstar::AABB;
 use std::convert::{From, Into};
 use std::ops::{Add, Div, DivAssign, Mul, MulAssign, Sub};
@@ -860,7 +862,7 @@ impl Default for MapSettings {
 ///
 /// Ignored when a [`NodeTemplate`] is installed — the template's
 /// `notification_ui` takes over. The effects stay reachable there through
-/// [`Animation`](crate::map::animation::Animation).
+/// [`Animation`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum NodeAnimation {
     /// Expanding, fading disc. Reads as "one thing happened here".
@@ -924,7 +926,7 @@ pub enum CometDirection {
 ///
 /// Ignored when a [`SegmentTemplate`] is installed — the template's
 /// `segment_notification_ui` takes over. The effect stays reachable there
-/// through [`Animation`](crate::map::animation::Animation).
+/// through [`Animation`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SegmentAnimation {
     /// A brief bright flash on the line that fades back out. The segment
@@ -1026,20 +1028,25 @@ pub trait ContextMenuManager {
 ///
 /// # Examples
 ///
-/// A node drawn as a rounded box with its name inside, plus a notification
-/// animation that expands and fades out over two seconds:
+/// A node drawn as a rounded box with its name inside. Declaring the box in
+/// [`NodeTemplate::outline`] is enough for the hit area, the selection ring
+/// and every built-in effect (`pulse`, `ripple`, `halo`, ...) to follow it:
+/// the other hooks keep their default implementations.
 ///
 /// ```
-/// use egui_map::map::objects::{MapPoint, NodeContext, NodeTemplate, NotificationContext, MarkerContext, SelectionContext};
-/// use egui::{Align2, Color32, CornerRadius, FontId, Pos2, Rect, Stroke, Ui, Vec2};
-/// use std::time::Instant;
+/// use egui_map::map::objects::{HitContext, NodeContext, NodeOutline, NodeTemplate};
+/// use egui::{Align2, Color32, CornerRadius, FontId, Rect, Stroke, Ui, Vec2};
 ///
 /// struct BoxedNodes;
+///
+/// fn node_box(position: egui::Pos2, zoom: f32) -> Rect {
+///     Rect::from_center_size(position, Vec2::new(90.0 * zoom, 35.0 * zoom))
+/// }
 ///
 /// impl NodeTemplate for BoxedNodes {
 ///     fn node_ui(&self, ui: &mut Ui, ctx: NodeContext) {
 ///         // Multiply every size by `ctx.zoom` so the node scales with the map.
-///         let rect = Rect::from_center_size(ctx.position, Vec2::new(90.0 * ctx.zoom, 35.0 * ctx.zoom));
+///         let rect = node_box(ctx.position, ctx.zoom);
 ///         let rounding = CornerRadius::same((10.0 * ctx.zoom) as u8);
 ///         let painter = ui.painter();
 ///         // `ctx.color` is already resolved: `ctx.point.color` if the node has
@@ -1048,8 +1055,8 @@ pub trait ContextMenuManager {
 ///         painter.rect_stroke(
 ///             rect,
 ///             rounding,
-///             Stroke::new(4.0 * ctx.zoom, Color32::WHITE),
-///             egui::StrokeKind::Middle,
+///             Stroke::new(2.0 * ctx.zoom, Color32::WHITE),
+///             egui::StrokeKind::Outside,
 ///         );
 ///         painter.text(
 ///             ctx.position,
@@ -1060,50 +1067,31 @@ pub trait ContextMenuManager {
 ///         );
 ///     }
 ///
-///     fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
-///         let secs = Instant::now().duration_since(ctx.initial_time).as_secs_f32();
-///         // Expand the stroke and fade the color out over 2 seconds.
-///         let alpha = (1.0 - secs / 2.0).clamp(0.0, 1.0);
-///         let fading = Color32::from_rgba_unmultiplied(
-///             ctx.color.r(),
-///             ctx.color.g(),
-///             ctx.color.b(),
-///             (255.0 * alpha) as u8,
-///         );
-///         let rect = Rect::from_center_size(ctx.position, Vec2::new(90.0 * ctx.zoom, 35.0 * ctx.zoom));
-///         ui.painter().rect_stroke(
-///             rect,
-///             CornerRadius::same((10.0 * ctx.zoom) as u8),
-///             Stroke::new((4.0 + 25.0 * secs) * ctx.zoom, fading),
-///             egui::StrokeKind::Middle,
-///         );
-///         // Keep the animation frames coming.
-///         ui.ctx().request_repaint();
-///         // Returning `false` removes the notification.
-///         secs < 2.0
+///     fn outline(&self, ctx: HitContext) -> NodeOutline {
+///         // The box as the user sees it, border included.
+///         NodeOutline::RoundedRect {
+///             rect: node_box(ctx.position, ctx.zoom).expand(2.0 * ctx.zoom),
+///             corner_radius: 12.0 * ctx.zoom,
+///         }
 ///     }
-///     # fn selection_ui(&self, ui: &mut Ui, ctx: SelectionContext) {
-///     #     let rect = Rect::from_center_size(ctx.position, Vec2::new(94.0 * ctx.zoom, 39.0 * ctx.zoom));
-///     #     ui.painter().rect_stroke(
-///     #         rect,
-///     #         CornerRadius::same((10.0 * ctx.zoom) as u8),
-///     #         Stroke::new(3.0 * ctx.zoom, ctx.color),
-///     #         egui::StrokeKind::Middle,
-///     #     );
-///     # }
-///     # fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext) {
-///     #     ui.painter().circle_stroke(ctx.position, 6.0 * ctx.zoom, Stroke::new(2.0 * ctx.zoom, Color32::LIGHT_GREEN));
-///     #     ui.ctx().request_repaint();
-///     # }
 /// }
 /// ```
 ///
 /// # Note on `NodeAnimation`/`SteadyAnimation` in the examples above
 ///
 /// Every method here takes a context struct -- [`NodeContext`],
-/// [`SelectionContext`], [`NotificationContext`] or [`MarkerContext`] -- each
-/// `#[non_exhaustive]` so a future field can be added without another
-/// breaking change to `NodeTemplate` itself.
+/// [`SelectionContext`], [`NotificationContext`], [`MarkerContext`] or
+/// [`HitContext`] -- each `#[non_exhaustive]` so a future field can be added
+/// without another breaking change to `NodeTemplate` itself.
+///
+/// # Shape
+///
+/// Only [`NodeTemplate::node_ui`] is required. Everything else has a default
+/// derived from [`NodeTemplate::outline`], the node's shape (a small circle
+/// unless overridden): the hit area ([`NodeTemplate::contains`]), the
+/// selection ring, the notification effects and the lasting node states,
+/// drawn with [`Animation`]'s `*_outline` effects so they keep the shape.
+/// Override any of those hooks to draw something else.
 pub trait NodeTemplate {
     /// Draws a node, replacing the default filled circle.
     ///
@@ -1129,7 +1117,17 @@ pub trait NodeTemplate {
     /// See [`SelectionContext`] for the fields available, in particular
     /// `ctx.point` (which node is being highlighted) and `ctx.color` (the
     /// active theme's selection color, resolved for you).
-    fn selection_ui(&self, ui: &mut Ui, ctx: SelectionContext);
+    ///
+    /// The default draws a ring in the node's [`outline`](NodeTemplate::outline)
+    /// shape, [`SELECTION_GAP`] outside it.
+    fn selection_ui(&self, ui: &mut Ui, ctx: SelectionContext) {
+        let outline = self.outline(ctx.hit());
+        ui.painter().add(
+            outline
+                .grown(SELECTION_GAP)
+                .stroke_shape(Stroke::new((2.0 * ctx.zoom).max(1.0), ctx.color)),
+        );
+    }
 
     /// Draws the notification effect of a node notified at
     /// `ctx.initial_time`.
@@ -1139,14 +1137,30 @@ pub trait NodeTemplate {
     /// [`Map::node`](super::Map::node)'s event methods (`pulse`, `ripple`,
     /// ...). `ctx.kind` is which of those was requested and `ctx.node_id` is
     /// the id of the node it belongs to -- use them to dispatch to the
-    /// matching built-in [`Animation`](crate::map::animation::Animation)
+    /// matching built-in [`Animation`]
     /// function (or your own effect) instead of reimplementing every
     /// animation by hand. See [`NotificationContext`] for the rest of the
     /// fields. Should return `true` while the animation is still playing —
     /// remember to call
     /// [`ui.ctx().request_repaint()`](egui::Context::request_repaint) —;
     /// once it returns `false` the notification is discarded.
-    fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool;
+    ///
+    /// The default draws the requested effect along the node's
+    /// [`outline`](NodeTemplate::outline) ([`Animation::node_event_outline`]),
+    /// restarting it every cycle while a lasting notification runs
+    /// ([`NotificationContext::effect_start`]).
+    fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
+        let outline = self.outline(ctx.hit());
+        let running = Animation::node_event_outline(ctx.kind)(
+            ui.painter(),
+            &outline,
+            ctx.zoom,
+            ctx.effect_start(),
+            ctx.color,
+        );
+        ui.ctx().request_repaint();
+        running || ctx.until.is_some()
+    }
 
     /// Draws a marker over the given node.
     ///
@@ -1159,25 +1173,47 @@ pub trait NodeTemplate {
     /// Markers are painted after every node, so over the nodes' labels. To
     /// draw a marker as part of its node instead, leave this empty and use
     /// [`NodeContext::marker`] in [`NodeTemplate::node_ui`].
-    fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext);
+    ///
+    /// The default draws the requested lasting effect along the node's
+    /// [`outline`](NodeTemplate::outline) ([`Animation::node_state_outline`]).
+    fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext) {
+        let outline = self.outline(ctx.hit());
+        let time = ui.input(|input| input.time) as f32;
+        Animation::node_state_outline(ctx.kind)(ui.painter(), &outline, ctx.zoom, time, ctx.color);
+        ui.ctx().request_repaint();
+    }
+
+    /// The shape of the node described by `ctx`, as [`NodeTemplate::node_ui`]
+    /// draws it, in screen coordinates. The defaults of every other hook are
+    /// derived from it (see [Shape](NodeTemplate#shape)); the widget also
+    /// learns from it how far the nodes reach, for
+    /// [`Map::hovered_node`](super::Map::hovered_node).
+    ///
+    /// The default is a circle of `4 * zoom`, the size of the built-in node.
+    fn outline(&self, ctx: HitContext) -> NodeOutline {
+        NodeOutline::Circle {
+            center: ctx.position,
+            radius: 4.0 * ctx.zoom,
+        }
+    }
 
     /// Whether `pointer` (screen coordinates) is over the node described by
     /// `ctx` -- the node's hit area, used by
-    /// [`Map::hovered_node`](super::Map::hovered_node). Override it to match
-    /// the shape [`NodeTemplate::node_ui`] draws (e.g. a box around a label),
-    /// together with [`NodeTemplate::hit_extent`].
-    /// The default is [`HitContext::within_default_radius`], a small circle
-    /// around the node's position.
+    /// [`Map::hovered_node`](super::Map::hovered_node).
+    /// The default is the node's [`outline`](NodeTemplate::outline), or
+    /// [`HitContext::within_default_radius`] around its position, whichever
+    /// is larger there -- so a tiny node stays easy to point at.
     fn contains(&self, ctx: HitContext, pointer: Pos2) -> bool {
-        ctx.within_default_radius(pointer)
+        self.outline(ctx).contains(pointer) || ctx.within_default_radius(pointer)
     }
 
     /// The farthest a node's hit area ([`NodeTemplate::contains`]) reaches
     /// from its position, in screen points, at `zoom`. The widget only tests
-    /// nodes whose center is at most this far from the pointer, so it must
-    /// cover the whole area (for a box: half its diagonal). The default,
-    /// [`default_hit_extent`], matches the default `contains`; override both
-    /// together.
+    /// nodes whose center is at most this far from the pointer. It also
+    /// learns how far the drawn nodes' [`outline`](NodeTemplate::outline)s
+    /// reach and uses the larger of the two, so this only needs overriding
+    /// for a `contains` that reaches beyond the outline. Default:
+    /// [`default_hit_extent`].
     fn hit_extent(&self, zoom: f32) -> f32 {
         default_hit_extent(zoom)
     }
@@ -1188,6 +1224,11 @@ pub trait NodeTemplate {
 pub fn default_hit_extent(zoom: f32) -> f32 {
     (4.0 * zoom).max(NODE_HIT_MIN_RADIUS)
 }
+
+/// Gap, in screen points, between a node's
+/// [`outline`](NodeTemplate::outline) and the ring the default
+/// [`NodeTemplate::selection_ui`] draws.
+pub const SELECTION_GAP: f32 = 2.0;
 
 /// Radius, in screen points, of the default node hit area
 /// ([`HitContext::within_default_radius`]) when the map is zoomed out far
@@ -1208,6 +1249,68 @@ pub struct HitContext<'a> {
     pub zoom: f32,
     /// The node being tested.
     pub point: &'a MapPoint,
+}
+
+impl NodeContext<'_> {
+    /// This node as a [`HitContext`], e.g. to ask the template for its
+    /// [`outline`](NodeTemplate::outline).
+    pub fn hit(&self) -> HitContext<'_> {
+        HitContext {
+            position: self.position,
+            zoom: self.zoom,
+            point: self.point,
+        }
+    }
+}
+
+impl SelectionContext<'_> {
+    /// This node as a [`HitContext`], e.g. to ask the template for its
+    /// [`outline`](NodeTemplate::outline).
+    pub fn hit(&self) -> HitContext<'_> {
+        HitContext {
+            position: self.position,
+            zoom: self.zoom,
+            point: self.point,
+        }
+    }
+}
+
+impl NotificationContext<'_> {
+    /// This node as a [`HitContext`], e.g. to ask the template for its
+    /// [`outline`](NodeTemplate::outline).
+    pub fn hit(&self) -> HitContext<'_> {
+        HitContext {
+            position: self.position,
+            zoom: self.zoom,
+            point: self.point,
+        }
+    }
+
+    /// The moment to draw the effect from: `initial_time` for a one-off
+    /// notification; for a lasting one (`until`), the start of the current
+    /// cycle, so the effect repeats (see [`animation::cycle_start`]).
+    pub fn effect_start(&self) -> Instant {
+        match self.until {
+            Some(_) => animation::cycle_start(
+                self.initial_time,
+                Instant::now(),
+                animation::event_duration(self.kind),
+            ),
+            None => self.initial_time,
+        }
+    }
+}
+
+impl MarkerContext<'_> {
+    /// This node as a [`HitContext`], e.g. to ask the template for its
+    /// [`outline`](NodeTemplate::outline).
+    pub fn hit(&self) -> HitContext<'_> {
+        HitContext {
+            position: self.position,
+            zoom: self.zoom,
+            point: self.point,
+        }
+    }
 }
 
 impl HitContext<'_> {
@@ -1314,7 +1417,7 @@ pub struct SelectionContext<'a> {
 /// breaking change to [`NodeTemplate`].
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
-pub struct NotificationContext {
+pub struct NotificationContext<'a> {
     /// The node's screen position: already scaled by `zoom` and translated
     /// to the viewport origin.
     pub position: Pos2,
@@ -1333,7 +1436,7 @@ pub struct NotificationContext {
     pub color: Color32,
     /// Which built-in event effect was requested (`pulse`, `ripple`, ...).
     /// Match on this to dispatch to the corresponding
-    /// [`Animation`](crate::map::animation::Animation) function instead of
+    /// [`Animation`] function instead of
     /// reimplementing the lookup yourself.
     pub kind: NodeAnimation,
     /// When the notification must end, if it was given a lasting duration
@@ -1345,6 +1448,8 @@ pub struct NotificationContext {
     pub until: Option<Instant>,
     /// The id of the node this notification belongs to.
     pub node_id: usize,
+    /// The node this notification belongs to.
+    pub point: &'a MapPoint,
     /// The active [`MapTheme`](super::theme::MapTheme)'s full
     /// [`ThemeColors`] palette for the current color mode --
     /// [`ThemeColors::alert`](super::theme::ThemeColors::alert) is what
@@ -1360,7 +1465,7 @@ pub struct NotificationContext {
 /// be added here without another breaking change.
 #[derive(Clone, Copy, Debug)]
 #[non_exhaustive]
-pub struct MarkerContext {
+pub struct MarkerContext<'a> {
     /// The node's screen position: already scaled by `zoom` and translated
     /// to the viewport origin.
     pub position: Pos2,
@@ -1378,6 +1483,8 @@ pub struct MarkerContext {
     /// The id of the node the state/marker belongs to (for a marker: the id
     /// it points at, not the marker's own id).
     pub node_id: usize,
+    /// The node the state/marker belongs to.
+    pub point: &'a MapPoint,
     /// The color the built-in effect would draw with: the node's own
     /// override for its lasting state, or -- for either a state with no
     /// override or a plain [`Map::update_marker`](super::Map::update_marker)
@@ -1418,7 +1525,7 @@ pub struct MarkerContext {
 /// `color` so you never have to reach for the active theme or reimplement a
 /// fallback yourself. The two effect contexts also carry `kind` -- match on
 /// it to dispatch straight to the matching built-in
-/// [`Animation`](crate::map::animation::Animation) function, exactly like
+/// [`Animation`] function, exactly like
 /// [`NotificationContext::kind`]/[`MarkerContext::kind`] already let you do
 /// for nodes.
 ///
@@ -1498,7 +1605,7 @@ pub trait SegmentTemplate {
     /// Called every frame for each segment carrying an event-driven effect
     /// (see [`SegmentHandle`](super::SegmentHandle)). `ctx.kind` is which of
     /// `flash`/`comet_once`/`wipe` was requested -- match on it to dispatch
-    /// to the corresponding [`Animation`](crate::map::animation::Animation)
+    /// to the corresponding [`Animation`]
     /// function instead of reimplementing every effect by hand. See
     /// [`SegmentNotificationContext`] for the rest of the fields. Should
     /// return `true` while the animation is still playing — remember to call
@@ -1590,7 +1697,7 @@ pub struct SegmentNotificationContext<'a> {
     pub theme: ThemeColors,
     /// Which built-in event effect was requested (`flash`, `comet_once`,
     /// `wipe`). Match on this to dispatch to the corresponding
-    /// [`Animation`](crate::map::animation::Animation) function instead of
+    /// [`Animation`] function instead of
     /// reimplementing the lookup yourself.
     pub kind: SegmentAnimation,
 }
@@ -1629,7 +1736,7 @@ pub struct SegmentStateContext<'a> {
     pub theme: ThemeColors,
     /// Which built-in persistent effect was requested (`comet`, `dash`,
     /// `glow_band`, `chevrons`). Match on this to dispatch to the
-    /// corresponding [`Animation`](crate::map::animation::Animation)
+    /// corresponding [`Animation`]
     /// function instead of reimplementing the lookup yourself.
     pub kind: SteadySegmentAnimation,
 }
