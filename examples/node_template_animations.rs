@@ -53,10 +53,9 @@
 
 use eframe::egui::{self, Align2, Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2};
 use egui_map::map::Map;
-use egui_map::map::animation::Animation;
 use egui_map::map::objects::{
-    MapPoint, MapSegment, MarkerContext, NodeAnimation, NodeContext, NodeTemplate,
-    NotificationContext, SelectionContext, SteadyAnimation, VisibilitySetting,
+    MapPoint, MapSegment, MarkerContext, NodeContext, NodeTemplate, NotificationContext,
+    SelectionContext, VisibilitySetting,
 };
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -98,7 +97,7 @@ impl NodeTemplate for DiamondNodes {
         if ctx.marker > 0.0 {
             let time = ui.input(|i| i.time) as f32;
             let glow_rect = Rect::from_center_size(position, Vec2::splat(3.4 * size));
-            Animation::glow(
+            ctx.animation.glow(
                 ui.painter(),
                 glow_rect,
                 egui::CornerRadius::same((0.5 * size) as u8),
@@ -148,24 +147,11 @@ impl NodeTemplate for DiamondNodes {
             initial_time,
             color,
             kind,
+            animation,
             ..
         } = ctx;
         let painter = ui.painter();
-        let still_playing = match kind {
-            NodeAnimation::Pulse => Animation::pulse(painter, position, zoom, initial_time, color),
-            NodeAnimation::Ripple => {
-                Animation::ripple(painter, position, zoom, initial_time, color)
-            }
-            NodeAnimation::CountdownArc => {
-                Animation::countdown_arc(painter, position, zoom, initial_time, color)
-            }
-            NodeAnimation::ScaleIn => {
-                Animation::scale_in(painter, position, zoom, initial_time, color)
-            }
-            NodeAnimation::Crosshair => {
-                Animation::crosshair(painter, position, zoom, initial_time, color)
-            }
-        };
+        let still_playing = animation.event(kind)(painter, position, zoom, initial_time, color);
         ui.ctx().request_repaint();
         still_playing
     }
@@ -177,11 +163,7 @@ impl NodeTemplate for DiamondNodes {
     /// gets no color, so this template still picks its own.
     fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext) {
         let time = ui.input(|i| i.time) as f32;
-        let effect = match ctx.kind {
-            SteadyAnimation::Halo => Animation::halo,
-            SteadyAnimation::Blink => Animation::blink,
-            SteadyAnimation::Orbit => Animation::orbit,
-        };
+        let effect = ctx.animation.state(ctx.kind);
         effect(ui.painter(), ctx.position, ctx.zoom, time, MARKER_COLOR);
         ui.ctx().request_repaint();
     }

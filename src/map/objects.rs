@@ -796,6 +796,11 @@ pub struct MapSettings {
     /// active [`MapTheme`](super::theme::MapTheme) instead, see
     /// [`Map::set_theme`](super::Map::set_theme).
     pub style: Style,
+    /// Per-animation tuning for the built-in node effects ([`Animation`]).
+    /// The defaults reproduce the values the widget has always used, so an
+    /// untouched `MapSettings` paints exactly as before; see
+    /// [`Animation::with`] to adjust one.
+    pub animation: Animation,
 }
 
 impl MapSettings {
@@ -816,6 +821,7 @@ impl MapSettings {
             label_text_size: 24.0,
             region_label_alpha: 0.0,
             style: Style::new(),
+            animation: Animation::default(),
         }
     }
 }
@@ -848,6 +854,7 @@ impl Default for MapSettings {
                 font: Some(FontId::new(12.00, FontFamily::Proportional)),
                 region_label_font: FontId::new(48.0, FontFamily::Proportional),
             },
+            animation: Animation::default(),
         }
     }
 }
@@ -1034,7 +1041,6 @@ pub trait ContextMenuManager {
 /// the other hooks keep their default implementations.
 ///
 /// ```
-/// use egui_map::map::animation::Animation;
 /// use egui_map::map::objects::{HitContext, NodeContext, NodeOutline, NodeTemplate};
 /// use egui::{Align2, Color32, CornerRadius, FontId, Rect, Stroke, Ui, Vec2};
 ///
@@ -1058,7 +1064,7 @@ pub trait ContextMenuManager {
 ///         if ctx.marker > 0.0 {
 ///             let time = ui.input(|i| i.time) as f32;
 ///             let glow_rect = rect.expand(6.0 * ctx.zoom);
-///             Animation::glow(
+///             ctx.animation.glow(
 ///                 painter,
 ///                 glow_rect,
 ///                 CornerRadius::same((14.0 * ctx.zoom) as u8),
@@ -1165,12 +1171,13 @@ pub trait NodeTemplate {
     /// once it returns `false` the notification is discarded.
     ///
     /// The default draws the requested effect along the node's
-    /// [`outline`](NodeTemplate::outline) ([`Animation::node_event_outline`]),
+    /// [`outline`](NodeTemplate::outline) ([`Animation::event_outline`],
+    /// using [`ctx.animation`](NotificationContext::animation)),
     /// restarting it every cycle while a lasting notification runs
     /// ([`NotificationContext::effect_start`]).
     fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
         let outline = self.outline(ctx.hit());
-        let running = Animation::node_event_outline(ctx.kind)(
+        let running = ctx.animation.event_outline(ctx.kind)(
             ui.painter(),
             &outline,
             ctx.zoom,
@@ -1194,11 +1201,12 @@ pub trait NodeTemplate {
     /// [`NodeContext::marker`] in [`NodeTemplate::node_ui`].
     ///
     /// The default draws the requested lasting effect along the node's
-    /// [`outline`](NodeTemplate::outline) ([`Animation::node_state_outline`]).
+    /// [`outline`](NodeTemplate::outline) ([`Animation::state_outline`],
+    /// using [`ctx.animation`](MarkerContext::animation)).
     fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext) {
         let outline = self.outline(ctx.hit());
         let time = ui.input(|input| input.time) as f32;
-        Animation::node_state_outline(ctx.kind)(ui.painter(), &outline, ctx.zoom, time, ctx.color);
+        ctx.animation.state_outline(ctx.kind)(ui.painter(), &outline, ctx.zoom, time, ctx.color);
         ui.ctx().request_repaint();
     }
 
@@ -1313,7 +1321,7 @@ impl NotificationContext<'_> {
             Some(_) => animation::cycle_start(
                 self.initial_time,
                 Instant::now(),
-                animation::event_duration(self.kind),
+                self.animation.event_duration(self.kind),
             ),
             None => self.initial_time,
         }
@@ -1395,6 +1403,10 @@ pub struct NodeContext<'a> {
     /// instead of in [`NodeTemplate::marker_ui`], which is drawn over every
     /// node and so over the node's label.
     pub marker: f32,
+    /// The widget's per-animation tuning ([`MapSettings::animation`]), so a
+    /// template drawing an effect itself (e.g. [`Animation::glow`] above) uses
+    /// the same values the built-in path would.
+    pub animation: Animation,
 }
 
 /// How long [`NodeContext::marker`] takes to fade in or out, in seconds.
@@ -1476,6 +1488,9 @@ pub struct NotificationContext<'a> {
     /// whole palette is handed over so a `NodeTemplate` can use any other
     /// theme role without reaching for the theme itself.
     pub theme: ThemeColors,
+    /// The widget's per-animation tuning ([`MapSettings::animation`]), for a
+    /// template that draws the effect itself.
+    pub animation: Animation,
 }
 
 /// The context passed to [`NodeTemplate::marker_ui`].
@@ -1517,6 +1532,9 @@ pub struct MarkerContext<'a> {
     /// alike. The whole palette is handed over so a `NodeTemplate` can use
     /// any other theme role without reaching for the theme itself.
     pub theme: ThemeColors,
+    /// The widget's per-animation tuning ([`MapSettings::animation`]), for a
+    /// template that draws the effect itself.
+    pub animation: Animation,
 }
 
 /// Customizes how segments and their visual effects are rendered.

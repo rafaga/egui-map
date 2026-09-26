@@ -35,7 +35,7 @@
 //! declares in `outline` -- instead of a circle around a point. The
 //! templates' default `notification_ui`/`marker_ui` use them, so a template
 //! drawing boxes (or any convex shape) gets effects that keep that shape.
-//! [`Animation::node_event_outline`]/[`Animation::node_state_outline`] pick
+//! [`Animation::event_outline`]/[`Animation::state_outline`] pick
 //! the variant for a requested kind.
 //!
 //! The segment effects ([`Animation::flash_decay`], [`Animation::comet_once`],
@@ -133,19 +133,6 @@ fn triangle_wave(time: f32, period: f32) -> f32 {
     1.0 - (2.0 * phase - 1.0).abs()
 }
 
-/// Length of one cycle of a node event effect, in seconds: how long it plays
-/// once, and how often a lasting notification
-/// ([`NodeHandle::lasting`](crate::map::NodeHandle::lasting)) restarts it.
-pub fn event_duration(kind: NodeAnimation) -> f32 {
-    match kind {
-        NodeAnimation::Pulse => PULSE_DURATION,
-        NodeAnimation::Ripple => RIPPLE_DURATION,
-        NodeAnimation::CountdownArc => COUNTDOWN_DURATION,
-        NodeAnimation::ScaleIn => SCALE_IN_DURATION,
-        NodeAnimation::Crosshair => CROSSHAIR_DURATION,
-    }
-}
-
 /// When the cycle a notification that started at `started` is in at `now`
 /// began: `started` itself for the first cycle, then every `cycle` seconds.
 /// Drawing an event effect from this instant repeats it.
@@ -156,15 +143,11 @@ pub fn cycle_start(started: Instant, now: Instant, cycle: f32) -> Instant {
         .unwrap_or(now)
 }
 
-/// Signature of the `*_outline` event effects.
-pub type OutlineEventEffect = fn(&Painter, &NodeOutline, f32, Instant, Color32) -> bool;
-/// Signature of the `*_outline` persistent effects.
-pub type OutlineStateEffect = fn(&Painter, &NodeOutline, f32, f32, Color32);
-
 /// Opacity factor of [`Animation::glow`] at `time`: a smooth `0 -> 1 -> 0`
-/// pulse of [`GLOW_PERIOD`], scaled by `strength` (clamped to `0.0..=1.0`).
-fn glow_level(time: f32, strength: f32) -> f32 {
-    let pulse = 0.5 - 0.5 * (TAU * time / GLOW_PERIOD).cos();
+/// pulse of the given `period` (seconds), scaled by `strength` (clamped to
+/// `0.0..=1.0`).
+fn glow_level(time: f32, strength: f32, period: f32) -> f32 {
+    let pulse = 0.5 - 0.5 * (TAU * time / period).cos();
     strength.clamp(0.0, 1.0) * pulse
 }
 
@@ -176,11 +159,366 @@ fn ease_out_back(x: f32) -> f32 {
     1.0 + C3 * x1 * x1 * x1 + C1 * x1 * x1
 }
 
-/// Factory for the built-in node animations.
+/// Per-animation tuning for the built-in node effects, plus the factory for
+/// them.
+///
+/// `Animation::default()` reproduces the values the widget used to hard-code,
+/// so an untouched `Animation` behaves exactly as before. Tweak it with
+/// [`Animation::with`]:
+///
+/// ```
+/// use egui_map::map::animation::Animation;
+///
+/// let animation = Animation::default().with(|a| {
+///     a.pulse.spread = 60.0;
+///     a.ripple.stroke = 3.0;
+/// });
+/// ```
+///
+/// Every effect's methods ([`Animation::pulse`], [`Animation::pulse_outline`],
+/// ...) read these fields, so one `Animation` drives both the circular and the
+/// `*_outline` variant of an effect. A custom
+/// [`NodeTemplate`](crate::map::objects::NodeTemplate) gets the active one as
+/// [`NodeContext::animation`](crate::map::objects::NodeContext::animation).
 ///
 /// See the [module docs](self) for the difference between the event-driven and
 /// persistent families.
-pub struct Animation {}
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct Animation {
+    /// [`Animation::pulse`] / [`Animation::pulse_outline`].
+    pub pulse: Pulse,
+    /// [`Animation::ripple`] / [`Animation::ripple_outline`].
+    pub ripple: Ripple,
+    /// [`Animation::countdown_arc`] / [`Animation::countdown_outline`].
+    pub countdown: Countdown,
+    /// [`Animation::scale_in`] / [`Animation::scale_in_outline`].
+    pub scale_in: ScaleIn,
+    /// [`Animation::crosshair`] / [`Animation::crosshair_outline`].
+    pub crosshair: Crosshair,
+    /// [`Animation::halo`] / [`Animation::halo_outline`].
+    pub halo: Halo,
+    /// [`Animation::blink`] / [`Animation::blink_outline`].
+    pub blink: Blink,
+    /// [`Animation::orbit`] / [`Animation::orbit_outline`].
+    pub orbit: Orbit,
+    /// [`Animation::glow`] / [`Animation::glow_outline`].
+    pub glow: Glow,
+}
+
+impl Animation {
+    /// Runs `f` on a mutable copy of `self` and returns it, so several fields
+    /// can be adjusted in one expression.
+    pub fn with(mut self, f: impl FnOnce(&mut Self)) -> Self {
+        f(&mut self);
+        self
+    }
+}
+
+/// Tunables of [`Animation::pulse`]: an expanding, fading disc.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pulse {
+    /// Radius at the start of the effect, in screen pixels at `zoom == 1`.
+    pub base_radius: f32,
+    /// How fast the radius grows, in screen pixels per second at `zoom == 1`.
+    /// Also the `*_outline` variant's growth rate.
+    pub spread: f32,
+    /// How long the effect plays, in seconds.
+    pub duration: f32,
+}
+
+impl Pulse {
+    /// Runs `f` on a mutable copy of `self` and returns it.
+    pub fn with(mut self, f: impl FnOnce(&mut Self)) -> Self {
+        f(&mut self);
+        self
+    }
+}
+
+impl Default for Pulse {
+    fn default() -> Self {
+        Self {
+            base_radius: 4.0,
+            spread: 40.0,
+            duration: PULSE_DURATION,
+        }
+    }
+}
+
+/// Tunables of [`Animation::ripple`]: three staggered expanding rings.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ripple {
+    /// Radius the first ring starts at, in screen pixels at `zoom == 1`.
+    pub base_radius: f32,
+    /// Growth of each ring over the whole effect, in screen pixels at
+    /// `zoom == 1`. Shared by the `*_outline` variant.
+    pub spread: f32,
+    /// Ring stroke width, before the `zoom` multiplier.
+    pub stroke: f32,
+    /// How long the effect plays, in seconds.
+    pub duration: f32,
+}
+
+impl Ripple {
+    /// Runs `f` on a mutable copy of `self` and returns it.
+    pub fn with(mut self, f: impl FnOnce(&mut Self)) -> Self {
+        f(&mut self);
+        self
+    }
+}
+
+impl Default for Ripple {
+    fn default() -> Self {
+        Self {
+            base_radius: 4.0,
+            spread: 36.0,
+            stroke: 2.0,
+            duration: RIPPLE_DURATION,
+        }
+    }
+}
+
+/// Tunables of [`Animation::countdown_arc`]: a ring emptying clockwise.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Countdown {
+    /// Ring radius of the circular variant, in screen pixels at `zoom == 1`.
+    pub radius: f32,
+    /// How far outside the node the `*_outline` variant draws its arc, in
+    /// screen pixels at `zoom == 1`.
+    pub outline_offset: f32,
+    /// Stroke width, before the `zoom` multiplier.
+    pub stroke: f32,
+    /// How long the effect takes to empty, in seconds.
+    pub duration: f32,
+}
+
+impl Countdown {
+    /// Runs `f` on a mutable copy of `self` and returns it.
+    pub fn with(mut self, f: impl FnOnce(&mut Self)) -> Self {
+        f(&mut self);
+        self
+    }
+}
+
+impl Default for Countdown {
+    fn default() -> Self {
+        Self {
+            radius: 10.0,
+            outline_offset: 4.0,
+            stroke: 2.0,
+            duration: COUNTDOWN_DURATION,
+        }
+    }
+}
+
+/// Tunables of [`Animation::scale_in`]: a disc that overshoots and settles.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScaleIn {
+    /// Peak radius of the circular variant, in screen pixels at `zoom == 1`.
+    /// The `*_outline` variant scales the node's own shape instead.
+    pub radius: f32,
+    /// How long the effect plays, in seconds.
+    pub duration: f32,
+}
+
+impl ScaleIn {
+    /// Runs `f` on a mutable copy of `self` and returns it.
+    pub fn with(mut self, f: impl FnOnce(&mut Self)) -> Self {
+        f(&mut self);
+        self
+    }
+}
+
+impl Default for ScaleIn {
+    fn default() -> Self {
+        Self {
+            radius: 8.0,
+            duration: SCALE_IN_DURATION,
+        }
+    }
+}
+
+/// Tunables of [`Animation::crosshair`]: four ticks converging on the node.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Crosshair {
+    /// How far the ticks start, in screen pixels at `zoom == 1`, for the
+    /// circular variant.
+    pub far: f32,
+    /// Same, measured from the bounding box's edge, for the `*_outline`
+    /// variant.
+    pub outline_far: f32,
+    /// How much of `far` the ticks cover while converging.
+    pub travel: f32,
+    /// Tick length, in screen pixels at `zoom == 1`.
+    pub length: f32,
+    /// Stroke width, before the `zoom` multiplier.
+    pub stroke: f32,
+    /// How long the effect takes to converge, in seconds.
+    pub duration: f32,
+}
+
+impl Crosshair {
+    /// Runs `f` on a mutable copy of `self` and returns it.
+    pub fn with(mut self, f: impl FnOnce(&mut Self)) -> Self {
+        f(&mut self);
+        self
+    }
+}
+
+impl Default for Crosshair {
+    fn default() -> Self {
+        Self {
+            far: 30.0,
+            outline_far: 22.0,
+            travel: 18.0,
+            length: 8.0,
+            stroke: 2.0,
+            duration: CROSSHAIR_DURATION,
+        }
+    }
+}
+
+/// Tunables of [`Animation::halo`]: a breathing ring in the node's shape.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Halo {
+    /// Ring radius of the circular variant, in screen pixels at `zoom == 1`.
+    pub radius: f32,
+    /// Floor for [`Self::radius`], in screen pixels, so the halo does not
+    /// vanish when zoomed far out.
+    pub radius_min: f32,
+    /// Ring stroke width, before the `zoom` multiplier. Shared by the
+    /// `*_outline` variant.
+    pub stroke: f32,
+    /// Floor for [`Self::stroke`], in screen pixels.
+    pub stroke_min: f32,
+    /// How far outside the node the `*_outline` variant draws its ring, in
+    /// screen pixels at `zoom == 1`.
+    pub outline_growth: f32,
+    /// How long one breathe takes, in seconds.
+    pub period: f32,
+}
+
+impl Halo {
+    /// Runs `f` on a mutable copy of `self` and returns it.
+    pub fn with(mut self, f: impl FnOnce(&mut Self)) -> Self {
+        f(&mut self);
+        self
+    }
+}
+
+impl Default for Halo {
+    fn default() -> Self {
+        Self {
+            radius: 9.0,
+            radius_min: 5.0,
+            stroke: 2.0,
+            stroke_min: 1.5,
+            outline_growth: 5.0,
+            period: 2.0,
+        }
+    }
+}
+
+/// Tunables of [`Animation::blink`]: a thick ring blinking on and off.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Blink {
+    /// Ring radius of the circular variant, in screen pixels at `zoom == 1`.
+    pub radius: f32,
+    /// Circular variant's stroke width, before the `zoom` multiplier.
+    pub stroke: f32,
+    /// How far outside the node the `*_outline` variant draws its ring, in
+    /// screen pixels at `zoom == 1`.
+    pub outline_growth: f32,
+    /// `*_outline` variant's stroke width, before the `zoom` multiplier.
+    pub outline_stroke: f32,
+    /// How long one blink takes, in seconds.
+    pub period: f32,
+}
+
+impl Blink {
+    /// Runs `f` on a mutable copy of `self` and returns it.
+    pub fn with(mut self, f: impl FnOnce(&mut Self)) -> Self {
+        f(&mut self);
+        self
+    }
+}
+
+impl Default for Blink {
+    fn default() -> Self {
+        Self {
+            radius: 4.0,
+            stroke: 9.0,
+            outline_growth: 2.0,
+            outline_stroke: 4.0,
+            period: 2.55,
+        }
+    }
+}
+
+/// Tunables of [`Animation::orbit`]: a dot travelling around the node.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Orbit {
+    /// Orbit radius of the circular variant, in screen pixels at `zoom == 1`.
+    pub radius: f32,
+    /// Floor for [`Self::radius`], in screen pixels.
+    pub radius_min: f32,
+    /// How far outside the node the `*_outline` variant draws its path, in
+    /// screen pixels at `zoom == 1`.
+    pub outline_growth: f32,
+    /// Width of the faint guide, before the `zoom` multiplier. Shared by both
+    /// variants.
+    pub guide_stroke: f32,
+    /// Radius of the travelling dot, in screen pixels at `zoom == 1`.
+    pub dot_radius: f32,
+    /// Floor for [`Self::dot_radius`], in screen pixels.
+    pub dot_min: f32,
+    /// How long one full lap takes, in seconds.
+    pub period: f32,
+}
+
+impl Orbit {
+    /// Runs `f` on a mutable copy of `self` and returns it.
+    pub fn with(mut self, f: impl FnOnce(&mut Self)) -> Self {
+        f(&mut self);
+        self
+    }
+}
+
+impl Default for Orbit {
+    fn default() -> Self {
+        Self {
+            radius: 12.0,
+            radius_min: 7.0,
+            outline_growth: 8.0,
+            guide_stroke: 1.0,
+            dot_radius: 2.5,
+            dot_min: 2.0,
+            period: 3.0,
+        }
+    }
+}
+
+/// Tunables of [`Animation::glow`]: a tint breathing in and out.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Glow {
+    /// How long one pulse (dim, bright, dim) takes, in seconds.
+    pub period: f32,
+}
+
+impl Glow {
+    /// Runs `f` on a mutable copy of `self` and returns it.
+    pub fn with(mut self, f: impl FnOnce(&mut Self)) -> Self {
+        f(&mut self);
+        self
+    }
+}
+
+impl Default for Glow {
+    fn default() -> Self {
+        Self {
+            period: GLOW_PERIOD,
+        }
+    }
+}
 
 impl Animation {
     // ---------------------------------------------------------------- events
@@ -190,6 +528,7 @@ impl Animation {
     /// Reads as *"one thing happened here"*. Plays for [`PULSE_DURATION`].
     /// Returns `true` while still playing.
     pub fn pulse(
+        &self,
         painter: &Painter,
         center: Pos2,
         zoom: f32,
@@ -197,14 +536,14 @@ impl Animation {
         color: Color32,
     ) -> bool {
         let secs = elapsed(initial_time);
-        let radius = (4.00 + (40.00 * secs)) * zoom;
-        let transparency = (1.00 - (secs / PULSE_DURATION).abs()).max(0.0);
+        let radius = (self.pulse.base_radius + self.pulse.spread * secs) * zoom;
+        let transparency = (1.00 - (secs / self.pulse.duration).abs()).max(0.0);
         painter.add(Shape::Circle(CircleShape::filled(
             center,
             radius,
             with_alpha(color, transparency),
         )));
-        secs < PULSE_DURATION
+        secs < self.pulse.duration
     }
 
     /// One frame of three staggered expanding rings.
@@ -213,6 +552,7 @@ impl Animation {
     /// reads as *"activity is ongoing"*. Plays for [`RIPPLE_DURATION`].
     /// Returns `true` while still playing.
     pub fn ripple(
+        &self,
         painter: &Painter,
         center: Pos2,
         zoom: f32,
@@ -221,23 +561,23 @@ impl Animation {
     ) -> bool {
         const RINGS: usize = 3;
         let secs = elapsed(initial_time);
-        let stagger = RIPPLE_DURATION / RINGS as f32;
+        let stagger = self.ripple.duration / RINGS as f32;
 
         let mut shapes = Vec::with_capacity(RINGS);
         for ring in 0..RINGS {
             let local = secs - ring as f32 * stagger;
-            if !(0.0..RIPPLE_DURATION).contains(&local) {
+            if !(0.0..self.ripple.duration).contains(&local) {
                 continue;
             }
-            let progress = local / RIPPLE_DURATION;
+            let progress = local / self.ripple.duration;
             shapes.push(Shape::Circle(CircleShape::stroke(
                 center,
-                (4.0 + 36.0 * progress) * zoom,
-                Stroke::new(2.0 * zoom, with_alpha(color, 1.0 - progress)),
+                (self.ripple.base_radius + self.ripple.spread * progress) * zoom,
+                Stroke::new(self.ripple.stroke * zoom, with_alpha(color, 1.0 - progress)),
             )));
         }
         painter.extend(shapes);
-        secs < RIPPLE_DURATION
+        secs < self.ripple.duration
     }
 
     /// One frame of a ring that empties clockwise from 12 o'clock.
@@ -246,6 +586,7 @@ impl Animation {
     /// which makes it a natural fit for *"how old is this information"*.
     /// Returns `true` while still playing.
     pub fn countdown_arc(
+        &self,
         painter: &Painter,
         center: Pos2,
         zoom: f32,
@@ -255,8 +596,8 @@ impl Animation {
         // Segments in a full turn; the arc draws a prefix of these.
         const STEPS: usize = 48;
         let secs = elapsed(initial_time);
-        let remaining = (1.0 - secs / COUNTDOWN_DURATION).clamp(0.0, 1.0);
-        let radius = 10.0 * zoom;
+        let remaining = (1.0 - secs / self.countdown.duration).clamp(0.0, 1.0);
+        let radius = self.countdown.radius * zoom;
 
         let count = (STEPS as f32 * remaining).round() as usize;
         if count >= 1 {
@@ -273,10 +614,10 @@ impl Animation {
                 .collect();
             painter.add(Shape::Path(PathShape::line(
                 points,
-                Stroke::new(2.0 * zoom, with_alpha(color, 1.0)),
+                Stroke::new(self.countdown.stroke * zoom, with_alpha(color, 1.0)),
             )));
         }
-        secs < COUNTDOWN_DURATION
+        secs < self.countdown.duration
     }
 
     /// One frame of a disc that grows past its final size and settles back.
@@ -284,6 +625,7 @@ impl Animation {
     /// Meant for nodes that just appeared. Plays for [`SCALE_IN_DURATION`].
     /// Returns `true` while still playing.
     pub fn scale_in(
+        &self,
         painter: &Painter,
         center: Pos2,
         zoom: f32,
@@ -291,14 +633,14 @@ impl Animation {
         color: Color32,
     ) -> bool {
         let secs = elapsed(initial_time);
-        let progress = (secs / SCALE_IN_DURATION).clamp(0.0, 1.0);
-        let radius = 8.0 * zoom * ease_out_back(progress).max(0.0);
+        let progress = (secs / self.scale_in.duration).clamp(0.0, 1.0);
+        let radius = self.scale_in.radius * zoom * ease_out_back(progress).max(0.0);
         painter.add(Shape::Circle(CircleShape::filled(
             center,
             radius,
             with_alpha(color, 1.0 - progress),
         )));
-        secs < SCALE_IN_DURATION
+        secs < self.scale_in.duration
     }
 
     /// One frame of four ticks converging onto the node.
@@ -306,6 +648,7 @@ impl Animation {
     /// Reads as *"target acquired"*; pairs well with selection. Plays for
     /// [`CROSSHAIR_DURATION`]. Returns `true` while still playing.
     pub fn crosshair(
+        &self,
         painter: &Painter,
         center: Pos2,
         zoom: f32,
@@ -313,17 +656,17 @@ impl Animation {
         color: Color32,
     ) -> bool {
         let secs = elapsed(initial_time);
-        let progress = (secs / CROSSHAIR_DURATION).clamp(0.0, 1.0);
+        let progress = (secs / self.crosshair.duration).clamp(0.0, 1.0);
         // Ticks travel from far away down to just outside the node, and fade
         // out over the last third so they do not linger on top of it.
-        let far = (30.0 - 18.0 * progress) * zoom;
-        let near = far - 8.0 * zoom;
+        let far = (self.crosshair.far - self.crosshair.travel * progress) * zoom;
+        let near = far - self.crosshair.length * zoom;
         let alpha = if progress < 0.66 {
             1.0
         } else {
             1.0 - (progress - 0.66) / 0.34
         };
-        let stroke = Stroke::new(2.0 * zoom, with_alpha(color, alpha));
+        let stroke = Stroke::new(self.crosshair.stroke * zoom, with_alpha(color, alpha));
 
         let mut shapes = Vec::with_capacity(4);
         for (dx, dy) in [(0.0, -1.0), (0.0, 1.0), (-1.0, 0.0), (1.0, 0.0)] {
@@ -336,35 +679,100 @@ impl Animation {
             ));
         }
         painter.extend(shapes);
-        secs < CROSSHAIR_DURATION
+        secs < self.crosshair.duration
+    }
+
+    // ------------------------------------------------------------ dispatchers
+
+    /// The circular event effect for `kind`, bound to this `Animation`'s
+    /// tunables. Call it with `(painter, center, zoom, initial_time, color)`.
+    pub fn event(
+        &self,
+        kind: NodeAnimation,
+    ) -> impl Fn(&Painter, Pos2, f32, Instant, Color32) -> bool + 'static {
+        let a = *self;
+        move |painter, center, zoom, initial_time, color| match kind {
+            NodeAnimation::Pulse => a.pulse(painter, center, zoom, initial_time, color),
+            NodeAnimation::Ripple => a.ripple(painter, center, zoom, initial_time, color),
+            NodeAnimation::CountdownArc => {
+                a.countdown_arc(painter, center, zoom, initial_time, color)
+            }
+            NodeAnimation::ScaleIn => a.scale_in(painter, center, zoom, initial_time, color),
+            NodeAnimation::Crosshair => a.crosshair(painter, center, zoom, initial_time, color),
+        }
+    }
+
+    /// The `*_outline` event effect for `kind`, bound to this `Animation`'s
+    /// tunables. Call it with `(painter, outline, zoom, initial_time, color)`.
+    pub fn event_outline(
+        &self,
+        kind: NodeAnimation,
+    ) -> impl Fn(&Painter, &NodeOutline, f32, Instant, Color32) -> bool + 'static {
+        let a = *self;
+        move |painter, outline, zoom, initial_time, color| match kind {
+            NodeAnimation::Pulse => a.pulse_outline(painter, outline, zoom, initial_time, color),
+            NodeAnimation::Ripple => a.ripple_outline(painter, outline, zoom, initial_time, color),
+            NodeAnimation::CountdownArc => {
+                a.countdown_outline(painter, outline, zoom, initial_time, color)
+            }
+            NodeAnimation::ScaleIn => {
+                a.scale_in_outline(painter, outline, zoom, initial_time, color)
+            }
+            NodeAnimation::Crosshair => {
+                a.crosshair_outline(painter, outline, zoom, initial_time, color)
+            }
+        }
+    }
+
+    /// Length of one cycle of a node event effect, in seconds: how long it
+    /// plays once, and how often a lasting notification
+    /// ([`NodeHandle::lasting`](crate::map::NodeHandle::lasting)) restarts it.
+    pub fn event_duration(&self, kind: NodeAnimation) -> f32 {
+        match kind {
+            NodeAnimation::Pulse => self.pulse.duration,
+            NodeAnimation::Ripple => self.ripple.duration,
+            NodeAnimation::CountdownArc => self.countdown.duration,
+            NodeAnimation::ScaleIn => self.scale_in.duration,
+            NodeAnimation::Crosshair => self.crosshair.duration,
+        }
+    }
+
+    /// The circular persistent effect for `kind`, bound to this `Animation`'s
+    /// tunables. Call it with `(painter, center, zoom, time, color)`.
+    pub fn state(
+        &self,
+        kind: SteadyAnimation,
+    ) -> impl Fn(&Painter, Pos2, f32, f32, Color32) + 'static {
+        let a = *self;
+        move |painter, center, zoom, time, color| match kind {
+            SteadyAnimation::Blink => a.blink(painter, center, zoom, time, color),
+            SteadyAnimation::Halo => a.halo(painter, center, zoom, time, color),
+            SteadyAnimation::Orbit => a.orbit(painter, center, zoom, time, color),
+        }
+    }
+
+    /// The `*_outline` persistent effect for `kind`, bound to this
+    /// `Animation`'s tunables. Call it with
+    /// `(painter, outline, zoom, time, color)`.
+    pub fn state_outline(
+        &self,
+        kind: SteadyAnimation,
+    ) -> impl Fn(&Painter, &NodeOutline, f32, f32, Color32) + 'static {
+        let a = *self;
+        move |painter, outline, zoom, time, color| match kind {
+            SteadyAnimation::Blink => a.blink_outline(painter, outline, zoom, time, color),
+            SteadyAnimation::Halo => a.halo_outline(painter, outline, zoom, time, color),
+            SteadyAnimation::Orbit => a.orbit_outline(painter, outline, zoom, time, color),
+        }
     }
 
     // ------------------------------------------------------- outline effects
-
-    /// The `*_outline` event effect for `kind`.
-    pub fn node_event_outline(kind: NodeAnimation) -> OutlineEventEffect {
-        match kind {
-            NodeAnimation::Pulse => Animation::pulse_outline,
-            NodeAnimation::Ripple => Animation::ripple_outline,
-            NodeAnimation::CountdownArc => Animation::countdown_outline,
-            NodeAnimation::ScaleIn => Animation::scale_in_outline,
-            NodeAnimation::Crosshair => Animation::crosshair_outline,
-        }
-    }
-
-    /// The `*_outline` persistent effect for `kind`.
-    pub fn node_state_outline(kind: SteadyAnimation) -> OutlineStateEffect {
-        match kind {
-            SteadyAnimation::Blink => Animation::blink_outline,
-            SteadyAnimation::Halo => Animation::halo_outline,
-            SteadyAnimation::Orbit => Animation::orbit_outline,
-        }
-    }
 
     /// [`Animation::pulse`] following `outline`: the node's own shape grows
     /// outwards and fades. Painted before the node (as `notification_ui`
     /// is), the node covers the middle and it reads as a spreading halo.
     pub fn pulse_outline(
+        &self,
         painter: &Painter,
         outline: &NodeOutline,
         zoom: f32,
@@ -372,18 +780,19 @@ impl Animation {
         color: Color32,
     ) -> bool {
         let secs = elapsed(initial_time);
-        let transparency = (1.0 - secs / PULSE_DURATION).max(0.0);
+        let transparency = (1.0 - secs / self.pulse.duration).max(0.0);
         painter.add(
             outline
-                .grown(40.0 * secs * zoom)
+                .grown(self.pulse.spread * secs * zoom)
                 .fill_shape(with_alpha(color, transparency)),
         );
-        secs < PULSE_DURATION
+        secs < self.pulse.duration
     }
 
     /// [`Animation::ripple`] following `outline`: three staggered rings in
     /// the node's shape, spreading out.
     pub fn ripple_outline(
+        &self,
         painter: &Painter,
         outline: &NodeOutline,
         zoom: f32,
@@ -392,27 +801,31 @@ impl Animation {
     ) -> bool {
         const RINGS: usize = 3;
         let secs = elapsed(initial_time);
-        let stagger = RIPPLE_DURATION / RINGS as f32;
+        let stagger = self.ripple.duration / RINGS as f32;
         let mut shapes = Vec::with_capacity(RINGS);
         for ring in 0..RINGS {
             let local = secs - ring as f32 * stagger;
-            if !(0.0..RIPPLE_DURATION).contains(&local) {
+            if !(0.0..self.ripple.duration).contains(&local) {
                 continue;
             }
-            let progress = local / RIPPLE_DURATION;
+            let progress = local / self.ripple.duration;
             shapes.push(
                 outline
-                    .grown(36.0 * progress * zoom)
-                    .stroke_shape(Stroke::new(2.0 * zoom, with_alpha(color, 1.0 - progress))),
+                    .grown(self.ripple.spread * progress * zoom)
+                    .stroke_shape(Stroke::new(
+                        self.ripple.stroke * zoom,
+                        with_alpha(color, 1.0 - progress),
+                    )),
             );
         }
         painter.extend(shapes);
-        secs < RIPPLE_DURATION
+        secs < self.ripple.duration
     }
 
     /// [`Animation::countdown_arc`] following `outline`: a line just outside
     /// the node's edge that empties clockwise from the top.
     pub fn countdown_outline(
+        &self,
         painter: &Painter,
         outline: &NodeOutline,
         zoom: f32,
@@ -420,20 +833,26 @@ impl Animation {
         color: Color32,
     ) -> bool {
         let secs = elapsed(initial_time);
-        let remaining = (1.0 - secs / COUNTDOWN_DURATION).clamp(0.0, 1.0);
-        let points = partial_perimeter(&outline.grown(4.0 * zoom).perimeter(), remaining);
+        let remaining = (1.0 - secs / self.countdown.duration).clamp(0.0, 1.0);
+        let points = partial_perimeter(
+            &outline
+                .grown(self.countdown.outline_offset * zoom)
+                .perimeter(),
+            remaining,
+        );
         if points.len() >= 2 {
             painter.add(Shape::Path(PathShape::line(
                 points,
-                Stroke::new(2.0 * zoom, with_alpha(color, 1.0)),
+                Stroke::new(self.countdown.stroke * zoom, with_alpha(color, 1.0)),
             )));
         }
-        secs < COUNTDOWN_DURATION
+        secs < self.countdown.duration
     }
 
     /// [`Animation::scale_in`] following `outline`: the node's shape grows
     /// from nothing past its size and settles back, fading.
     pub fn scale_in_outline(
+        &self,
         painter: &Painter,
         outline: &NodeOutline,
         _zoom: f32,
@@ -441,18 +860,19 @@ impl Animation {
         color: Color32,
     ) -> bool {
         let secs = elapsed(initial_time);
-        let progress = (secs / SCALE_IN_DURATION).clamp(0.0, 1.0);
+        let progress = (secs / self.scale_in.duration).clamp(0.0, 1.0);
         painter.add(
             outline
                 .scaled(ease_out_back(progress).max(0.0))
                 .fill_shape(with_alpha(color, 1.0 - progress)),
         );
-        secs < SCALE_IN_DURATION
+        secs < self.scale_in.duration
     }
 
     /// [`Animation::crosshair`] following `outline`: four ticks converging on
     /// the middle of each side of the node's bounding box.
     pub fn crosshair_outline(
+        &self,
         painter: &Painter,
         outline: &NodeOutline,
         zoom: f32,
@@ -460,16 +880,16 @@ impl Animation {
         color: Color32,
     ) -> bool {
         let secs = elapsed(initial_time);
-        let progress = (secs / CROSSHAIR_DURATION).clamp(0.0, 1.0);
+        let progress = (secs / self.crosshair.duration).clamp(0.0, 1.0);
         // Same travel as the circular version, measured from the box's edge.
-        let far = (22.0 - 18.0 * progress) * zoom;
-        let near = far - 8.0 * zoom;
+        let far = (self.crosshair.outline_far - self.crosshair.travel * progress) * zoom;
+        let near = far - self.crosshair.length * zoom;
         let alpha = if progress < 0.66 {
             1.0
         } else {
             1.0 - (progress - 0.66) / 0.34
         };
-        let stroke = Stroke::new(2.0 * zoom, with_alpha(color, alpha));
+        let stroke = Stroke::new(self.crosshair.stroke * zoom, with_alpha(color, alpha));
         let bounds = outline.bounding_rect();
         let ticks = [
             (bounds.center_top(), Vec2::new(0.0, -1.0)),
@@ -480,59 +900,69 @@ impl Animation {
         painter.extend(ticks.map(|(edge, direction)| {
             Shape::line_segment([edge + direction * far, edge + direction * near], stroke)
         }));
-        secs < CROSSHAIR_DURATION
+        secs < self.crosshair.duration
     }
 
     /// [`Animation::halo`] following `outline`: a ring in the node's shape,
     /// just outside it, whose opacity breathes. `time` is the frame time.
     pub fn halo_outline(
+        &self,
         painter: &Painter,
         outline: &NodeOutline,
         zoom: f32,
         time: f32,
         color: Color32,
     ) {
-        const PERIOD: f32 = 2.0;
-        let alpha = 0.30 + 0.45 * triangle_wave(time, PERIOD);
+        let alpha = 0.30 + 0.45 * triangle_wave(time, self.halo.period);
         painter.add(
             outline
-                .grown(5.0 * zoom)
-                .stroke_shape(Stroke::new((2.0 * zoom).max(1.5), with_alpha(color, alpha))),
+                .grown(self.halo.outline_growth * zoom)
+                .stroke_shape(Stroke::new(
+                    (self.halo.stroke * zoom).max(self.halo.stroke_min),
+                    with_alpha(color, alpha),
+                )),
         );
     }
 
     /// [`Animation::blink`] following `outline`: a thick ring in the node's
     /// shape blinking on and off. `time` is the frame time.
     pub fn blink_outline(
+        &self,
         painter: &Painter,
         outline: &NodeOutline,
         zoom: f32,
         time: f32,
         color: Color32,
     ) {
-        const PERIOD: f32 = 2.55;
-        painter.add(outline.grown(2.0 * zoom).stroke_shape(Stroke::new(
-            4.0 * zoom,
-            with_alpha(color, triangle_wave(time, PERIOD)),
-        )));
+        painter.add(
+            outline
+                .grown(self.blink.outline_growth * zoom)
+                .stroke_shape(Stroke::new(
+                    self.blink.outline_stroke * zoom,
+                    with_alpha(color, triangle_wave(time, self.blink.period)),
+                )),
+        );
     }
 
     /// [`Animation::orbit`] following `outline`: a dot travelling around the
     /// node's shape, with a faint guide. `time` is the frame time.
     pub fn orbit_outline(
+        &self,
         painter: &Painter,
         outline: &NodeOutline,
         zoom: f32,
         time: f32,
         color: Color32,
     ) {
-        const PERIOD: f32 = 3.0;
-        let path = outline.grown(8.0 * zoom);
-        painter.add(path.stroke_shape(Stroke::new(1.0, with_alpha(color, 0.25))));
-        if let Some(dot) = point_along(&path.perimeter(), time / PERIOD) {
+        let path = outline.grown(self.orbit.outline_growth * zoom);
+        painter.add(path.stroke_shape(Stroke::new(
+            self.orbit.guide_stroke,
+            with_alpha(color, 0.25),
+        )));
+        if let Some(dot) = point_along(&path.perimeter(), time / self.orbit.period) {
             painter.add(Shape::Circle(CircleShape::filled(
                 dot,
-                (2.5 * zoom).max(2.0),
+                (self.orbit.dot_radius * zoom).max(self.orbit.dot_min),
                 with_alpha(color, 1.0),
             )));
         }
@@ -543,13 +973,14 @@ impl Animation {
     /// [`NodeContext::marker`](crate::map::objects::NodeContext::marker)).
     /// Paint it over the node's background and before its label.
     pub fn glow_outline(
+        &self,
         painter: &Painter,
         outline: &NodeOutline,
         time: f32,
         color: Color32,
         strength: f32,
     ) {
-        let level = glow_level(time, strength);
+        let level = glow_level(time, strength, self.glow.period);
         if level > 0.0 {
             painter.add(outline.fill_shape(color.gamma_multiply(level)));
         }
@@ -972,14 +1403,16 @@ impl Animation {
     ///
     /// The radius has a floor in screen pixels so the halo does not vanish
     /// when the map is zoomed far out.
-    pub fn halo(painter: &Painter, center: Pos2, zoom: f32, time: f32, color: Color32) {
-        const PERIOD: f32 = 2.0;
-        let alpha = 0.30 + 0.45 * triangle_wave(time, PERIOD);
-        let radius = (9.0 * zoom).max(5.0);
+    pub fn halo(&self, painter: &Painter, center: Pos2, zoom: f32, time: f32, color: Color32) {
+        let alpha = 0.30 + 0.45 * triangle_wave(time, self.halo.period);
+        let radius = (self.halo.radius * zoom).max(self.halo.radius_min);
         painter.add(Shape::Circle(CircleShape::stroke(
             center,
             radius,
-            Stroke::new((2.0 * zoom).max(1.5), with_alpha(color, alpha)),
+            Stroke::new(
+                (self.halo.stroke * zoom).max(self.halo.stroke_min),
+                with_alpha(color, alpha),
+            ),
         )));
     }
 
@@ -988,12 +1421,14 @@ impl Animation {
     /// This is the effect markers have always used, factored out of the widget
     /// so it can be selected and reused like any other. `time` is the frame
     /// time in seconds.
-    pub fn blink(painter: &Painter, center: Pos2, zoom: f32, time: f32, color: Color32) {
-        const PERIOD: f32 = 2.55;
+    pub fn blink(&self, painter: &Painter, center: Pos2, zoom: f32, time: f32, color: Color32) {
         painter.add(Shape::Circle(CircleShape::stroke(
             center,
-            4.0 * zoom,
-            Stroke::new(9.0 * zoom, with_alpha(color, triangle_wave(time, PERIOD))),
+            self.blink.radius * zoom,
+            Stroke::new(
+                self.blink.stroke * zoom,
+                with_alpha(color, triangle_wave(time, self.blink.period)),
+            ),
         )));
     }
 
@@ -1013,6 +1448,7 @@ impl Animation {
     /// `0.0`. `time` is the frame time in seconds; request repaints while
     /// `strength` is above zero.
     pub fn glow(
+        &self,
         painter: &Painter,
         rect: Rect,
         corner_radius: CornerRadius,
@@ -1020,7 +1456,7 @@ impl Animation {
         color: Color32,
         strength: f32,
     ) {
-        let level = glow_level(time, strength);
+        let level = glow_level(time, strength, self.glow.period);
         if level <= 0.0 {
             return;
         }
@@ -1034,10 +1470,9 @@ impl Animation {
     /// One frame of a dot orbiting the node, with a faint guide ring.
     ///
     /// Reads as *"under observation"*. `time` is the frame time in seconds.
-    pub fn orbit(painter: &Painter, center: Pos2, zoom: f32, time: f32, color: Color32) {
-        const PERIOD: f32 = 3.0;
-        let radius = (12.0 * zoom).max(7.0);
-        let angle = TAU * (time / PERIOD).rem_euclid(1.0);
+    pub fn orbit(&self, painter: &Painter, center: Pos2, zoom: f32, time: f32, color: Color32) {
+        let radius = (self.orbit.radius * zoom).max(self.orbit.radius_min);
+        let angle = TAU * (time / self.orbit.period).rem_euclid(1.0);
         let dot = Pos2::new(
             center.x + radius * angle.cos(),
             center.y + radius * angle.sin(),
@@ -1046,11 +1481,11 @@ impl Animation {
             Shape::Circle(CircleShape::stroke(
                 center,
                 radius,
-                Stroke::new(1.0, with_alpha(color, 0.25)),
+                Stroke::new(self.orbit.guide_stroke, with_alpha(color, 0.25)),
             )),
             Shape::Circle(CircleShape::filled(
                 dot,
-                (2.5 * zoom).max(2.0),
+                (self.orbit.dot_radius * zoom).max(self.orbit.dot_min),
                 with_alpha(color, 1.0),
             )),
         ]);
@@ -1071,40 +1506,58 @@ mod tests {
         )
     }
 
-    /// Every event-driven effect, with the duration it is supposed to run for.
+    /// Every event-driven node effect, with the duration it is supposed to run
+    /// for. The closure takes `(painter, center, zoom, initial_time, color)`.
     #[allow(clippy::type_complexity)]
     fn event_effects() -> Vec<(
         &'static str,
-        fn(&Painter, Pos2, f32, Instant, Color32) -> bool,
+        fn(&Animation, &Painter, Pos2, f32, Instant, Color32) -> bool,
         f32,
     )> {
         vec![
-            ("pulse", Animation::pulse, PULSE_DURATION),
-            ("ripple", Animation::ripple, RIPPLE_DURATION),
+            (
+                "pulse",
+                |a, p, c, z, t, col| a.pulse(p, c, z, t, col),
+                PULSE_DURATION,
+            ),
+            (
+                "ripple",
+                |a, p, c, z, t, col| a.ripple(p, c, z, t, col),
+                RIPPLE_DURATION,
+            ),
             (
                 "countdown_arc",
-                Animation::countdown_arc,
+                |a, p, c, z, t, col| a.countdown_arc(p, c, z, t, col),
                 COUNTDOWN_DURATION,
             ),
-            ("scale_in", Animation::scale_in, SCALE_IN_DURATION),
-            ("crosshair", Animation::crosshair, CROSSHAIR_DURATION),
+            (
+                "scale_in",
+                |a, p, c, z, t, col| a.scale_in(p, c, z, t, col),
+                SCALE_IN_DURATION,
+            ),
+            (
+                "crosshair",
+                |a, p, c, z, t, col| a.crosshair(p, c, z, t, col),
+                CROSSHAIR_DURATION,
+            ),
         ]
     }
 
     #[test]
     fn glow_pulses_and_scales_with_strength() {
-        assert_eq!(glow_level(0.0, 1.0), 0.0);
-        assert!((glow_level(GLOW_PERIOD / 2.0, 1.0) - 1.0).abs() < 1e-5);
-        assert!((glow_level(GLOW_PERIOD / 2.0, 0.5) - 0.5).abs() < 1e-5);
-        assert_eq!(glow_level(GLOW_PERIOD / 2.0, 0.0), 0.0);
+        assert_eq!(glow_level(0.0, 1.0, GLOW_PERIOD), 0.0);
+        assert!((glow_level(GLOW_PERIOD / 2.0, 1.0, GLOW_PERIOD) - 1.0).abs() < 1e-5);
+        assert!((glow_level(GLOW_PERIOD / 2.0, 0.5, GLOW_PERIOD) - 0.5).abs() < 1e-5);
+        assert_eq!(glow_level(GLOW_PERIOD / 2.0, 0.0, GLOW_PERIOD), 0.0);
         // Out-of-range strengths are clamped.
-        assert!((glow_level(GLOW_PERIOD / 2.0, 3.0) - 1.0).abs() < 1e-5);
-        assert_eq!(glow_level(GLOW_PERIOD / 2.0, -1.0), 0.0);
+        assert!((glow_level(GLOW_PERIOD / 2.0, 3.0, GLOW_PERIOD) - 1.0).abs() < 1e-5);
+        assert_eq!(glow_level(GLOW_PERIOD / 2.0, -1.0, GLOW_PERIOD), 0.0);
         // Drawing it, at any strength, never panics.
         let painter = headless_painter();
         let rect = Rect::from_min_size(Pos2::ZERO, Vec2::new(90.0, 35.0));
+        let animation = Animation::default();
         for strength in [0.0, 0.5, 1.0] {
-            Animation::glow(
+            animation.glow(
                 &painter,
                 rect,
                 CornerRadius::same(10),
@@ -1118,15 +1571,30 @@ mod tests {
     #[test]
     fn event_effects_report_running_then_finished() {
         let painter = headless_painter();
+        let animation = Animation::default();
         for (name, effect, duration) in event_effects() {
             assert!(
-                effect(&painter, Pos2::ZERO, 1.0, Instant::now(), Color32::RED),
+                effect(
+                    &animation,
+                    &painter,
+                    Pos2::ZERO,
+                    1.0,
+                    Instant::now(),
+                    Color32::RED
+                ),
                 "{name} must report it is still running when it just started"
             );
 
             let long_past = Instant::now() - Duration::from_secs_f32(duration + 1.0);
             assert!(
-                !effect(&painter, Pos2::ZERO, 1.0, long_past, Color32::RED),
+                !effect(
+                    &animation,
+                    &painter,
+                    Pos2::ZERO,
+                    1.0,
+                    long_past,
+                    Color32::RED
+                ),
                 "{name} must report it is finished once its duration has passed"
             );
         }
@@ -1147,11 +1615,186 @@ mod tests {
     #[test]
     fn persistent_effects_run_at_any_time() {
         let painter = headless_painter();
+        let animation = Animation::default();
         for time in [0.0, 0.7, 1.3, 60.0] {
-            Animation::halo(&painter, Pos2::ZERO, 1.0, time, Color32::GREEN);
-            Animation::blink(&painter, Pos2::ZERO, 1.0, time, Color32::GREEN);
-            Animation::orbit(&painter, Pos2::ZERO, 1.0, time, Color32::GREEN);
+            animation.halo(&painter, Pos2::ZERO, 1.0, time, Color32::GREEN);
+            animation.blink(&painter, Pos2::ZERO, 1.0, time, Color32::GREEN);
+            animation.orbit(&painter, Pos2::ZERO, 1.0, time, Color32::GREEN);
         }
+    }
+
+    #[test]
+    fn animation_default_matches_the_built_in_values() {
+        // Pins `Animation::default()` to the values the widget used to
+        // hard-code, so a regression here is a visual change, not a silent one.
+        let a = Animation::default();
+        assert_eq!(
+            a.pulse,
+            Pulse {
+                base_radius: 4.0,
+                spread: 40.0,
+                duration: PULSE_DURATION
+            }
+        );
+        assert_eq!(
+            a.ripple,
+            Ripple {
+                base_radius: 4.0,
+                spread: 36.0,
+                stroke: 2.0,
+                duration: RIPPLE_DURATION
+            }
+        );
+        assert_eq!(
+            a.countdown,
+            Countdown {
+                radius: 10.0,
+                outline_offset: 4.0,
+                stroke: 2.0,
+                duration: COUNTDOWN_DURATION
+            }
+        );
+        assert_eq!(
+            a.scale_in,
+            ScaleIn {
+                radius: 8.0,
+                duration: SCALE_IN_DURATION
+            }
+        );
+        assert_eq!(
+            a.crosshair,
+            Crosshair {
+                far: 30.0,
+                outline_far: 22.0,
+                travel: 18.0,
+                length: 8.0,
+                stroke: 2.0,
+                duration: CROSSHAIR_DURATION
+            }
+        );
+        assert_eq!(
+            a.halo,
+            Halo {
+                radius: 9.0,
+                radius_min: 5.0,
+                stroke: 2.0,
+                stroke_min: 1.5,
+                outline_growth: 5.0,
+                period: 2.0
+            }
+        );
+        assert_eq!(
+            a.blink,
+            Blink {
+                radius: 4.0,
+                stroke: 9.0,
+                outline_growth: 2.0,
+                outline_stroke: 4.0,
+                period: 2.55
+            }
+        );
+        assert_eq!(
+            a.orbit,
+            Orbit {
+                radius: 12.0,
+                radius_min: 7.0,
+                outline_growth: 8.0,
+                guide_stroke: 1.0,
+                dot_radius: 2.5,
+                dot_min: 2.0,
+                period: 3.0
+            }
+        );
+        assert_eq!(
+            a.glow,
+            Glow {
+                period: GLOW_PERIOD
+            }
+        );
+    }
+
+    #[test]
+    fn with_adjusts_only_the_given_fields() {
+        let a = Animation::default().with(|a| {
+            a.pulse.spread = 60.0;
+            a.ripple.stroke = 3.0;
+        });
+        assert_eq!(a.pulse.spread, 60.0);
+        assert_eq!(a.ripple.stroke, 3.0);
+        // Everything else keeps its default.
+        assert_eq!(a.pulse.base_radius, Pulse::default().base_radius);
+        assert_eq!(a.ripple.spread, Ripple::default().spread);
+        assert_eq!(a.halo, Halo::default());
+    }
+
+    #[test]
+    fn pulse_spread_changes_the_drawn_radius() {
+        // Two painters in the same frame; only the `spread` differs. The
+        // recorded circle radius must differ by the expected amount, proving
+        // the config actually reaches the drawing.
+        let ctx = Context::default();
+        // A fixed `initial_time` in the past so `secs` is non-zero and the
+        // `spread` term is what differs between the two runs.
+        let initial_time = Instant::now() - Duration::from_secs_f32(1.0);
+        let shape_radius = |animation: Animation| -> f32 {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    animation.pulse(ui.painter(), Pos2::ZERO, 1.0, initial_time, Color32::RED);
+                },
+            );
+            let radius = out
+                .shapes
+                .iter()
+                .find_map(|cs| match &cs.shape {
+                    egui::epaint::Shape::Circle(circle) => Some(circle.radius),
+                    _ => None,
+                })
+                .expect("pulse must draw a circle");
+            out.textures_delta.clear();
+            radius
+        };
+
+        let default_radius = shape_radius(Animation::default());
+        let wider = shape_radius(Animation::default().with(|a| a.pulse.spread = 80.0));
+        assert!(
+            wider > default_radius,
+            "raising pulse.spread must grow the drawn radius \
+             (default={default_radius}, wider={wider})"
+        );
+    }
+
+    #[test]
+    fn dispatchers_pick_the_effect_and_carry_the_config() {
+        let painter = headless_painter();
+        let animation = Animation::default();
+        // `event`/`state` select by kind and report running state.
+        assert!(animation.event(NodeAnimation::Pulse)(
+            &painter,
+            Pos2::ZERO,
+            1.0,
+            Instant::now(),
+            Color32::RED
+        ));
+        // They also honor the config: a `Pulse` with a tiny duration is done.
+        let quick = Animation::default().with(|a| a.pulse.duration = 0.001);
+        let past = Instant::now() - Duration::from_secs_f32(1.0);
+        assert!(!quick.event(NodeAnimation::Pulse)(
+            &painter,
+            Pos2::ZERO,
+            1.0,
+            past,
+            Color32::RED
+        ));
+        // `event_duration` reads the same config.
+        assert_eq!(quick.event_duration(NodeAnimation::Pulse), 0.001);
+        assert_eq!(
+            animation.event_duration(NodeAnimation::Ripple),
+            RIPPLE_DURATION
+        );
     }
 
     /// Every segment event-driven effect, with the duration it runs for.

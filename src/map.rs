@@ -866,6 +866,7 @@ impl Widget for &mut Map {
                                     point,
                                     color,
                                     theme: self.theme_colors(),
+                                    animation: self.settings.animation,
                                 },
                             );
                         } else {
@@ -873,11 +874,10 @@ impl Widget for &mut Map {
                             // one clock instead of each sampling the wall clock
                             // at a slightly different moment.
                             let time = ui.input(|i| i.time) as f32;
-                            let effect = match self.settings.marker_animation {
-                                SteadyAnimation::Blink => Animation::blink,
-                                SteadyAnimation::Halo => Animation::halo,
-                                SteadyAnimation::Orbit => Animation::orbit,
-                            };
+                            let effect = self
+                                .settings
+                                .animation
+                                .state(self.settings.marker_animation);
                             effect(ui.painter(), adjusted_point.into(), self.zoom, time, color);
                             // Persistent effects never finish on their own.
                             ui.ctx().request_repaint();
@@ -1608,14 +1608,11 @@ impl Map {
                                 point: system,
                                 color,
                                 theme,
+                                animation: self.settings.animation,
                             },
                         );
                     } else {
-                        let effect = match state.animation {
-                            SteadyAnimation::Blink => Animation::blink,
-                            SteadyAnimation::Halo => Animation::halo,
-                            SteadyAnimation::Orbit => Animation::orbit,
-                        };
+                        let effect = self.settings.animation.state(state.animation);
                         // Frame time, so every element animated this frame
                         // shares one clock instead of sampling its own.
                         let time = ui_obj.input(|i| i.time) as f32;
@@ -1645,26 +1642,23 @@ impl Map {
                                 node_id: system_id,
                                 point: system,
                                 theme,
+                                animation: self.settings.animation,
                             },
                         );
                         if !running {
                             nodes_to_remove.push(system_id);
                         }
                     } else {
-                        let effect = match notification.animation {
-                            NodeAnimation::Pulse => Animation::pulse,
-                            NodeAnimation::Ripple => Animation::ripple,
-                            NodeAnimation::CountdownArc => Animation::countdown_arc,
-                            NodeAnimation::ScaleIn => Animation::scale_in,
-                            NodeAnimation::Crosshair => Animation::crosshair,
-                        };
+                        let effect = self.settings.animation.event(notification.animation);
                         // A lasting notification restarts the effect every
                         // cycle until `until`; a plain one plays it once.
                         let started = if notification.until.is_some() {
                             animation::cycle_start(
                                 notification.started,
                                 now,
-                                animation::event_duration(notification.animation),
+                                self.settings
+                                    .animation
+                                    .event_duration(notification.animation),
                             )
                         } else {
                             notification.started
@@ -1699,6 +1693,7 @@ impl Map {
                         background_color,
                         theme,
                         marker,
+                        animation: self.settings.animation,
                     };
                     // Learn how far this template's nodes reach, in map
                     // units, for `find_hovered_node`'s search radius.
@@ -3621,5 +3616,56 @@ mod tests {
             Color32::from_rgb(7, 8, 9),
             "the highlight color must come from the installed MapTheme's `selected`"
         );
+    }
+
+    #[test]
+    fn contexts_carry_the_settings_animation() {
+        // The `animation` a template receives must be the one on
+        // `settings.animation`, so a template drawing an effect itself uses
+        // the same tuning the built-in path would.
+        #[derive(Default)]
+        struct Recorder {
+            marker: std::cell::RefCell<Option<Animation>>,
+            notification: std::cell::RefCell<Option<Animation>>,
+            node: std::cell::RefCell<Option<Animation>>,
+        }
+        impl NodeTemplate for Recorder {
+            fn node_ui(&self, _ui: &mut Ui, ctx: NodeContext) {
+                *self.node.borrow_mut() = Some(ctx.animation);
+            }
+            fn notification_ui(&self, _ui: &mut Ui, ctx: NotificationContext) -> bool {
+                *self.notification.borrow_mut() = Some(ctx.animation);
+                false
+            }
+            fn marker_ui(&self, _ui: &mut Ui, ctx: MarkerContext) {
+                *self.marker.borrow_mut() = Some(ctx.animation);
+            }
+        }
+
+        let expected = Animation::default().with(|a| a.pulse.spread = 123.4);
+        let mut map = Map::new();
+        map.add_points(vec![MapPoint::new(1, [0.0, 0.0])]);
+        map.settings.animation = expected;
+        let template = Rc::new(Recorder::default());
+        map.set_node_template(template.clone());
+        map.node(1).unwrap().pulse(Instant::now());
+        map.update_marker(42, 1);
+
+        let ctx = Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0));
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(screen),
+                ..RawInput::default()
+            },
+            |ui| {
+                ui.add(&mut map);
+            },
+        );
+        output.textures_delta.clear();
+
+        assert_eq!(template.notification.borrow().as_ref(), Some(&expected));
+        assert_eq!(template.marker.borrow().as_ref(), Some(&expected));
+        assert_eq!(template.node.borrow().as_ref(), Some(&expected));
     }
 }
