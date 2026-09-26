@@ -101,7 +101,6 @@
 //! call [`animation::Animation`]'s functions directly from either template if
 //! you only want to reuse the built-in look.
 
-use crate::map::animation::Animation;
 use crate::map::objects::{
     CometDirection, ContextMenuManager, HitContext, LabelContext, MapBounds, MapLabel, MapPoint,
     MapSegment, MapSettings, MarkerContext, NodeAnimation, NodeContext, NotificationContext,
@@ -760,16 +759,21 @@ impl Widget for &mut Map {
                         // `self.region_labels` is still borrowed -- each iteration
                         // extracts what it needs (`position`, an owned `text`) in a
                         // block that ends that borrow before the method call.
+                        //
+                        // Cull on `position` *before* cloning `label.text`: most
+                        // region labels are off-screen at any given zoom, and
+                        // cloning their names only to drop them immediately was
+                        // wasted work. Same for the font, resolved once here
+                        // instead of cloned per label.
                         for i in 0..self.region_labels.len() {
-                            let (position, text) = {
+                            let position: Pos2 = {
                                 let label = &self.region_labels[i];
-                                let position: Pos2 =
-                                    (RawPoint::from(label.center) * zoom - min_point).into();
-                                (position, label.text.clone())
+                                (RawPoint::from(label.center) * zoom - min_point).into()
                             };
                             if !visible_rect.contains(position) {
                                 continue;
                             }
+                            let text = self.region_labels[i].text.clone();
                             self.paint_region_label(
                                 &paint,
                                 position,
@@ -840,6 +844,14 @@ impl Widget for &mut Map {
                     }
                 }
 
+                // Resolved once for all markers below: the theme and color
+                // mode don't change within a frame.
+                let marker_theme = self.theme_colors();
+                let marker_time = ui.input(|i| i.time) as f32;
+                let marker_effect = self
+                    .settings
+                    .animation
+                    .state(self.settings.marker_animation);
                 for marker in &self.markers {
                     // A marker can arrive before its node does (the nodes
                     // aren't loaded yet, or never will be): it is kept and
@@ -854,7 +866,7 @@ impl Widget for &mut Map {
                         // the same persistent "this is flagged" role the
                         // `node_states` branch below uses, distinct from the
                         // one-off `alert` color transient notifications use.
-                        let color = self.theme_colors().marker;
+                        let color = marker_theme.marker;
                         if let Some(template) = &self.node_template {
                             template.marker_ui(
                                 ui,
@@ -865,20 +877,21 @@ impl Widget for &mut Map {
                                     node_id: *marker.1,
                                     point,
                                     color,
-                                    theme: self.theme_colors(),
+                                    theme: marker_theme,
                                     animation: self.settings.animation,
                                 },
                             );
                         } else {
-                            // Frame time, so every marker in this frame shares
-                            // one clock instead of each sampling the wall clock
-                            // at a slightly different moment.
-                            let time = ui.input(|i| i.time) as f32;
-                            let effect = self
-                                .settings
-                                .animation
-                                .state(self.settings.marker_animation);
-                            effect(ui.painter(), adjusted_point.into(), self.zoom, time, color);
+                            // One clock for every marker in this frame instead
+                            // of sampling the wall clock per marker, and the
+                            // effect resolved once above instead of per marker.
+                            marker_effect(
+                                ui.painter(),
+                                adjusted_point.into(),
+                                self.zoom,
+                                marker_time,
+                                color,
+                            );
                             // Persistent effects never finish on their own.
                             ui.ctx().request_repaint();
                         }
@@ -1764,6 +1777,12 @@ impl Map {
         // fixed head start rather than mirroring it exactly.
         let effect_fade = (line_fade + SEGMENT_EFFECT_ALPHA_BOOST).min(1.0);
 
+        // Resolved once for the whole batch, like `paint_map_points` does:
+        // the active theme and color mode cannot change mid-frame, so
+        // `self.theme_colors()` per segment (up to four times each, plus one
+        // per context) would be pure repeated work.
+        let theme = self.theme_colors();
+
         for segment in segments.locate_in_envelope_intersecting(query) {
             let raw_line = segment.raw_line();
             let pos_a: Pos2 = (raw_line.points[0] * self.zoom - min_point).into();
@@ -1781,10 +1800,7 @@ impl Map {
             // value handed to a `SegmentTemplate` as `SegmentContext::color`,
             // and the one the default stroke paints with, so an override
             // actually shows up.
-            let segment_color = scale_alpha(
-                segment.color.unwrap_or(self.theme_colors().segment),
-                line_fade,
-            );
+            let segment_color = scale_alpha(segment.color.unwrap_or(theme.segment), line_fade);
             if let Some(template) = &self.segment_template {
                 template.segment_ui(
                     painter,
@@ -1794,7 +1810,8 @@ impl Map {
                         zoom: self.zoom,
                         segment,
                         color: segment_color,
-                        theme: self.theme_colors(),
+                        theme,
+                        animation: self.settings.segment_animation,
                     },
                 );
             } else if let Some(width) = line_width {
@@ -1808,10 +1825,7 @@ impl Map {
             // the *event* -- sits on top of the *state*, same ordering as
             // node effects.
             if let Some(state) = self.segment_states.get(&segment.id) {
-                let color = scale_alpha(
-                    state.color.unwrap_or(self.theme_colors().alert),
-                    effect_fade,
-                );
+                let color = scale_alpha(state.color.unwrap_or(theme.alert), effect_fade);
                 let time = painter.ctx().input(|i| i.time) as f32;
                 if let Some(template) = &self.segment_template {
                     template.segment_state_ui(
@@ -1823,17 +1837,13 @@ impl Map {
                             segment,
                             time,
                             color,
-                            theme: self.theme_colors(),
+                            theme,
                             kind: state.animation,
+                            animation: self.settings.segment_animation,
                         },
                     );
                 } else {
-                    let effect = match state.animation {
-                        SteadySegmentAnimation::Comet => Animation::comet,
-                        SteadySegmentAnimation::Dash => Animation::dash,
-                        SteadySegmentAnimation::GlowBand => Animation::glow_band,
-                        SteadySegmentAnimation::Chevrons => Animation::chevrons,
-                    };
+                    let effect = self.settings.segment_animation.state(state.animation);
                     effect(painter, pos_a, pos_b, self.zoom, time, color);
                 }
                 // Persistent effects never finish on their own.
@@ -1841,10 +1851,7 @@ impl Map {
             }
 
             if let Some(notification) = self.segment_notifications.get(&segment.id) {
-                let color = scale_alpha(
-                    notification.color.unwrap_or(self.theme_colors().alert),
-                    effect_fade,
-                );
+                let color = scale_alpha(notification.color.unwrap_or(theme.alert), effect_fade);
                 let still_playing = if let Some(template) = &self.segment_template {
                     template.segment_notification_ui(
                         painter,
@@ -1855,38 +1862,24 @@ impl Map {
                             segment,
                             initial_time: notification.started,
                             color,
-                            theme: self.theme_colors(),
+                            theme,
                             kind: notification.animation,
+                            animation: self.settings.segment_animation,
                         },
                     )
                 } else {
-                    match notification.animation {
-                        SegmentAnimation::FlashDecay => Animation::flash_decay(
-                            painter,
-                            pos_a,
-                            pos_b,
-                            self.zoom,
-                            notification.started,
-                            color,
-                        ),
-                        SegmentAnimation::Comet(direction) => Animation::comet_once(
-                            painter,
-                            pos_a,
-                            pos_b,
-                            self.zoom,
-                            notification.started,
-                            color,
-                            direction,
-                        ),
-                        SegmentAnimation::Wipe => Animation::wipe(
-                            painter,
-                            pos_a,
-                            pos_b,
-                            self.zoom,
-                            notification.started,
-                            color,
-                        ),
-                    }
+                    let effect = self
+                        .settings
+                        .segment_animation
+                        .event(notification.animation);
+                    effect(
+                        painter,
+                        pos_a,
+                        pos_b,
+                        self.zoom,
+                        notification.started,
+                        color,
+                    )
                 };
                 if still_playing {
                     painter.ctx().request_repaint();
@@ -2310,6 +2303,7 @@ impl Map {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::map::animation::{Animation, SegmentAnimations};
     use std::time::Duration;
 
     fn sample_points() -> Vec<MapPoint> {
@@ -3667,5 +3661,59 @@ mod tests {
         assert_eq!(template.notification.borrow().as_ref(), Some(&expected));
         assert_eq!(template.marker.borrow().as_ref(), Some(&expected));
         assert_eq!(template.node.borrow().as_ref(), Some(&expected));
+    }
+
+    #[test]
+    fn segment_contexts_carry_the_settings_segment_animation() {
+        // The segment-side counterpart of
+        // `contexts_carry_the_settings_animation`.
+        #[derive(Default)]
+        struct Recorder {
+            state: std::cell::RefCell<Option<SegmentAnimations>>,
+            notification: std::cell::RefCell<Option<SegmentAnimations>>,
+            base: std::cell::RefCell<Option<SegmentAnimations>>,
+        }
+        impl SegmentTemplate for Recorder {
+            fn segment_ui(&self, _painter: &Painter, ctx: SegmentContext) {
+                *self.base.borrow_mut() = Some(ctx.animation);
+            }
+            fn segment_notification_ui(
+                &self,
+                _painter: &Painter,
+                ctx: SegmentNotificationContext,
+            ) -> bool {
+                *self.notification.borrow_mut() = Some(ctx.animation);
+                false
+            }
+            fn segment_state_ui(&self, _painter: &Painter, ctx: SegmentStateContext) {
+                *self.state.borrow_mut() = Some(ctx.animation);
+            }
+        }
+
+        let expected = SegmentAnimations::default().with(|s| s.dash.width = 77.0);
+        let mut map = Map::new();
+        map.add_lines(vec![MapSegment::new((1, 2), [0.0, 0.0], [50.0, 0.0])]);
+        map.settings.segment_animation = expected;
+        let template = Rc::new(Recorder::default());
+        map.set_segment_template(template.clone());
+        map.segment((1, 2)).unwrap().chevrons();
+        map.segment((1, 2)).unwrap().wipe(Instant::now());
+
+        let ctx = Context::default();
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0));
+        let mut output = ctx.run_ui(
+            RawInput {
+                screen_rect: Some(screen),
+                ..RawInput::default()
+            },
+            |ui| {
+                ui.add(&mut map);
+            },
+        );
+        output.textures_delta.clear();
+
+        assert_eq!(template.base.borrow().as_ref(), Some(&expected));
+        assert_eq!(template.notification.borrow().as_ref(), Some(&expected));
+        assert_eq!(template.state.borrow().as_ref(), Some(&expected));
     }
 }

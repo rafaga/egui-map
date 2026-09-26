@@ -8,7 +8,7 @@
 //! [`LabelTemplate`]. The color palette a `Style` paints with lives in
 //! [`super::theme`], via [`MapTheme`](super::theme::MapTheme).
 
-use crate::map::animation::{self, Animation};
+use crate::map::animation::{self, Animation, SegmentAnimations};
 pub use crate::map::outline::NodeOutline;
 use crate::map::theme::{Style, ThemeColors};
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Stroke, Ui};
@@ -801,6 +801,10 @@ pub struct MapSettings {
     /// untouched `MapSettings` paints exactly as before; see
     /// [`Animation::with`] to adjust one.
     pub animation: Animation,
+    /// Per-animation tuning for the built-in **segment** effects
+    /// ([`SegmentAnimations`]). Same defaults-preserve-behavior contract as
+    /// [`Self::animation`].
+    pub segment_animation: SegmentAnimations,
 }
 
 impl MapSettings {
@@ -822,6 +826,7 @@ impl MapSettings {
             region_label_alpha: 0.0,
             style: Style::new(),
             animation: Animation::default(),
+            segment_animation: SegmentAnimations::default(),
         }
     }
 }
@@ -855,6 +860,7 @@ impl Default for MapSettings {
                 region_label_font: FontId::new(48.0, FontFamily::Proportional),
             },
             animation: Animation::default(),
+            segment_animation: SegmentAnimations::default(),
         }
     }
 }
@@ -1573,10 +1579,8 @@ pub struct MarkerContext<'a> {
 /// `kind` instead of reimplementing it:
 ///
 /// ```
-/// use egui_map::map::animation::Animation;
 /// use egui_map::map::objects::{
 ///     SegmentContext, SegmentNotificationContext, SegmentStateContext, SegmentTemplate,
-///     SteadySegmentAnimation,
 /// };
 /// use egui::{Color32, Painter, Stroke};
 /// use std::time::Instant;
@@ -1615,13 +1619,9 @@ pub struct MarkerContext<'a> {
 ///
 ///     fn segment_state_ui(&self, painter: &Painter, ctx: SegmentStateContext) {
 ///         // `ctx.kind` is which persistent effect this segment requested --
-///         // dispatch straight to it instead of reimplementing the math.
-///         let effect = match ctx.kind {
-///             SteadySegmentAnimation::Comet => Animation::comet,
-///             SteadySegmentAnimation::Dash => Animation::dash,
-///             SteadySegmentAnimation::GlowBand => Animation::glow_band,
-///             SteadySegmentAnimation::Chevrons => Animation::chevrons,
-///         };
+///         // dispatch straight to it (bound to the widget's tuning) instead of
+///         // reimplementing the math.
+///         let effect = ctx.animation.state(ctx.kind);
 ///         effect(painter, ctx.pos_a, ctx.pos_b, ctx.zoom, ctx.time, ctx.color);
 ///         painter.ctx().request_repaint();
 ///     }
@@ -1698,6 +1698,10 @@ pub struct SegmentContext<'a> {
     /// over so a `SegmentTemplate` can use any other theme role (`alert`,
     /// `selected`, ...) without reaching for the theme itself.
     pub theme: ThemeColors,
+    /// The widget's per-animation tuning for segment effects
+    /// ([`MapSettings::segment_animation`]), for a template that draws the
+    /// effect itself.
+    pub animation: SegmentAnimations,
 }
 
 /// The context passed to [`SegmentTemplate::segment_notification_ui`].
@@ -1737,6 +1741,9 @@ pub struct SegmentNotificationContext<'a> {
     /// [`Animation`] function instead of
     /// reimplementing the lookup yourself.
     pub kind: SegmentAnimation,
+    /// The widget's per-animation tuning for segment effects
+    /// ([`MapSettings::segment_animation`]).
+    pub animation: SegmentAnimations,
 }
 
 /// The context passed to [`SegmentTemplate::segment_state_ui`].
@@ -1776,6 +1783,9 @@ pub struct SegmentStateContext<'a> {
     /// corresponding [`Animation`]
     /// function instead of reimplementing the lookup yourself.
     pub kind: SteadySegmentAnimation,
+    /// The widget's per-animation tuning for segment effects
+    /// ([`MapSettings::segment_animation`]).
+    pub animation: SegmentAnimations,
 }
 
 /// Customizes how [`RegionLabel`]s are drawn, replacing the widget's
