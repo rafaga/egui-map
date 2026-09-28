@@ -852,6 +852,8 @@ impl Widget for &mut Map {
                     .settings
                     .animation
                     .state(self.settings.marker_animation);
+                // One repaint request for all markers, not one per marker.
+                let mut markers_repaint = false;
                 for marker in &self.markers {
                     // A marker can arrive before its node does (the nodes
                     // aren't loaded yet, or never will be): it is kept and
@@ -893,9 +895,12 @@ impl Widget for &mut Map {
                                 color,
                             );
                             // Persistent effects never finish on their own.
-                            ui.ctx().request_repaint();
+                            markers_repaint = true;
                         }
                     }
+                }
+                if markers_repaint {
+                    ui.ctx().request_repaint();
                 }
 
                 self.paint_sub_components(ui, self.map_area);
@@ -1516,6 +1521,11 @@ impl Map {
         let mut nearest_id = None;
         let mut nodes_to_remove = Vec::new();
         let mut shape_vec = vec![];
+        // Any animated node wants a repaint; requesting it once at the end of
+        // the loop instead of once per node keeps a heavily animated frame
+        // (many alerts at a zoomed-out view) from issuing thousands of
+        // redundant requests.
+        let mut needs_repaint = false;
 
         if hashm.is_none() {
             return Err(());
@@ -1551,6 +1561,15 @@ impl Map {
         let background_color = ui_obj.ctx().theme().default_visuals().extreme_bg_color;
         // One clock for every node's marker fade this frame.
         let now = Instant::now();
+        // One clock for every built-in effect this frame too, instead of a
+        // `ui.input` lock per animated node.
+        let time = ui_obj.input(|i| i.time) as f32;
+        // Whether any node carries lasting state / a notification this frame:
+        // when they are empty (the common case) the per-node `get`s below are
+        // skipped entirely, which matters at a zoomed-out view where the
+        // loop runs over every node.
+        let has_states = !self.node_states.is_empty();
+        let has_notifications = !self.notifications.is_empty();
 
         // filling text settings
         let mut text_settings = TextSettings {
@@ -1602,7 +1621,7 @@ impl Map {
 
                 // Persistent node state is drawn first so a notification --
                 // the *event* -- sits on top of the *state*.
-                if let Some(state) = self.node_states.get(&system_id) {
+                if has_states && let Some(state) = self.node_states.get(&system_id) {
                     let color = state.color.unwrap_or(theme.marker);
                     if let Some(template) = &self.node_template {
                         // There is no dedicated template hook for node state:
@@ -1626,16 +1645,14 @@ impl Map {
                         );
                     } else {
                         let effect = self.settings.animation.state(state.animation);
-                        // Frame time, so every element animated this frame
-                        // shares one clock instead of sampling its own.
-                        let time = ui_obj.input(|i| i.time) as f32;
                         effect(paint, viewport_point.into(), self.zoom, time, color);
                     }
                     // Persistent effects never finish on their own.
-                    ui_obj.ctx().request_repaint();
+                    needs_repaint = true;
                 }
 
-                if let Some(notification) = self.notifications.get(&system_id) {
+                if has_notifications && let Some(notification) = self.notifications.get(&system_id)
+                {
                     let color = notification
                         .color
                         .unwrap_or(theme.alert)
@@ -1679,7 +1696,7 @@ impl Map {
                         let running =
                             effect(paint, viewport_point.into(), self.zoom, started, color);
                         if running || notification.until.is_some() {
-                            ui_obj.ctx().request_repaint();
+                            needs_repaint = true;
                         } else {
                             nodes_to_remove.push(system_id);
                         }
@@ -1696,7 +1713,7 @@ impl Map {
                 if let Some(node_template) = &self.node_template {
                     let (marker, marker_fading) = self.marker_level(system_id, now);
                     if marker_fading {
-                        ui_obj.ctx().request_repaint();
+                        needs_repaint = true;
                     }
                     let node_context = NodeContext {
                         position: viewport_point.into(),
@@ -1728,6 +1745,9 @@ impl Map {
             }
         }
         paint.extend(shape_vec);
+        if needs_repaint {
+            ui_obj.ctx().request_repaint();
+        }
 
         Ok(nodes_to_remove)
     }
@@ -1738,6 +1758,9 @@ impl Map {
     fn paint_map_lines(&self, painter: &Painter, min_point: &RawPoint) -> Vec<(usize, usize)> {
         let _span = tracing::info_span!("paint_map_lines").entered();
         let mut segments_to_remove = Vec::new();
+        // One repaint request for the whole pass, not one per animated
+        // segment (same reasoning as `paint_map_points`).
+        let mut needs_repaint = false;
 
         if self.zoom <= self.settings.line_visible_zoom {
             return segments_to_remove;
@@ -1847,7 +1870,7 @@ impl Map {
                     effect(painter, pos_a, pos_b, self.zoom, time, color);
                 }
                 // Persistent effects never finish on their own.
-                painter.ctx().request_repaint();
+                needs_repaint = true;
             }
 
             if let Some(notification) = self.segment_notifications.get(&segment.id) {
@@ -1882,11 +1905,14 @@ impl Map {
                     )
                 };
                 if still_playing {
-                    painter.ctx().request_repaint();
+                    needs_repaint = true;
                 } else {
                     segments_to_remove.push(segment.id);
                 }
             }
+        }
+        if needs_repaint {
+            painter.ctx().request_repaint();
         }
         segments_to_remove
     }
@@ -2223,44 +2249,48 @@ impl Map {
         }
         let pointer = resp.hover_pos()?;
         let points = self.points.as_ref()?;
-        let tree = self.tree.as_ref()?;
         let extent = match &self.node_template {
             Some(template) => template
                 .hit_extent(self.zoom)
                 .max(self.outline_reach.get() * self.zoom),
             None => objects::default_hit_extent(self.zoom),
         };
-        let map_point = (*min_point + RawPoint::from(pointer)) / self.zoom;
-        // The tree measures squared map units.
-        let radius = extent.max(0.0) / self.zoom;
-        let candidates = tree
-            .within(&map_point.components, radius * radius, &squared_euclidean)
-            .ok()?;
-        candidates
-            .into_iter()
-            .filter_map(|(_, id)| {
-                let point = points.get(id)?;
-                let position: Pos2 = (RawPoint::from(point.coords) * self.zoom - *min_point).into();
-                let ctx = HitContext {
-                    position,
-                    zoom: self.zoom,
-                    point,
-                };
-                let hit = match &self.node_template {
-                    Some(template) => template.contains(ctx, pointer),
-                    None => ctx.within_default_radius(pointer),
-                };
-                hit.then_some(*id)
-            })
-            .max_by_key(|id| self.paint_order(*id))
-    }
+        let extent = extent.max(0.0);
+        let extent_sq = extent * extent;
 
-    /// Where `id` falls in this frame's painting order (later is on top);
-    /// `None` for a node that isn't painted (outside the viewport).
-    fn paint_order(&self, id: usize) -> Option<usize> {
-        self.visible_points
-            .iter()
-            .rposition(|visible| visible.cast_unsigned() == id)
+        // `visible_points` is the paint order (it is iterated in order by
+        // `paint_map_points`), so the *last* hit in it is the one on top.
+        // Scanning it backwards and returning the first hit is O(visible)
+        // with no allocation -- the previous version looked up each
+        // candidate's position with `paint_order`, which re-scanned
+        // `visible_points` per candidate: at a zoomed-out view the hit radius
+        // is large enough to pull in nearly every node, making that O(n^2)
+        // every hovered frame.
+        for &visible in self.visible_points.iter().rev() {
+            let id = visible.cast_unsigned();
+            let Some(point) = points.get(&id) else {
+                continue;
+            };
+            let position: Pos2 = (RawPoint::from(point.coords) * self.zoom - *min_point).into();
+            // Cheap rejection before the shape test: a node whose center is
+            // farther than the hit extent cannot contain the pointer.
+            if (position - pointer).length_sq() > extent_sq {
+                continue;
+            }
+            let ctx = HitContext {
+                position,
+                zoom: self.zoom,
+                point,
+            };
+            let hit = match &self.node_template {
+                Some(template) => template.contains(ctx, pointer),
+                None => ctx.within_default_radius(pointer),
+            };
+            if hit {
+                return Some(id);
+            }
+        }
+        None
     }
 
     /// Starts fading `node_id`'s [`NodeContext::marker`](objects::NodeContext::marker)
@@ -3609,6 +3639,54 @@ mod tests {
             color,
             Color32::from_rgb(7, 8, 9),
             "the highlight color must come from the installed MapTheme's `selected`"
+        );
+    }
+
+    #[test]
+    fn hover_picks_the_topmost_of_overlapping_nodes() {
+        // Two nodes at the same spot: both are hit, and the one painted last
+        // (last in `visible_points`) must win. Guards the reverse-scan in
+        // `find_hovered_node` that replaced the per-candidate `paint_order`
+        // lookup (O(n^2) at a zoomed-out view).
+        let mut map = Map::new();
+        map.add_points(vec![
+            MapPoint::new(1, [0.0, 0.0]),
+            MapPoint::new(2, [0.0, 0.0]),
+        ]);
+
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0));
+        let ctx = Context::default();
+        for pass in 0..2 {
+            let events = if pass == 1 {
+                vec![Event::PointerMoved(screen.center())]
+            } else {
+                Vec::new()
+            };
+            let mut output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(screen),
+                    events,
+                    ..RawInput::default()
+                },
+                |ui| {
+                    ui.add(&mut map);
+                },
+            );
+            output.textures_delta.clear();
+        }
+
+        // The expected winner is whichever of the two is painted last.
+        let expected = map
+            .visible_points
+            .iter()
+            .rev()
+            .map(|visible| visible.cast_unsigned())
+            .find(|id| *id == 1 || *id == 2);
+        assert!(expected.is_some(), "both nodes must be visible");
+        assert_eq!(
+            map.hovered_node(),
+            expected,
+            "the node painted last must win the hover among overlapping nodes"
         );
     }
 

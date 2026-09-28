@@ -115,6 +115,12 @@ pub const CHEVRON_SPEED: f32 = 0.5;
 /// paints.
 pub const CHEVRON_WIDTH: f32 = 10.0;
 
+/// Shapes smaller than this many screen points across are effectively
+/// invisible; the `*_outline`/circular effects skip tessellating them. Only
+/// reachable at an extreme zoom-out, but it keeps a frame full of tiny,
+/// overlapping effects from paying for geometry no one can see.
+const MIN_EFFECT_PX: f32 = 1.0;
+
 /// Returns `color` with its opacity multiplied by `alpha` (clamped to
 /// `0.0..=1.0`): an opaque `color` ends up with exactly that alpha, and a
 /// translucent one (e.g. a lasting notification already fading out) keeps
@@ -780,11 +786,16 @@ impl Animation {
         let secs = elapsed(initial_time);
         let radius = (self.pulse.base_radius + self.pulse.spread * secs) * zoom;
         let transparency = (1.00 - (secs / self.pulse.duration).abs()).max(0.0);
-        painter.add(Shape::Circle(CircleShape::filled(
-            center,
-            radius,
-            with_alpha(color, transparency),
-        )));
+        // The fade tail rounds to a fully transparent color: skip it rather
+        // than tessellating an invisible circle, which is pure waste when
+        // many pulses are on screen at once. Same for a sub-pixel disc.
+        if transparency > 0.0 && 2.0 * radius >= MIN_EFFECT_PX {
+            painter.add(Shape::Circle(CircleShape::filled(
+                center,
+                radius,
+                with_alpha(color, transparency),
+            )));
+        }
         secs < self.pulse.duration
     }
 
@@ -1023,11 +1034,15 @@ impl Animation {
     ) -> bool {
         let secs = elapsed(initial_time);
         let transparency = (1.0 - secs / self.pulse.duration).max(0.0);
-        painter.add(
-            outline
-                .grown(self.pulse.spread * secs * zoom)
-                .fill_shape(with_alpha(color, transparency)),
-        );
+        // See `pulse`: skip the fully transparent fade tail instead of
+        // tessellating an invisible shape, and skip a sub-pixel one.
+        if transparency > 0.0 {
+            let grown = outline.grown(self.pulse.spread * secs * zoom);
+            let bounds = grown.bounding_rect();
+            if bounds.width().max(bounds.height()) >= MIN_EFFECT_PX {
+                painter.add(grown.fill_shape(with_alpha(color, transparency)));
+            }
+        }
         secs < self.pulse.duration
     }
 
