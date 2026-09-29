@@ -1938,7 +1938,9 @@ impl Map {
     /// only changes `color`) never invalidates the cache. Rounding `size`
     /// to the nearest pixel before hashing keeps the cache useful while the
     /// map sits at a steady zoom, at the cost of relaying out on every zoom
-    /// step that crosses a pixel boundary.
+    /// step that crosses a pixel boundary. An entry laid out for another
+    /// `pixels_per_point` (the window moved to a screen with another scale)
+    /// is laid out again.
     ///
     /// Centers the text on `position` the same way [`Painter::text`] does
     /// internally (`anchor.anchor_size(pos, galley.size())`), since a
@@ -1971,9 +1973,12 @@ impl Map {
         // unrounded value.
         let size = font.size;
         let key = (text, size.round() as i32, font.family);
+        // A galley is laid out for one pixel density: after the window moves
+        // to a screen with another scale, the cached one is stale (epaint
+        // warns about it on every frame and draws it at the old resolution).
         let galley = match self.region_label_cache.get(&key) {
-            Some(galley) => galley.clone(),
-            None => {
+            Some(galley) if galley.pixels_per_point == paint.pixels_per_point() => galley.clone(),
+            _ => {
                 let galley =
                     paint.layout_no_wrap(key.0.clone(), FontId::new(size, key.2.clone()), color);
                 self.region_label_cache.insert(key, galley.clone());

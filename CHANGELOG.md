@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/) (pre-1.0:
 any minor bump may include breaking changes, called out below as such).
 
+## [Unreleased]
+
+### Fixed
+
+- Region labels are laid out again when `pixels_per_point` changes (the
+  window moved to a screen with another scale): the cached galleys were
+  reused at the old scale, drawn blurry and made epaint warn on every frame.
+
 ## [0.9.5] - 2026-09-25
 
 ### Added
