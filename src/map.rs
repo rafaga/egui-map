@@ -116,7 +116,10 @@ use kdtree::distance::squared_euclidean;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use std::time::Instant;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use web_time::Instant;
 
 use self::objects::{LabelTemplate, NodeTemplate, SegmentTemplate};
 
@@ -1195,7 +1198,7 @@ impl Map {
             self.calculate_visible_points();
             true
         } else {
-            tracing::warn!(
+            tracing::debug!(
                 node_id,
                 loaded_nodes = self.points.as_ref().map_or(0, |p| p.len()),
                 "set_pos_from_nodeid: unknown node id, the view was left unchanged"

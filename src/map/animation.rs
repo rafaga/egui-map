@@ -58,7 +58,10 @@ use egui::{
     pos2,
 };
 use std::f32::consts::TAU;
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use std::time::Instant;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use web_time::Instant;
 
 /// How long [`Animation::pulse`] plays, in seconds.
 pub const PULSE_DURATION: f32 = 3.5;

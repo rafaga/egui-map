@@ -1,6 +1,6 @@
 [package]
 name = "egui-map"
-version = "0.11.0"
+version = "0.12.0"
 edition = "2024"
 authors = ["Rafael Amador <rafaga@duck.com"]
 description = "Visual component to draw a map on screen."
@@ -53,6 +53,10 @@ rstar = "0.13.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3.23", optional = true }
 tracing-tracy = { version = "0.12", optional = true }
+
+# `std::time::Instant::now()` panics on `wasm32-unknown-unknown`; `web-time` is the very same type and reads the browser clock there. Every other target keeps `std::time::Instant`.
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+web-time = "1"
 
 [dev-dependencies]
 eframe = "0.36"

@@ -15,7 +15,10 @@ use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Stroke, Ui};
 use rstar::AABB;
 use std::convert::{From, Into};
 use std::ops::{Add, Div, DivAssign, Mul, MulAssign, Sub};
+#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
 use std::time::Instant;
+#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+use web_time::Instant;
 
 /// A point (or vector) in 2D map coordinates.
 ///
