@@ -31,6 +31,13 @@ ignore = [
   # eframe (winit -> sctk-adwaita), a dev-dependency used by the examples only.
   # Revisit when winit drops it.
   { id = "RUSTSEC-2026-0192", reason = "unmaintained, dev-dependency only (eframe -> winit -> sctk-adwaita), no vulnerability" },
+  # `quick-xml` is used by the `wayland-scanner` proc macro (eframe -> winit ->
+  # smithay-client-toolkit), a dev-dependency used by the examples only. It
+  # parses the Wayland protocol XML that ships with those crates at build time,
+  # never untrusted input. Fixed in quick-xml 0.41; the version picked depends on
+  # how the dependency tree resolves, since `Cargo.lock` is not versioned.
+  { id = "RUSTSEC-2026-0194", reason = "quick-xml quadratic attribute check, build-time proc macro on trusted XML, dev-dependency only" },
+  { id = "RUSTSEC-2026-0195", reason = "quick-xml unbounded namespace allocation, build-time proc macro on trusted XML, dev-dependency only" },
 ]
 
 
