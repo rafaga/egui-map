@@ -51,12 +51,18 @@ egui = { version = "0.36", features = ["bytemuck"]}
 kdtree = { version = "0.8.0" }
 rstar = "0.13.0"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3.23", optional = true }
-tracing-tracy = { version = "0.12", optional = true }
 
 # `std::time::Instant::now()` panics on `wasm32-unknown-unknown`; `web-time` is the very same type and reads the browser clock there. Every other target keeps `std::time::Instant`.
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 web-time = "1"
+
+# Tracy (a native profiler client that needs a C++ toolchain) is only for the
+# `tracy_profile` example, and cannot run in the browser. The crate's own spans
+# go through the `tracing` facade, which works on every target; on wasm32 the
+# `profile` feature simply has nothing to pull in.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tracing-subscriber = { version = "0.3.23", optional = true }
+tracing-tracy = { version = "0.12", optional = true }
 
 [dev-dependencies]
 eframe = "0.36"
