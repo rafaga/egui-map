@@ -88,9 +88,12 @@ pub const DASH_PERIOD_PX: f32 = 24.0;
 /// How many repeats of the dash pattern [`Animation::dash`] slides through
 /// per second ("marching ants" speed).
 pub const DASH_SPEED: f32 = 0.6;
-/// Width, before the `zoom` multiplier, of the ribbon [`Animation::dash`]
-/// paints.
-pub const DASH_WIDTH: f32 = 3.0;
+/// Width, in **screen pixels**, of the ribbon [`Animation::dash`] paints when
+/// [`Dash::width`] is `None` and there is no default stroke to follow
+/// ([`Style::line_width`](crate::map::theme::Style::line_width) is `None`).
+/// Not scaled by zoom, like the default stroke it stands in for, and equal to
+/// that stroke's default width.
+pub const DASH_WIDTH: f32 = 2.0;
 /// How long [`Animation::wipe`] takes to draw the line in, in seconds.
 pub const WIPE_DURATION: f32 = 0.9;
 /// How long one full traverse-and-loop of [`Animation::glow_band`] takes, in
@@ -257,6 +260,23 @@ impl SegmentAnimations {
         f(&mut self);
         self
     }
+
+    /// `self` with the effects that follow the default segment stroke given
+    /// its width: a [`Dash::width`] of `None` becomes `line_width` (screen
+    /// pixels), so [`SegmentAnimations::dash`] is as thick as the line it runs
+    /// over. With no default stroke (`line_width` of `None`) it stays `None`
+    /// and falls back to [`DASH_WIDTH`]. A width set explicitly is kept.
+    ///
+    /// The map applies this before handing the animations to the segment
+    /// effects and to a [`SegmentTemplate`](crate::map::objects::SegmentTemplate),
+    /// so call it yourself only when you draw segment effects on your own.
+    pub fn with_line_width(self, line_width: Option<f32>) -> Self {
+        self.with(|animation| {
+            if animation.dash.width.is_none() {
+                animation.dash.width = line_width;
+            }
+        })
+    }
 }
 
 /// Tunables of [`SegmentAnimations::flash_decay`]: a segment thickening then
@@ -383,8 +403,15 @@ pub struct Dash {
     pub period_px: f32,
     /// How many repeats slide through per second.
     pub speed: f32,
-    /// Ribbon width, before the `zoom` multiplier.
-    pub width: f32,
+    /// Ribbon width, in **screen pixels** (not scaled by zoom, like
+    /// `period_px` and like the default stroke it runs over).
+    ///
+    /// `None`, the default, follows the width of the default segment stroke,
+    /// [`Style::line_width`](crate::map::theme::Style::line_width), so the
+    /// dashes are as thick as the line at every zoom and for any
+    /// `line_width`; when that stroke is off it falls back to [`DASH_WIDTH`].
+    /// `Some(width)` is used as it is.
+    pub width: Option<f32>,
 }
 
 impl Dash {
@@ -400,7 +427,7 @@ impl Default for Dash {
         Self {
             period_px: DASH_PERIOD_PX,
             speed: DASH_SPEED,
-            width: DASH_WIDTH,
+            width: None,
         }
     }
 }
@@ -1390,18 +1417,25 @@ impl SegmentAnimations {
     /// pattern repeats every [`Dash::period_px`] screen pixels and slides at
     /// [`Dash::speed`] repeats per second.
     ///
+    /// The ribbon is [`Dash::width`] screen pixels wide, whatever the zoom
+    /// (`zoom` is unused, and kept so every steady segment effect has the same
+    /// signature): the width of the default stroke when that is `None` and the
+    /// animations went through [`SegmentAnimations::with_line_width`] (the map
+    /// does it), otherwise [`DASH_WIDTH`].
+    ///
     /// Two triangles textured with a small repeating strip (registered once
     /// per [`egui::Context`] and reused after that), rather than one shape per
     /// dash -- see the [module docs](self) for why that matters at scale. A
     /// zero-length segment is skipped.
-    pub fn dash(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, time: f32, color: Color32) {
+    pub fn dash(&self, painter: &Painter, a: Pos2, b: Pos2, _zoom: f32, time: f32, color: Color32) {
         let delta = b - a;
         let len = delta.length();
         if len <= f32::EPSILON {
             return;
         }
         let dir = delta / len;
-        let normal = Vec2::new(-dir.y, dir.x) * (self.dash.width * zoom * 0.5);
+        let width = self.dash.width.unwrap_or(DASH_WIDTH);
+        let normal = Vec2::new(-dir.y, dir.x) * (width * 0.5);
         let phase = (time * self.dash.speed).rem_euclid(1.0);
         let u0 = phase;
         let u1 = phase + len / self.dash.period_px;
@@ -2359,7 +2393,8 @@ mod tests {
             Dash {
                 period_px: DASH_PERIOD_PX,
                 speed: DASH_SPEED,
-                width: DASH_WIDTH
+                // Follows the default stroke unless it is set.
+                width: None
             }
         );
         assert_eq!(
@@ -2383,10 +2418,10 @@ mod tests {
     #[test]
     fn segment_with_adjusts_only_the_given_fields() {
         let a = SegmentAnimations::default().with(|a| {
-            a.dash.width = 8.0;
+            a.dash.width = Some(8.0);
             a.chevrons.speed = 1.5;
         });
-        assert_eq!(a.dash.width, 8.0);
+        assert_eq!(a.dash.width, Some(8.0));
         assert_eq!(a.chevrons.speed, 1.5);
         assert_eq!(a.dash.period_px, Dash::default().period_px);
         assert_eq!(a.wipe, Wipe::default());
@@ -2423,47 +2458,110 @@ mod tests {
         animation.state(SteadySegmentAnimation::Dash)(&painter, a, b, 1.0, 0.0, Color32::GREEN);
     }
 
+    /// Half the width of the ribbon `animation` draws for a horizontal
+    /// segment at `zoom`. The dashes are drawn as a mesh whose vertices
+    /// straddle the segment line, so the farthest vertex from the centerline
+    /// is half the ribbon.
+    fn dash_half_width(animation: SegmentAnimations, zoom: f32) -> f32 {
+        let ctx = Context::default();
+        let mut out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0))),
+                ..Default::default()
+            },
+            |ui| {
+                animation.dash(
+                    ui.painter(),
+                    Pos2::ZERO,
+                    Pos2::new(50.0, 0.0),
+                    zoom,
+                    0.0,
+                    Color32::GREEN,
+                );
+            },
+        );
+        let offset = out
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                egui::epaint::Shape::Mesh(mesh) => Some(
+                    mesh.vertices
+                        .iter()
+                        .map(|v| v.pos.y.abs())
+                        .fold(0.0, f32::max),
+                ),
+                _ => None,
+            })
+            .expect("dash must draw a mesh");
+        out.textures_delta.clear();
+        offset
+    }
+
     #[test]
     fn dash_width_changes_the_drawn_ribbon() {
-        // Two runs in the same frame; only `dash.width` differs. The dashes
-        // are drawn as meshes whose vertices straddle the segment line, so a
-        // wider ribbon pushes them further from the centerline.
-        let ctx = Context::default();
-        let a = Pos2::ZERO;
-        let b = Pos2::new(50.0, 0.0);
-        let max_offset = |animation: SegmentAnimations| -> f32 {
-            let mut out = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0))),
-                    ..Default::default()
-                },
-                |ui| {
-                    animation.dash(ui.painter(), a, b, 1.0, 0.0, Color32::GREEN);
-                },
-            );
-            let offset = out
-                .shapes
-                .iter()
-                .find_map(|cs| match &cs.shape {
-                    egui::epaint::Shape::Mesh(mesh) => Some(
-                        mesh.vertices
-                            .iter()
-                            .map(|v| v.pos.y.abs())
-                            .fold(0.0, f32::max),
-                    ),
-                    _ => None,
-                })
-                .expect("dash must draw a mesh");
-            out.textures_delta.clear();
-            offset
-        };
-
-        let default_offset = max_offset(SegmentAnimations::default());
-        let wider = max_offset(SegmentAnimations::default().with(|s| s.dash.width = 12.0));
+        let default_offset = dash_half_width(SegmentAnimations::default(), 1.0);
+        let wider = dash_half_width(
+            SegmentAnimations::default().with(|s| s.dash.width = Some(12.0)),
+            1.0,
+        );
         assert!(
             wider > default_offset,
             "raising dash.width must widen the drawn ribbon \
              (default={default_offset}, wider={wider})"
+        );
+        assert_eq!(wider, 6.0, "the width is in screen pixels");
+    }
+
+    #[test]
+    fn a_dash_with_no_width_uses_the_fallback() {
+        let animation = SegmentAnimations::default();
+        assert_eq!(animation.dash.width, None);
+        assert_eq!(dash_half_width(animation, 1.0), DASH_WIDTH / 2.0);
+    }
+
+    #[test]
+    fn the_dash_ribbon_does_not_depend_on_the_zoom() {
+        // Like the default stroke it runs over, and like the dash period.
+        for animation in [
+            SegmentAnimations::default(),
+            SegmentAnimations::default().with(|s| s.dash.width = Some(5.0)),
+            SegmentAnimations::default().with_line_width(Some(3.0)),
+        ] {
+            let reference = dash_half_width(animation, 1.0);
+            for zoom in [0.1, 0.25, 0.5, 2.0, 8.0] {
+                assert_eq!(dash_half_width(animation, zoom), reference, "zoom {zoom}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_dash_is_as_thick_as_the_line_it_follows() {
+        for line_width in [1.0, 2.0, 5.0, 10.0] {
+            let animation = SegmentAnimations::default().with_line_width(Some(line_width));
+            assert_eq!(
+                dash_half_width(animation, 1.0) * 2.0,
+                line_width,
+                "line_width {line_width}"
+            );
+        }
+    }
+
+    #[test]
+    fn with_line_width_fills_in_only_a_missing_dash_width() {
+        let followed = SegmentAnimations::default().with_line_width(Some(4.0));
+        assert_eq!(followed.dash.width, Some(4.0));
+        // A width set on purpose wins over the line's.
+        let explicit = SegmentAnimations::default()
+            .with(|s| s.dash.width = Some(9.0))
+            .with_line_width(Some(4.0));
+        assert_eq!(explicit.dash.width, Some(9.0));
+        // No default stroke to follow: left to fall back to `DASH_WIDTH`.
+        let none = SegmentAnimations::default().with_line_width(None);
+        assert_eq!(none.dash.width, None);
+        // Nothing else is touched.
+        assert_eq!(
+            followed.with(|s| s.dash.width = None),
+            SegmentAnimations::default()
         );
     }
 

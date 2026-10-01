@@ -1809,6 +1809,11 @@ impl Map {
         // per context) would be pure repeated work.
         let theme = self.theme_colors();
 
+        // The segment effects as the effects and the templates get them: the
+        // ones that follow the default stroke (the dash) already resolved to
+        // its width, so they stay as thick as the line at every zoom.
+        let segment_animation = self.settings.segment_animation.with_line_width(line_width);
+
         for segment in segments.locate_in_envelope_intersecting(query) {
             let raw_line = segment.raw_line();
             let pos_a: Pos2 = (raw_line.points[0] * self.zoom - min_point).into();
@@ -1837,7 +1842,7 @@ impl Map {
                         segment,
                         color: segment_color,
                         theme,
-                        animation: self.settings.segment_animation,
+                        animation: segment_animation,
                     },
                 );
             } else if let Some(width) = line_width {
@@ -1865,11 +1870,11 @@ impl Map {
                             color,
                             theme,
                             kind: state.animation,
-                            animation: self.settings.segment_animation,
+                            animation: segment_animation,
                         },
                     );
                 } else {
-                    let effect = self.settings.segment_animation.state(state.animation);
+                    let effect = segment_animation.state(state.animation);
                     effect(painter, pos_a, pos_b, self.zoom, time, color);
                 }
                 // Persistent effects never finish on their own.
@@ -1890,14 +1895,11 @@ impl Map {
                             color,
                             theme,
                             kind: notification.animation,
-                            animation: self.settings.segment_animation,
+                            animation: segment_animation,
                         },
                     )
                 } else {
-                    let effect = self
-                        .settings
-                        .segment_animation
-                        .event(notification.animation);
+                    let effect = segment_animation.event(notification.animation);
                     effect(
                         painter,
                         pos_a,
@@ -3776,7 +3778,7 @@ mod tests {
             }
         }
 
-        let expected = SegmentAnimations::default().with(|s| s.dash.width = 77.0);
+        let expected = SegmentAnimations::default().with(|s| s.dash.width = Some(77.0));
         let mut map = Map::new();
         map.add_lines(vec![MapSegment::new((1, 2), [0.0, 0.0], [50.0, 0.0])]);
         map.settings.segment_animation = expected;
@@ -3801,5 +3803,59 @@ mod tests {
         assert_eq!(template.base.borrow().as_ref(), Some(&expected));
         assert_eq!(template.notification.borrow().as_ref(), Some(&expected));
         assert_eq!(template.state.borrow().as_ref(), Some(&expected));
+    }
+
+    #[test]
+    fn a_dash_without_a_width_follows_the_default_stroke() {
+        // What a `SegmentTemplate` is handed: the dash width resolved to the
+        // default stroke's (`Style::line_width`), or left to fall back when
+        // there is no stroke, or kept when it was set.
+        #[derive(Default)]
+        struct Recorder(std::cell::RefCell<Option<SegmentAnimations>>);
+        impl SegmentTemplate for Recorder {
+            fn segment_ui(&self, _painter: &Painter, ctx: SegmentContext) {
+                *self.0.borrow_mut() = Some(ctx.animation);
+            }
+            fn segment_notification_ui(
+                &self,
+                _painter: &Painter,
+                _ctx: SegmentNotificationContext,
+            ) -> bool {
+                false
+            }
+            fn segment_state_ui(&self, _painter: &Painter, _ctx: SegmentStateContext) {}
+        }
+
+        let dash_width = |line_width: Option<f32>, dash_width: Option<f32>| -> Option<f32> {
+            let mut map = Map::new();
+            map.add_lines(vec![MapSegment::new((1, 2), [0.0, 0.0], [50.0, 0.0])]);
+            map.settings.style.line_width = line_width;
+            map.settings.segment_animation.dash.width = dash_width;
+            let template = Rc::new(Recorder::default());
+            map.set_segment_template(template.clone());
+            let ctx = Context::default();
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0));
+            let mut output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(screen),
+                    ..RawInput::default()
+                },
+                |ui| {
+                    ui.add(&mut map);
+                },
+            );
+            output.textures_delta.clear();
+            let animation = template.0.borrow().expect("the segment was drawn");
+            animation.dash.width
+        };
+
+        assert_eq!(dash_width(Some(6.0), None), Some(6.0));
+        assert_eq!(dash_width(Some(2.0), None), Some(2.0));
+        assert_eq!(dash_width(None, None), None);
+        assert_eq!(dash_width(Some(6.0), Some(77.0)), Some(77.0));
+        // The settings themselves are not rewritten.
+        let mut map = Map::new();
+        map.settings.style.line_width = Some(6.0);
+        assert_eq!(map.settings.segment_animation.dash.width, None);
     }
 }
