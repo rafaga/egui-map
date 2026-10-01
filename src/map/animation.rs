@@ -525,20 +525,51 @@ impl Default for Pulse {
 pub struct Ripple {
     /// Radius the first ring starts at, in screen pixels at `zoom == 1`.
     pub base_radius: f32,
-    /// Growth of each ring over the whole effect, in screen pixels at
+    /// Growth of each ring over its own life, in screen pixels at
     /// `zoom == 1`. Shared by the `*_outline` variant.
     pub spread: f32,
     /// Ring stroke width, before the `zoom` multiplier.
     pub stroke: f32,
-    /// How long the effect plays, in seconds.
+    /// How long the effect plays, in seconds: from the first ring appearing
+    /// until the last one has faded out. The rings are born one after the
+    /// other, so each lives `3/5` of this.
     pub duration: f32,
 }
+
+/// How many staggered rings [`Animation::ripple`] draws.
+const RIPPLE_RINGS: usize = 3;
 
 impl Ripple {
     /// Runs `f` on a mutable copy of `self` and returns it.
     pub fn with(mut self, f: impl FnOnce(&mut Self)) -> Self {
         f(&mut self);
         self
+    }
+
+    /// How long one ring lives. The last ring is born `RINGS - 1` staggers
+    /// after the first, and has to finish by `duration`, so that no ring is
+    /// cut off when the effect ends.
+    fn ring_life(&self) -> f32 {
+        self.duration * RIPPLE_RINGS as f32 / (2 * RIPPLE_RINGS - 1) as f32
+    }
+
+    /// The progress (`0.0..1.0`) of every ring alive `secs` after the effect
+    /// started. With `looping`, a new ring is born every stagger for ever, so
+    /// the rings keep coming without a break instead of ending after the
+    /// last one. The rings still build up one by one at the start, like the
+    /// one-off effect, and then repeat.
+    fn ring_progress(&self, secs: f32, looping: bool) -> impl Iterator<Item = f32> + use<> {
+        let life = self.ring_life();
+        let stagger = life / RIPPLE_RINGS as f32;
+        (0..RIPPLE_RINGS).filter_map(move |ring| {
+            let local = secs - ring as f32 * stagger;
+            if local < 0.0 {
+                // Not born yet.
+                return None;
+            }
+            let local = if looping { local % life } else { local };
+            (0.0..life).contains(&local).then(|| local / life)
+        })
     }
 }
 
@@ -830,8 +861,9 @@ impl Animation {
     /// One frame of three staggered expanding rings.
     ///
     /// Where [`Animation::pulse`] reads as a single event, the repetition here
-    /// reads as *"activity is ongoing"*. Plays for [`RIPPLE_DURATION`].
-    /// Returns `true` while still playing.
+    /// reads as *"activity is ongoing"*. Plays for [`RIPPLE_DURATION`]: every
+    /// ring is born, spreads and fades out before it ends. Returns `true`
+    /// while still playing.
     pub fn ripple(
         &self,
         painter: &Painter,
@@ -840,25 +872,34 @@ impl Animation {
         initial_time: Instant,
         color: Color32,
     ) -> bool {
-        const RINGS: usize = 3;
         let secs = elapsed(initial_time);
-        let stagger = self.ripple.duration / RINGS as f32;
-
-        let mut shapes = Vec::with_capacity(RINGS);
-        for ring in 0..RINGS {
-            let local = secs - ring as f32 * stagger;
-            if !(0.0..self.ripple.duration).contains(&local) {
-                continue;
-            }
-            let progress = local / self.ripple.duration;
-            shapes.push(Shape::Circle(CircleShape::stroke(
-                center,
-                (self.ripple.base_radius + self.ripple.spread * progress) * zoom,
-                Stroke::new(self.ripple.stroke * zoom, with_alpha(color, 1.0 - progress)),
-            )));
-        }
-        painter.extend(shapes);
+        self.paint_ripple(painter, center, zoom, secs, false, color);
         secs < self.ripple.duration
+    }
+
+    /// The rings of [`Animation::ripple`] `secs` into the effect. With
+    /// `looping`, rings keep being born for ever.
+    fn paint_ripple(
+        &self,
+        painter: &Painter,
+        center: Pos2,
+        zoom: f32,
+        secs: f32,
+        looping: bool,
+        color: Color32,
+    ) {
+        let shapes: Vec<Shape> = self
+            .ripple
+            .ring_progress(secs, looping)
+            .map(|progress| {
+                Shape::Circle(CircleShape::stroke(
+                    center,
+                    (self.ripple.base_radius + self.ripple.spread * progress) * zoom,
+                    Stroke::new(self.ripple.stroke * zoom, with_alpha(color, 1.0 - progress)),
+                ))
+            })
+            .collect();
+        painter.extend(shapes);
     }
 
     /// One frame of a ring that empties clockwise from 12 o'clock.
@@ -1005,9 +1046,56 @@ impl Animation {
         }
     }
 
+    /// The event effect for `kind` as a lasting notification
+    /// ([`NodeHandle::lasting`](crate::map::NodeHandle::lasting)) draws it:
+    /// repeated for as long as the notification lasts, which is up to the
+    /// caller to end. Call it with `(painter, center, zoom, started, color)`,
+    /// where `started` is when the notification began; it always returns
+    /// `true`.
+    ///
+    /// Most effects restart every [`event_duration`](Self::event_duration).
+    /// `ripple` instead keeps a new ring coming every stagger, so there is no
+    /// moment where the effect ends and starts over.
+    pub fn lasting_event(
+        &self,
+        kind: NodeAnimation,
+    ) -> impl Fn(&Painter, Pos2, f32, Instant, Color32) -> bool + 'static {
+        let a = *self;
+        move |painter, center, zoom, started, color| {
+            if kind == NodeAnimation::Ripple {
+                a.paint_ripple(painter, center, zoom, elapsed(started), true, color);
+            } else {
+                let cycle = cycle_start(started, Instant::now(), a.event_duration(kind));
+                a.event(kind)(painter, center, zoom, cycle, color);
+            }
+            true
+        }
+    }
+
+    /// [`Animation::lasting_event`] following an outline, like
+    /// [`Animation::event_outline`]. Call it with
+    /// `(painter, outline, zoom, started, color)`.
+    pub fn lasting_event_outline(
+        &self,
+        kind: NodeAnimation,
+    ) -> impl Fn(&Painter, &NodeOutline, f32, Instant, Color32) -> bool + 'static {
+        let a = *self;
+        move |painter, outline, zoom, started, color| {
+            if kind == NodeAnimation::Ripple {
+                a.paint_ripple_outline(painter, outline, zoom, elapsed(started), true, color);
+            } else {
+                let cycle = cycle_start(started, Instant::now(), a.event_duration(kind));
+                a.event_outline(kind)(painter, outline, zoom, cycle, color);
+            }
+            true
+        }
+    }
+
     /// Length of one cycle of a node event effect, in seconds: how long it
     /// plays once, and how often a lasting notification
-    /// ([`NodeHandle::lasting`](crate::map::NodeHandle::lasting)) restarts it.
+    /// ([`NodeHandle::lasting`](crate::map::NodeHandle::lasting)) restarts it
+    /// -- except `ripple`, which loops without restarting (see
+    /// [`Animation::lasting_event`]).
     pub fn event_duration(&self, kind: NodeAnimation) -> f32 {
         match kind {
             NodeAnimation::Pulse => self.pulse.duration,
@@ -1084,27 +1172,35 @@ impl Animation {
         initial_time: Instant,
         color: Color32,
     ) -> bool {
-        const RINGS: usize = 3;
         let secs = elapsed(initial_time);
-        let stagger = self.ripple.duration / RINGS as f32;
-        let mut shapes = Vec::with_capacity(RINGS);
-        for ring in 0..RINGS {
-            let local = secs - ring as f32 * stagger;
-            if !(0.0..self.ripple.duration).contains(&local) {
-                continue;
-            }
-            let progress = local / self.ripple.duration;
-            shapes.push(
+        self.paint_ripple_outline(painter, outline, zoom, secs, false, color);
+        secs < self.ripple.duration
+    }
+
+    /// The rings of [`Animation::ripple_outline`] `secs` into the effect.
+    /// With `looping`, rings keep being born for ever.
+    fn paint_ripple_outline(
+        &self,
+        painter: &Painter,
+        outline: &NodeOutline,
+        zoom: f32,
+        secs: f32,
+        looping: bool,
+        color: Color32,
+    ) {
+        let shapes: Vec<Shape> = self
+            .ripple
+            .ring_progress(secs, looping)
+            .map(|progress| {
                 outline
                     .grown(self.ripple.spread * progress * zoom)
                     .stroke_shape(Stroke::new(
                         self.ripple.stroke * zoom,
                         with_alpha(color, 1.0 - progress),
-                    )),
-            );
-        }
+                    ))
+            })
+            .collect();
         painter.extend(shapes);
-        secs < self.ripple.duration
     }
 
     /// [`Animation::countdown_arc`] following `outline`: a line just outside
@@ -2273,6 +2369,89 @@ mod tests {
             (reverse - b).length() < 1.0,
             "Reverse must start at `b`, got {reverse:?}"
         );
+    }
+
+    #[test]
+    fn ripple_rings_all_finish_before_the_effect_ends() {
+        // The last ring is born two staggers after the first. If the effect
+        // ended at `duration` with each ring living that long, it would be
+        // cut off a third of the way through its life.
+        let ripple = Ripple::default();
+        let nearly_over = ripple.duration * 0.999;
+        let alive: Vec<f32> = ripple.ring_progress(nearly_over, false).collect();
+        assert_eq!(alive.len(), 1, "only the last ring is left: {alive:?}");
+        assert!(
+            alive[0] > 0.99,
+            "the last ring must have almost finished, got {}",
+            alive[0]
+        );
+        assert_eq!(
+            ripple.ring_progress(ripple.duration, false).count(),
+            0,
+            "nothing is left once the effect has played for `duration`"
+        );
+        // And every ring gets to play from its very start.
+        assert_eq!(ripple.ring_progress(0.0, false).count(), 1);
+    }
+
+    #[test]
+    fn looping_ripple_never_pauses_and_repeats_exactly() {
+        let ripple = Ripple::default();
+        let life = ripple.ring_life();
+        let sorted = |secs: f32| {
+            let mut rings: Vec<f32> = ripple.ring_progress(secs, true).collect();
+            rings.sort_by(f32::total_cmp);
+            rings
+        };
+        // Once the rings have built up (two staggers in).
+        let mut secs = 2.0 * life / RIPPLE_RINGS as f32;
+        while secs < 4.0 * life {
+            let rings = sorted(secs);
+            assert_eq!(rings.len(), RIPPLE_RINGS, "a ring is missing at {secs}s");
+            // The pattern repeats every `life`.
+            for (now, later) in rings.iter().zip(sorted(secs + life)) {
+                assert!((now - later).abs() < 1e-3, "{rings:?} at {secs}s");
+            }
+            secs += 0.05;
+        }
+    }
+
+    #[test]
+    fn lasting_ripple_is_still_drawn_long_after_one_cycle() {
+        let ctx = Context::default();
+        let animation = Animation::default();
+        let rings = |started: Instant| -> usize {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    assert!(
+                        animation.lasting_event(NodeAnimation::Ripple)(
+                            ui.painter(),
+                            Pos2::new(50.0, 50.0),
+                            1.0,
+                            started,
+                            Color32::RED,
+                        ),
+                        "a lasting effect never reports itself finished"
+                    );
+                },
+            );
+            out.textures_delta.clear();
+            out.shapes
+                .iter()
+                .filter(|cs| matches!(cs.shape, egui::epaint::Shape::Circle(_)))
+                .count()
+        };
+        // Right at the start only the first ring exists, as with the
+        // one-off effect; after that, all three at any moment.
+        assert_eq!(rings(Instant::now()), 1);
+        for secs in [4.0_f32, 9.3, 40.0] {
+            let started = Instant::now() - Duration::from_secs_f32(secs);
+            assert_eq!(rings(started), RIPPLE_RINGS, "{secs}s into the effect");
+        }
     }
 
     #[test]

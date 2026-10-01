@@ -17,6 +17,11 @@ any minor bump may include breaking changes, called out below as such).
   `glow_band` and `chevrons`; `flash` lights the whole line at once and has
   none. Before, reversing a lasting effect meant swapping the endpoints of the
   segment itself.
+- `Animation::lasting_event` and `Animation::lasting_event_outline` draw a
+  node event effect the way a lasting notification does (repeated, with the
+  `ripple` looping seamlessly), for a `NodeTemplate` that draws the effect
+  itself. `NotificationContext::effect_start`, which restarts the effect every
+  cycle, keeps working but cannot loop a `ripple` seamlessly.
 - `CometDirection::orient(a, b)` returns the `(from, to)` pair an effect runs
   along in that direction, for a `SegmentTemplate` that draws the effect
   itself. `SegmentStateContext` and `SegmentNotificationContext` have a new
@@ -85,7 +90,8 @@ any minor bump may include breaking changes, called out below as such).
 - `examples/basic.rs`: removed a paragraph of the header that was repeated.
 - `examples/animations.rs` is a visual catalog of the built-in effects on a
   grid, so nothing overlaps: the node effects on the left (the lasting ones,
-  the event ones, and `pulse` with `NodeHandle::lasting`) and the segment
+  including a `ripple` that never breaks, the event ones, and `pulse` with
+  `NodeHandle::lasting`) and the segment
   effects on the right, one segment each. Two `RegionLabel`s title the
   blocks, and the window has the theme combo box and the tooltip of
   `examples/basic.rs`, plus *Forward*/*Reverse* radio buttons that set the
@@ -98,6 +104,16 @@ any minor bump may include breaking changes, called out below as such).
   ids (1 to 3), so the third one was out of range and the connections went
   to the wrong nodes. The nodes are now keyed by id in a `HashMap` like the
   other examples.
+- The `ripple` effect no longer cuts its last rings off. The three rings are
+  born one after the other, but the effect ended at `Ripple::duration`, so the
+  second and third ones vanished a third and two thirds of the way through
+  their fade. `Ripple::duration` is still how long the effect plays, now from
+  the first ring appearing until the last one has faded out, so each ring
+  lives `3/5` of it (it spreads faster than before for the same `spread`).
+- A `ripple` with `NodeHandle::lasting` repeats with no break. It restarted
+  from a single ring every `duration`, which read as the effect ending and
+  starting over. It now builds up its three rings once and then keeps a new
+  one coming every stagger, until the notification ends.
 - Region labels are laid out again when `pixels_per_point` changes (the
   window moved to a screen with another scale): the cached galleys were
   reused at the old scale, drawn blurry and made epaint warn on every frame.
