@@ -30,9 +30,20 @@ any minor bump may include breaking changes, called out below as such).
     own.
   - `Animation::dash` no longer uses its `zoom` argument; it stays so every
     steady segment effect keeps the same signature.
+- `examples/basic.rs` shows the first things an application reaches for: a
+  combo box with the built-in themes next to egui's light/dark/system
+  buttons (`Map::set_theme`), a tooltip on the node under the pointer
+  (`Map::hovered_node`) and a button that sets and clears a marker
+  (`Map::update_marker`, `Map::remove_marker`, whose return value tells
+  whether there was one). The segment between Alpha and Beta is a dashed line
+  whose pattern slides along it ("marching ants", `Map::segment(..).dash()`).
 
 ### Fixed
 
+- `examples/basic.rs` panicked at start-up: it indexed a `Vec` with the node
+  ids (1 to 3), so the third one was out of range and the connections went
+  to the wrong nodes. The nodes are now keyed by id in a `HashMap` like the
+  other examples.
 - Region labels are laid out again when `pixels_per_point` changes (the
   window moved to a screen with another scale): the cached galleys were
   reused at the old scale, drawn blurry and made epaint warn on every frame.

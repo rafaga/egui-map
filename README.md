@@ -214,7 +214,7 @@ map.settings.style.region_label_font = FontId::new(30.0, FontFamily::Monospace);
 
 ### Custom themes
 
-The widget ships fifteen named [`Theme`](https://docs.rs/egui-map/latest/egui_map/map/theme/enum.Theme.html) palettes — `SystemDefault`, which carries over egui's own default colors so an unthemed map looks like plain egui, is the default — each with a light and a dark variant; see the `Theme` rustdoc for the full list. Switch between them, or install your own palette, with `Map::set_theme` and the `MapTheme` trait:
+The widget ships fifteen named [`Theme`](https://docs.rs/egui-map/latest/egui_map/map/theme/enum.Theme.html) palettes — `SystemDefault`, which carries over egui's own default colors so an unthemed map looks like plain egui, is the default — each with a light and a dark variant; see the `Theme` rustdoc for the full list. `examples/basic.rs` lists them in a combo box and switches the map live, next to egui's own light/dark/system buttons. Switch between them, or install your own palette, with `Map::set_theme` and the `MapTheme` trait:
 
 ```rust
 use egui_map::map::theme::{ColorMode, MapTheme, Theme, ThemeColors};
