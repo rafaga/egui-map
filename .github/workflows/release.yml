@@ -1,0 +1,67 @@
+name: Publish to crates.io
+
+# Publishes the crate when a GitHub release is published. The release tag has
+# to match the version in `Cargo.toml` (`v0.13.0` or `0.13.0` for version
+# 0.13.0), otherwise nothing is published.
+#
+# Run by hand ("Run workflow") it only packages the crate and runs
+# `cargo publish --dry-run`, to try the release without publishing anything.
+#
+# Authentication is crates.io "trusted publishing": no token is stored in the
+# repository. It has to be configured once on crates.io, under the crate's
+# Settings > Trusted Publishing: repository owner `rafaga`, this repository,
+# workflow file `release.yml`.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# One publish at a time; a second run waits instead of racing the first.
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_NET_RETRY: 10
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The token that trusted publishing exchanges is minted from this one.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Check that the tag matches the version in Cargo.toml
+        if: github.event_name == 'release'
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$version" != "$tag" ]; then
+            echo "::error::the release tag is '$GITHUB_REF_NAME' but Cargo.toml says version $version"
+            exit 1
+          fi
+
+      # Packages the crate and builds it from the package, as crates.io would.
+      - name: Dry run
+        run: cargo publish --dry-run
+
+      - name: Authenticate with crates.io
+        if: github.event_name == 'release'
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Publish
+        if: github.event_name == 'release'
+        run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
