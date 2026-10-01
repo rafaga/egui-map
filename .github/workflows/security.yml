@@ -1,0 +1,33 @@
+name: Security
+
+# Advisories (RustSec), licenses, banned or duplicated crates and unknown
+# sources, from `deny.toml`. It runs weekly too, because a new advisory can
+# appear against dependencies that have not changed.
+on:
+  schedule:
+    - cron: "0 6 * * 1"
+  pull_request:
+    branches: [master, dev]
+    paths:
+      - "Cargo.toml"
+      - "deny.toml"
+      - ".github/workflows/security.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
