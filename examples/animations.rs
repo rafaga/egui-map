@@ -12,8 +12,11 @@
 //!   repeats and fades out for a few seconds instead of playing once.
 //! - **Segment effects** (right), one segment each, between two plain nodes.
 //!   Lasting: `comet`, `dash`, `glow_band`, `chevrons`. Event: `flash`,
-//!   `comet_once` travelling `Forward` and `Reverse` -- both fire on the same
-//!   timer, but the dot starts from opposite ends -- and `wipe`.
+//!   `comet_once` and `wipe`. Every one but `flash` has a direction, set with
+//!   `Map::segment(..).direction(..)` before the effect, and the *Direction*
+//!   radio buttons in the window pick it for all of them: `Forward` runs from
+//!   the first endpoint of the segment to the second, `Reverse` the other
+//!   way. `flash` lights the whole line at once and has no direction.
 //!
 //! Every event timer fires independently and at a different period, so
 //! several different animations are usually playing at once rather than
@@ -30,6 +33,7 @@ use eframe::egui::{self, FontId};
 use egui_map::map::Map;
 use egui_map::map::objects::{CometDirection, MapPoint, MapSegment, RegionLabel};
 use egui_map::map::theme::Theme;
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
@@ -68,9 +72,10 @@ const NODE_EFFECTS: [&str; 9] = [
 ];
 
 /// The segment effects: the lasting ones in the first column, the event ones
-/// in the second.
+/// in the second. All of them follow the direction picked in the window
+/// except `flash`, which lights the whole line at once.
 const LASTING_SEGMENTS: [&str; 4] = ["comet", "dash", "glow_band", "chevrons"];
-const EVENT_SEGMENTS: [&str; 4] = ["flash", "comet_once forward", "comet_once reverse", "wipe"];
+const EVENT_SEGMENTS: [&str; 3] = ["flash", "comet_once", "wipe"];
 
 /// Distance between the nodes of the grid, and between the rows of segments.
 const NODE_STEP: [f32; 2] = [135.0, 105.0];
@@ -126,6 +131,23 @@ fn on_node(
     })
 }
 
+/// Starts the lasting segment effects, running the way `direction` says. Run
+/// it again when the direction changes: it replaces the previous state.
+fn start_lasting(map: &mut Map, ids: &HashMap<&str, (usize, usize)>, direction: CometDirection) {
+    for name in LASTING_SEGMENTS {
+        let segment = map
+            .segment(ids[name])
+            .expect("the segment is loaded")
+            .direction(direction);
+        match name {
+            "comet" => segment.comet(),
+            "dash" => segment.dash(),
+            "glow_band" => segment.glow_band(),
+            _ => segment.chevrons(),
+        }
+    }
+}
+
 /// A repeater for a segment effect.
 fn on_segment(
     id: (usize, usize),
@@ -164,12 +186,16 @@ fn main() -> eframe::Result<()> {
     }
 
     // The segments, on the right: each one between a node named after the
-    // effect and a plain one. Ids are `(left, right)`.
+    // effect and a plain one. Ids are `(left, right)`, and all of them run
+    // from left to right, so `Forward` goes that way and `Reverse` the other.
     let mut segments = Vec::new();
     let mut segment_ids: HashMap<&str, (usize, usize)> = HashMap::new();
     let mut next_id = NODE_EFFECTS.len() + 1;
-    for (column, effects) in [LASTING_SEGMENTS, EVENT_SEGMENTS].into_iter().enumerate() {
-        for (row, name) in effects.into_iter().enumerate() {
+    for (column, effects) in [&LASTING_SEGMENTS[..], &EVENT_SEGMENTS[..]]
+        .into_iter()
+        .enumerate()
+    {
+        for (row, name) in effects.iter().enumerate() {
             let (left, right) = (next_id, next_id + 1);
             next_id += 2;
             let x = -10.0 + 200.0 * column as f32;
@@ -218,18 +244,11 @@ fn main() -> eframe::Result<()> {
     map.node(1).expect("halo is loaded").halo();
     map.node(2).expect("blink is loaded").blink();
     map.node(3).expect("orbit is loaded").orbit();
-    map.segment(segment_ids["comet"])
-        .expect("comet is loaded")
-        .comet();
-    map.segment(segment_ids["dash"])
-        .expect("dash is loaded")
-        .dash();
-    map.segment(segment_ids["glow_band"])
-        .expect("glow_band is loaded")
-        .glow_band();
-    map.segment(segment_ids["chevrons"])
-        .expect("chevrons is loaded")
-        .chevrons();
+    // A segment effect runs from the first endpoint to the second unless
+    // `direction` says otherwise. The window picks it, and the event effects
+    // read it each time they fire.
+    let direction = Rc::new(Cell::new(CometDirection::Forward));
+    start_lasting(&mut map, &segment_ids, direction.get());
 
     // Event effects: each on its own independent, non-synchronized timer, so
     // several different animations are usually playing at once.
@@ -246,14 +265,13 @@ fn main() -> eframe::Result<()> {
         on_segment(segment_ids["flash"], 1800, 300, |segment, at| {
             segment.flash(at)
         }),
-        on_segment(segment_ids["comet_once forward"], 2000, 0, |segment, at| {
-            segment.comet_once(at, CometDirection::Forward)
+        on_segment(segment_ids["comet_once"], 2000, 0, {
+            let direction = Rc::clone(&direction);
+            move |segment, at| segment.direction(direction.get()).comet_once(at)
         }),
-        on_segment(segment_ids["comet_once reverse"], 2000, 0, |segment, at| {
-            segment.comet_once(at, CometDirection::Reverse)
-        }),
-        on_segment(segment_ids["wipe"], 2200, 600, |segment, at| {
-            segment.wipe(at)
+        on_segment(segment_ids["wipe"], 2200, 600, {
+            let direction = Rc::clone(&direction);
+            move |segment, at| segment.direction(direction.get()).wipe(at)
         }),
     ];
 
@@ -286,6 +304,18 @@ fn main() -> eframe::Result<()> {
                     // Light, dark or the system's: the map resolves its colors
                     // for whichever mode egui is in.
                     egui::widgets::global_theme_preference_buttons(ui);
+                    ui.separator();
+                    // The direction of the segment effects. Exclusive, so
+                    // radio buttons. The lasting effects are started again
+                    // with the new one; the event ones read it when they fire.
+                    ui.label("Direction");
+                    let mut chosen = direction.get();
+                    ui.radio_value(&mut chosen, CometDirection::Forward, "Forward");
+                    ui.radio_value(&mut chosen, CometDirection::Reverse, "Reverse");
+                    if chosen != direction.get() {
+                        direction.set(chosen);
+                        start_lasting(&mut map, &segment_ids, chosen);
+                    }
                 });
             });
             egui::CentralPanel::default().show(ui, |ui| {

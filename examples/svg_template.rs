@@ -12,11 +12,11 @@
 //!   paints the icon and its name, and [`NodeTemplate::outline`], which says
 //!   the node is the rounded square around the icon. The selection ring and
 //!   `Map::hovered_node`, which shows a tooltip here, follow that outline.
-//! - **The direction of the ants.** A dash slides from the start of a segment
-//!   to its end, so each time the path changes the lines are loaded again
-//!   (`Map::add_lines`) with every segment of the path pointing the way the
-//!   data goes, and the effect is started on those segments
-//!   (`Map::segment(..).dash()`) after clearing the old ones.
+//! - **The direction of the ants.** A dash slides from the first endpoint of a
+//!   segment to its second, so a hop of the path taken the other way is
+//!   started with `Map::segment(..).direction(CometDirection::Reverse)`.
+//!   Each time the path changes, the old effects are cleared and the new ones
+//!   started (`Map::segment(..).dash()`).
 //! - **The rest of the window** is the one of `examples/basic.rs`: a combo box
 //!   with the built-in themes next to egui's light/dark/system buttons
 //!   (`Map::set_theme`).
@@ -26,7 +26,7 @@
 use eframe::egui::{self, Align2, Vec2};
 use egui_map::map::Map;
 use egui_map::map::objects::{
-    HitContext, MapPoint, MapSegment, NodeContext, NodeOutline, NodeTemplate,
+    CometDirection, HitContext, MapPoint, MapSegment, NodeContext, NodeOutline, NodeTemplate,
 };
 use egui_map::map::theme::Theme;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -178,35 +178,27 @@ fn shortest_path(from: usize, to: usize) -> Vec<usize> {
     Vec::new()
 }
 
-/// Loads the lines again, with the ones of `path` pointing the way it goes,
-/// and starts the marching ants on them.
-fn show_path(map: &mut Map, coords: &HashMap<usize, [f32; 2]>, path: &[usize]) {
+/// Clears the marching ants of the previous path and starts them on the
+/// segments of `path`, sliding the way the data goes.
+fn show_path(map: &mut Map, path: &[usize]) {
     for id in LINKS {
         if let Some(segment) = map.segment(id) {
             segment.clear();
         }
     }
-    let hops: Vec<(usize, usize)> = path.windows(2).map(|hop| (hop[0], hop[1])).collect();
-    let segments = LINKS
-        .iter()
-        .map(|&(a, b)| {
-            // The ants slide from the start of a segment to its end.
-            let (from, to) = if hops.contains(&(b, a)) {
-                (b, a)
-            } else {
-                (a, b)
-            };
-            MapSegment::new((a, b), coords[&from], coords[&to])
-        })
-        .collect();
-    map.add_lines(segments);
-    for (a, b) in hops {
-        let id = if LINKS.contains(&(a, b)) {
-            (a, b)
+    for hop in path.windows(2) {
+        let (a, b) = (hop[0], hop[1]);
+        // A segment is stored as `(first, second)`, and its ants slide from
+        // the first to the second: a hop taken the other way runs `Reverse`.
+        let (id, direction) = if LINKS.contains(&(a, b)) {
+            ((a, b), CometDirection::Forward)
         } else {
-            (b, a)
+            ((b, a), CometDirection::Reverse)
         };
-        map.segment(id).expect("the path follows the links").dash();
+        map.segment(id)
+            .expect("the path follows the links")
+            .direction(direction)
+            .dash();
     }
 }
 
@@ -215,16 +207,16 @@ fn main() -> eframe::Result<()> {
     //    combo boxes.
     let mut points: HashMap<usize, MapPoint> = HashMap::new();
     let mut names: HashMap<usize, &str> = HashMap::new();
-    let mut coords: HashMap<usize, [f32; 2]> = HashMap::new();
     for (id, name, _, x, y) in NODES {
         let mut point = MapPoint::new(id, [x, y]);
         point.set_name(name.to_string());
-        coords.insert(id, point.coords);
         points.insert(id, point);
         names.insert(id, name);
     }
 
-    // 2. Register each connection id on BOTH endpoint nodes.
+    // 2. Register each connection id on BOTH endpoint nodes, and build the
+    //    line geometry keyed by the same id.
+    let mut segments = Vec::new();
     for line_id in LINKS {
         for endpoint in [line_id.0, line_id.1] {
             points
@@ -233,12 +225,14 @@ fn main() -> eframe::Result<()> {
                 .connections
                 .push(line_id);
         }
+        let (from, to) = (points[&line_id.0].coords, points[&line_id.1].coords);
+        segments.push(MapSegment::new(line_id, from, to));
     }
 
-    // 3. Load the nodes and install the template; the lines are loaded by
-    //    `show_path`.
+    // 3. Load the nodes, then the lines, and install the template.
     let mut map = Map::new();
     map.add_hashmap_points(points);
+    map.add_lines(segments);
     map.set_node_template(Rc::new(NetworkNodes));
 
     let computers: Vec<usize> = NODES
@@ -248,7 +242,7 @@ fn main() -> eframe::Result<()> {
         .collect();
     let (mut from, mut to) = (8, 12);
     let mut path = shortest_path(from, to);
-    show_path(&mut map, &coords, &path);
+    show_path(&mut map, &path);
 
     let mut theme = Theme::default();
     let mut loaders_installed = false;
@@ -292,7 +286,7 @@ fn main() -> eframe::Result<()> {
                     }
                     if changed {
                         path = shortest_path(from, to);
-                        show_path(&mut map, &coords, &path);
+                        show_path(&mut map, &path);
                     }
                 });
                 let route: Vec<&str> = path.iter().map(|id| names[id]).collect();

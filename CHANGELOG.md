@@ -8,8 +8,29 @@ any minor bump may include breaking changes, called out below as such).
 
 ## [Unreleased]
 
+### Added
+
+- `SegmentHandle::direction(CometDirection)`: a modifier, like `color`, that
+  says which endpoint a segment effect runs from -- `Forward` (the default)
+  from the first endpoint to the second, `Reverse` the other way. It applies
+  to every directional effect: `comet_once`, `wipe`, `comet`, `dash`,
+  `glow_band` and `chevrons`; `flash` lights the whole line at once and has
+  none. Before, reversing a lasting effect meant swapping the endpoints of the
+  segment itself.
+- `CometDirection::orient(a, b)` returns the `(from, to)` pair an effect runs
+  along in that direction, for a `SegmentTemplate` that draws the effect
+  itself. `SegmentStateContext` and `SegmentNotificationContext` have a new
+  `direction` field with the direction that was asked for.
+
 ### Changed
 
+- **Breaking:** `comet_once` takes its direction like every other segment
+  effect, with the modifier: `segment.direction(CometDirection::Reverse)
+  .comet_once(at)` instead of `segment.comet_once(at, CometDirection::Reverse)`.
+  `SegmentAnimation::Comet` no longer carries a `CometDirection`. The `event`
+  and `state` dispatchers of `SegmentAnimations` run from the first point they
+  are given to the second, so a caller applies the direction first with
+  `CometDirection::orient`.
 - **Breaking:** the ribbon of the `dash` segment effect ("marching ants") is
   as thick as the line it runs over, at every zoom. Its width was
   `Dash::width * zoom` (3 by default) while the default stroke has a constant
@@ -55,8 +76,9 @@ any minor bump may include breaking changes, called out below as such).
   icon). Two combo boxes pick a source and a destination computer; the
   shortest path between them gets the `dash` segment effect ("marching
   ants"), sliding from the source to the destination through the switches and
-  routers in between. The lines are loaded again (`Map::add_lines`) each time
-  so the segments of the path point the way the data goes. The window has the
+  routers in between. A hop taken against the way its segment was defined runs
+  `Reverse` (`SegmentHandle::direction`), so the ants always go the way the
+  data goes. The window has the
   theme combo box and the tooltip of `examples/basic.rs`. The old example
   indexed a `Vec` with node ids that start at 1, which paired the wrong nodes
   in the segments.
@@ -66,8 +88,9 @@ any minor bump may include breaking changes, called out below as such).
   the event ones, and `pulse` with `NodeHandle::lasting`) and the segment
   effects on the right, one segment each. Two `RegionLabel`s title the
   blocks, and the window has the theme combo box and the tooltip of
-  `examples/basic.rs`. The timers are one generic repeater instead of one per
-  kind of effect.
+  `examples/basic.rs`, plus *Forward*/*Reverse* radio buttons that set the
+  direction of every segment effect that has one. The timers are one generic
+  repeater instead of one per kind of effect.
 
 ### Fixed
 

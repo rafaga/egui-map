@@ -47,9 +47,7 @@
 //! `segment_notification_ui` / `segment_state_ui`, remembering to call
 //! `painter.ctx().request_repaint()` itself.
 
-use super::objects::{
-    CometDirection, NodeAnimation, SegmentAnimation, SteadyAnimation, SteadySegmentAnimation,
-};
+use super::objects::{NodeAnimation, SegmentAnimation, SteadyAnimation, SteadySegmentAnimation};
 use super::outline::{NodeOutline, partial_perimeter, point_along};
 use egui::{
     Color32, ColorImage, Context, CornerRadius, Id, Mesh, Painter, Pos2, Rect, Shape, Stroke,
@@ -1278,7 +1276,11 @@ impl SegmentAnimations {
     // -------------------------------------------------------- events/segment
 
     /// The event effect for a segment `kind`, bound to this `SegmentAnimations`'
-    /// tunables. Call it with `(painter, a, b, zoom, initial_time, color)`.
+    /// tunables. Call it with `(painter, from, to, zoom, initial_time, color)`.
+    ///
+    /// The effect runs from `from` towards `to`: to run it in a
+    /// [`CometDirection`](super::objects::CometDirection), get the pair from
+    /// [`CometDirection::orient`](super::objects::CometDirection::orient).
     pub fn event(
         &self,
         kind: SegmentAnimation,
@@ -1288,20 +1290,18 @@ impl SegmentAnimations {
             SegmentAnimation::FlashDecay => {
                 a.flash_decay(painter, from, to, zoom, initial_time, color)
             }
-            SegmentAnimation::Comet(direction) => {
-                let (from, to) = match direction {
-                    CometDirection::Forward => (from, to),
-                    CometDirection::Reverse => (to, from),
-                };
-                a.comet_once(painter, [from, to], zoom, initial_time, color)
-            }
+            SegmentAnimation::Comet => a.comet_once(painter, [from, to], zoom, initial_time, color),
             SegmentAnimation::Wipe => a.wipe(painter, from, to, zoom, initial_time, color),
         }
     }
 
     /// The persistent effect for a segment `kind`, bound to this
     /// `SegmentAnimations`' tunables. Call it with
-    /// `(painter, a, b, zoom, time, color)`.
+    /// `(painter, from, to, zoom, time, color)`.
+    ///
+    /// The effect runs from `from` towards `to`: to run it in a
+    /// [`CometDirection`](super::objects::CometDirection), get the pair from
+    /// [`CometDirection::orient`](super::objects::CometDirection::orient).
     pub fn state(
         &self,
         kind: SteadySegmentAnimation,
@@ -1346,7 +1346,9 @@ impl SegmentAnimations {
     ///
     /// `endpoints` is `[from, to]`, already oriented the way the dot should
     /// travel: the caller resolves a [`CometDirection`](super::objects::CometDirection)
-    /// into that pair (see [`SegmentAnimations::event`]). Plays for
+    /// into that pair with
+    /// [`CometDirection::orient`](super::objects::CometDirection::orient).
+    /// Plays for
     /// [`CometOnce::duration`]. Returns `true` while still playing.
     pub fn comet_once(
         &self,
@@ -1852,6 +1854,7 @@ impl Animation {
 
 #[cfg(test)]
 mod tests {
+    use super::super::objects::CometDirection;
     use super::*;
     use egui::{Context, LayerId, Vec2};
     use std::time::Duration;
@@ -2223,9 +2226,10 @@ mod tests {
     fn comet_once_direction_picks_the_starting_endpoint() {
         // The dot must sit on the starting endpoint at the very start --
         // `a` for `Forward`, `b` for `Reverse` -- not partway along the
-        // segment. The direction is resolved by the `event` dispatcher, which
-        // is what `map.rs` and templates go through, so drive it from there
-        // and read the circle's center back out.
+        // segment. The direction is resolved by `CometDirection::orient`,
+        // which is what `map.rs` and templates go through before calling the
+        // `event` dispatcher, so drive it the same way and read the circle's
+        // center back out.
         let ctx = Context::default();
         let a = Pos2::ZERO;
         let b = Pos2::new(50.0, 0.0);
@@ -2237,10 +2241,11 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    animation.event(SegmentAnimation::Comet(direction))(
+                    let (from, to) = direction.orient(a, b);
+                    animation.event(SegmentAnimation::Comet)(
                         ui.painter(),
-                        a,
-                        b,
+                        from,
+                        to,
                         1.0,
                         Instant::now(),
                         Color32::RED,
