@@ -1804,21 +1804,27 @@ impl Map {
                 out.nodes_to_remove.push(system_id);
             }
         } else {
-            let effect = self.settings.animation.event(notification.animation);
-            // A lasting notification restarts the effect every
-            // cycle until `until`; a plain one plays it once.
-            let started = if notification.until.is_some() {
-                animation::cycle_start(
+            // A lasting notification repeats the effect until `until`; a
+            // plain one plays it once.
+            let running = if notification.until.is_some() {
+                self.settings
+                    .animation
+                    .lasting_event(notification.animation)(
+                    pass.paint,
+                    viewport_point.into(),
+                    self.zoom,
                     notification.started,
-                    pass.now,
-                    self.settings
-                        .animation
-                        .event_duration(notification.animation),
+                    color,
                 )
             } else {
-                notification.started
+                self.settings.animation.event(notification.animation)(
+                    pass.paint,
+                    viewport_point.into(),
+                    self.zoom,
+                    notification.started,
+                    color,
+                )
             };
-            let running = effect(pass.paint, viewport_point.into(), self.zoom, started, color);
             if running || notification.until.is_some() {
                 out.needs_repaint = true;
             } else {

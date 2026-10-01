@@ -6,10 +6,12 @@
 //! every segment shows exactly one effect, named after it:
 //!
 //! - **Node effects** (left), one node each. Lasting ones are visible
-//!   immediately and forever: `halo`, `blink`, `orbit`. Event ones are fired
-//!   again on a timer of their own: `pulse`, `ripple`, `countdown`,
-//!   `scale_in`, `crosshair`, and `pulse` with `NodeHandle::lasting`, which
-//!   repeats and fades out for a few seconds instead of playing once.
+//!   immediately and forever: `halo`, `blink`, `orbit`, and `ripple` with
+//!   `NodeHandle::lasting`, which keeps a new ring coming with no break where
+//!   it ends and starts over. Event ones are fired again on a timer of their
+//!   own: `pulse`, `countdown`, `scale_in`, `crosshair`, and `pulse` with
+//!   `NodeHandle::lasting` too, which repeats and fades out for a few seconds
+//!   instead of playing once.
 //! - **Segment effects** (right), one segment each, between two plain nodes.
 //!   Lasting: `comet`, `dash`, `glow_band`, `chevrons`. Event: `flash`,
 //!   `comet_once` and `wipe`. Every one but `flash` has a direction, set with
@@ -244,6 +246,13 @@ fn main() -> eframe::Result<()> {
     map.node(1).expect("halo is loaded").halo();
     map.node(2).expect("blink is loaded").blink();
     map.node(3).expect("orbit is loaded").orbit();
+    // The ripple is a lasting notification, started once: a new ring is born
+    // every moment, with no break where the effect ends and starts over. It
+    // fades out slowly over the duration it is given (an hour, here).
+    map.node(5)
+        .expect("ripple is loaded")
+        .lasting(Duration::from_secs(3600))
+        .ripple(Instant::now());
     // A segment effect runs from the first endpoint to the second unless
     // `direction` says otherwise. The window picks it, and the event effects
     // read it each time they fire.
@@ -254,7 +263,6 @@ fn main() -> eframe::Result<()> {
     // several different animations are usually playing at once.
     let mut repeaters = vec![
         on_node(4, 2200, 0, |node, at| node.pulse(at)),
-        on_node(5, 2600, 400, |node, at| node.ripple(at)),
         on_node(6, 3000, 900, |node, at| node.countdown(at)),
         on_node(7, 1800, 200, |node, at| node.scale_in(at)),
         on_node(8, 2400, 700, |node, at| node.crosshair(at)),

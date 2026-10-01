@@ -1203,18 +1203,27 @@ pub trait NodeTemplate {
     ///
     /// The default draws the requested effect along the node's
     /// [`outline`](NodeTemplate::outline) ([`Animation::event_outline`],
-    /// using [`ctx.animation`](NotificationContext::animation)),
-    /// restarting it every cycle while a lasting notification runs
-    /// ([`NotificationContext::effect_start`]).
+    /// using [`ctx.animation`](NotificationContext::animation)), and while a
+    /// lasting notification runs, repeats it ([`Animation::lasting_event_outline`]).
     fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
         let outline = self.outline(ctx.hit());
-        let running = ctx.animation.event_outline(ctx.kind)(
-            ui.painter(),
-            &outline,
-            ctx.zoom,
-            ctx.effect_start(),
-            ctx.color,
-        );
+        let running = if ctx.until.is_some() {
+            ctx.animation.lasting_event_outline(ctx.kind)(
+                ui.painter(),
+                &outline,
+                ctx.zoom,
+                ctx.initial_time,
+                ctx.color,
+            )
+        } else {
+            ctx.animation.event_outline(ctx.kind)(
+                ui.painter(),
+                &outline,
+                ctx.zoom,
+                ctx.initial_time,
+                ctx.color,
+            )
+        };
         ui.ctx().request_repaint();
         running || ctx.until.is_some()
     }
@@ -1347,6 +1356,11 @@ impl NotificationContext<'_> {
     /// The moment to draw the effect from: `initial_time` for a one-off
     /// notification; for a lasting one (`until`), the start of the current
     /// cycle, so the effect repeats (see [`animation::cycle_start`]).
+    ///
+    /// The effect restarts every cycle, so one made of several staggered
+    /// parts (`ripple`) starts over from a single ring at each restart. Draw
+    /// with [`Animation::lasting_event`] (or `lasting_event_outline`) and
+    /// `initial_time` instead for a repetition with no break.
     pub fn effect_start(&self) -> Instant {
         match self.until {
             Some(_) => animation::cycle_start(

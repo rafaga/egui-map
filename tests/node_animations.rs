@@ -151,6 +151,66 @@ fn event_effects_stop_painting_once_finished() {
     }
 }
 
+/// How many stroked circles a frame paints (the rings of a ripple).
+fn rings(shapes: &[Kind]) -> usize {
+    shapes.iter().filter(|k| **k == Kind::StrokedCircle).count()
+}
+
+#[test]
+fn a_lasting_ripple_keeps_all_its_rings_across_cycles() {
+    // Far past one `ripple` (3.5 s) and still inside the notification: a
+    // restart at the end of every cycle would cut the rings off and begin
+    // again from one. A lasting ripple keeps all three coming.
+    for seconds in [4, 9, 25] {
+        let mut map = map_with_one_node();
+        map.node(1)
+            .unwrap()
+            .lasting(Duration::from_secs(60))
+            .ripple(Instant::now() - Duration::from_secs(seconds));
+        assert_eq!(
+            rings(&render(&mut map)),
+            3,
+            "{seconds} s into a lasting ripple"
+        );
+    }
+}
+
+#[test]
+fn a_lasting_ripple_builds_up_from_one_ring() {
+    let mut map = map_with_one_node();
+    map.node(1)
+        .unwrap()
+        .lasting(Duration::from_secs(60))
+        .ripple(Instant::now());
+    assert_eq!(rings(&render(&mut map)), 1);
+}
+
+#[test]
+fn a_lasting_ripple_follows_the_outline_of_a_template() {
+    use egui_map::map::objects::{HitContext, NodeContext, NodeOutline, NodeTemplate};
+    use std::rc::Rc;
+
+    // Only `node_ui` and `outline`: the notification is the default hook.
+    struct Plain;
+    impl NodeTemplate for Plain {
+        fn node_ui(&self, _ui: &mut egui::Ui, _ctx: NodeContext) {}
+        fn outline(&self, ctx: HitContext) -> NodeOutline {
+            NodeOutline::Circle {
+                center: ctx.position,
+                radius: 4.0 * ctx.zoom,
+            }
+        }
+    }
+
+    let mut map = map_with_one_node();
+    map.set_node_template(Rc::new(Plain));
+    map.node(1)
+        .unwrap()
+        .lasting(Duration::from_secs(60))
+        .ripple(Instant::now() - Duration::from_secs(9));
+    assert_eq!(rings(&render(&mut map)), 3);
+}
+
 /// If the dispatch ignored the recorded choice these would coincide.
 #[test]
 fn the_effect_painted_is_the_one_requested() {
