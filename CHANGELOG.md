@@ -49,6 +49,17 @@ any minor bump may include breaking changes, called out below as such).
   One node glows (`Animation::glow_outline`, driven by `NodeContext::marker`),
   a segment has marching ants, and the window has the theme combo box, the
   tooltip and the marker button of `examples/basic.rs`.
+- `examples/svg_template.rs` simulates a computer network: three routers,
+  four switches and eight computers, drawn as SVG icons by a `NodeTemplate`
+  that implements only `node_ui` and `outline` (a rounded square around the
+  icon). Two combo boxes pick a source and a destination computer; the
+  shortest path between them gets the `dash` segment effect ("marching
+  ants"), sliding from the source to the destination through the switches and
+  routers in between. The lines are loaded again (`Map::add_lines`) each time
+  so the segments of the path point the way the data goes. The window has the
+  theme combo box and the tooltip of `examples/basic.rs`. The old example
+  indexed a `Vec` with node ids that start at 1, which paired the wrong nodes
+  in the segments.
 - `examples/basic.rs`: removed a paragraph of the header that was repeated.
 
 ### Fixed
