@@ -182,7 +182,7 @@ impl SegmentTemplate for MySegments {
 map.set_segment_template(std::rc::Rc::new(MySegments));
 ```
 
-`examples/animations.rs` shows the built-in node and segment effects end to end, with no custom template at all. `examples/node_template_animations.rs` shows the opposite pairing: a custom `NodeTemplate` (its own node shape) that still reuses the built-in `Animation::*` functions from its `notification_ui`/`marker_ui` hooks instead of hand-rolling new ones, dispatching directly on the `kind`/`node_id` those hooks receive.
+`examples/animations.rs` is a visual catalog of the built-in node and segment effects, with no custom template at all. `examples/custom_template.rs` is the shortest custom `NodeTemplate`: it paints the node and declares its outline, and the selection, notifications and marker are the defaults drawn along that outline. `examples/node_template_animations.rs` does the same with hexagonal nodes, a glow and a segment with marching ants.
 
 ### Region labels
 
