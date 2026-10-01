@@ -916,7 +916,11 @@ pub enum SteadyAnimation {
     Orbit,
 }
 
-/// Which endpoint a [`SegmentAnimation::Comet`] pass starts from.
+/// Which way a segment effect runs: which endpoint it starts from.
+///
+/// Chosen with [`SegmentHandle::direction`](super::SegmentHandle::direction),
+/// for every directional segment effect (`comet_once`, `wipe`, `comet`,
+/// `dash`, `glow_band` and `chevrons`).
 ///
 /// A segment's own endpoint order (`a`, `b` as loaded through
 /// [`Map::add_lines`](super::Map::add_lines)) is not usually meaningful to a
@@ -930,6 +934,21 @@ pub enum CometDirection {
     Forward,
     /// From the segment's second endpoint to its first.
     Reverse,
+}
+
+impl CometDirection {
+    /// The pair `(from, to)` an effect running in this direction travels
+    /// along, given a segment's endpoints `a` and `b`: `(a, b)` for
+    /// [`Self::Forward`], `(b, a)` for [`Self::Reverse`].
+    ///
+    /// Useful in a [`SegmentTemplate`] that draws the effect itself, with
+    /// the `direction` it is handed.
+    pub fn orient<T>(self, a: T, b: T) -> (T, T) {
+        match self {
+            Self::Forward => (a, b),
+            Self::Reverse => (b, a),
+        }
+    }
 }
 
 /// A built-in effect that plays once and ends, for a segment.
@@ -952,9 +971,12 @@ pub enum SegmentAnimation {
     FlashDecay,
     /// A single dot pass from one endpoint to the other, then gone — the
     /// event-driven counterpart to [`SteadySegmentAnimation::Comet`]. Reads
-    /// as "one thing moved along this route just now", direction included,
-    /// rather than "traffic keeps flowing this way".
-    Comet(CometDirection),
+    /// as "one thing moved along this route just now", rather than "traffic
+    /// keeps flowing this way". Which endpoint it starts from is the
+    /// [`CometDirection`] asked for with
+    /// [`SegmentHandle::direction`](super::SegmentHandle::direction), like
+    /// every other segment effect.
+    Comet,
     /// The line drawing itself in from the first endpoint to the second,
     /// then gone. Reads as "this route was just established" rather than
     /// "something travelled along it".
@@ -1744,6 +1766,12 @@ pub struct SegmentNotificationContext<'a> {
     /// [`Animation`] function instead of
     /// reimplementing the lookup yourself.
     pub kind: SegmentAnimation,
+    /// Which way the effect was asked to run
+    /// ([`SegmentHandle::direction`](super::SegmentHandle::direction)).
+    /// [`CometDirection::orient`] turns it into the `(from, to)` pair to draw
+    /// along. [`SegmentAnimation::FlashDecay`] has no direction, and this is
+    /// [`CometDirection::Forward`] for it.
+    pub direction: CometDirection,
     /// The widget's per-animation tuning for segment effects
     /// ([`MapSettings::segment_animation`]).
     pub animation: SegmentAnimations,
@@ -1786,6 +1814,11 @@ pub struct SegmentStateContext<'a> {
     /// corresponding [`Animation`]
     /// function instead of reimplementing the lookup yourself.
     pub kind: SteadySegmentAnimation,
+    /// Which way the effect was asked to run
+    /// ([`SegmentHandle::direction`](super::SegmentHandle::direction)).
+    /// [`CometDirection::orient`] turns it into the `(from, to)` pair to draw
+    /// along.
+    pub direction: CometDirection,
     /// The widget's per-animation tuning for segment effects
     /// ([`MapSettings::segment_animation`]).
     pub animation: SegmentAnimations,

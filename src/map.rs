@@ -352,6 +352,9 @@ struct SegmentNotification {
     animation: SegmentAnimation,
     /// `None` falls back to the active theme's `ThemeColors::alert`.
     color: Option<Color32>,
+    /// Which endpoint the effect runs from. A `Comet` carries its own in
+    /// `animation`, so this is `Forward` for it.
+    direction: CometDirection,
 }
 
 /// Lasting state attached to a segment, drawn until it is cleared.
@@ -360,6 +363,8 @@ struct SegmentState {
     animation: SteadySegmentAnimation,
     /// `None` falls back to the active theme's `ThemeColors::alert`.
     color: Option<Color32>,
+    /// Which endpoint the effect runs from.
+    direction: CometDirection,
 }
 
 /// A borrowed node, obtained from [`Map::node`], that an animation can be
@@ -507,13 +512,32 @@ impl NodeHandle<'_> {
 ///
 /// A segment can carry one of each at once; the state is drawn underneath the
 /// event, same as node effects.
+///
+/// Modifiers come first: [`color`](Self::color) and
+/// [`direction`](Self::direction), which says which endpoint the effect
+/// runs from. Every effect honours the direction except [`flash`](Self::flash),
+/// which lights the whole line at once.
 pub struct SegmentHandle<'a> {
     map: &'a mut Map,
     id: (usize, usize),
     color: Option<Color32>,
+    direction: CometDirection,
 }
 
 impl SegmentHandle<'_> {
+    /// Sets which way the effect about to be attached runs:
+    /// [`CometDirection::Forward`] (the default) from the segment's first
+    /// endpoint to its second, [`CometDirection::Reverse`] the other way.
+    ///
+    /// Applies to [`comet_once`](Self::comet_once), [`wipe`](Self::wipe),
+    /// [`comet`](Self::comet), [`dash`](Self::dash),
+    /// [`glow_band`](Self::glow_band) and [`chevrons`](Self::chevrons).
+    /// [`flash`](Self::flash) has no direction.
+    pub fn direction(mut self, direction: CometDirection) -> Self {
+        self.direction = direction;
+        self
+    }
+
     /// Overrides the colour of the effect about to be attached.
     ///
     /// Without this, the effect falls back to the active theme's
@@ -534,6 +558,7 @@ impl SegmentHandle<'_> {
                 started: at,
                 animation: SegmentAnimation::FlashDecay,
                 color: self.color,
+                direction: CometDirection::Forward,
             },
         );
     }
@@ -541,14 +566,15 @@ impl SegmentHandle<'_> {
     /// Single dot pass from one endpoint to the other, then gone. The
     /// event-driven counterpart to [`Self::comet`] — reads as "one thing
     /// moved along this route just now" rather than "traffic keeps flowing
-    /// this way". `direction` picks which endpoint it starts from.
-    pub fn comet_once(self, at: Instant, direction: CometDirection) {
+    /// this way". [`Self::direction`] picks which endpoint it starts from.
+    pub fn comet_once(self, at: Instant) {
         self.map.segment_notifications.insert(
             self.id,
             SegmentNotification {
                 started: at,
-                animation: SegmentAnimation::Comet(direction),
+                animation: SegmentAnimation::Comet,
                 color: self.color,
+                direction: self.direction,
             },
         );
     }
@@ -563,6 +589,7 @@ impl SegmentHandle<'_> {
                 started: at,
                 animation: SegmentAnimation::Wipe,
                 color: self.color,
+                direction: self.direction,
             },
         );
     }
@@ -575,6 +602,7 @@ impl SegmentHandle<'_> {
             SegmentState {
                 animation: SteadySegmentAnimation::Comet,
                 color: self.color,
+                direction: self.direction,
             },
         );
     }
@@ -587,6 +615,7 @@ impl SegmentHandle<'_> {
             SegmentState {
                 animation: SteadySegmentAnimation::Dash,
                 color: self.color,
+                direction: self.direction,
             },
         );
     }
@@ -600,6 +629,7 @@ impl SegmentHandle<'_> {
             SegmentState {
                 animation: SteadySegmentAnimation::GlowBand,
                 color: self.color,
+                direction: self.direction,
             },
         );
     }
@@ -612,6 +642,7 @@ impl SegmentHandle<'_> {
             SegmentState {
                 animation: SteadySegmentAnimation::Chevrons,
                 color: self.color,
+                direction: self.direction,
             },
         );
     }
@@ -1962,12 +1993,14 @@ impl Map {
                             color,
                             theme,
                             kind: state.animation,
+                            direction: state.direction,
                             animation: segment_animation,
                         },
                     );
                 } else {
                     let effect = segment_animation.state(state.animation);
-                    effect(painter, pos_a, pos_b, self.zoom, time, color);
+                    let (from, to) = state.direction.orient(pos_a, pos_b);
+                    effect(painter, from, to, self.zoom, time, color);
                 }
                 // Persistent effects never finish on their own.
                 needs_repaint = true;
@@ -1987,19 +2020,14 @@ impl Map {
                             color,
                             theme,
                             kind: notification.animation,
+                            direction: notification.direction,
                             animation: segment_animation,
                         },
                     )
                 } else {
                     let effect = segment_animation.event(notification.animation);
-                    effect(
-                        painter,
-                        pos_a,
-                        pos_b,
-                        self.zoom,
-                        notification.started,
-                        color,
-                    )
+                    let (from, to) = notification.direction.orient(pos_a, pos_b);
+                    effect(painter, from, to, self.zoom, notification.started, color)
                 };
                 if still_playing {
                     needs_repaint = true;
@@ -2203,6 +2231,7 @@ impl Map {
             map: self,
             id,
             color: None,
+            direction: CometDirection::Forward,
         })
     }
 
@@ -3284,12 +3313,8 @@ mod tests {
                 SegmentAnimation::FlashDecay,
             ),
             (
-                Box::new(|s: SegmentHandle, at: Instant| s.comet_once(at, CometDirection::Forward)),
-                SegmentAnimation::Comet(CometDirection::Forward),
-            ),
-            (
-                Box::new(|s: SegmentHandle, at: Instant| s.comet_once(at, CometDirection::Reverse)),
-                SegmentAnimation::Comet(CometDirection::Reverse),
+                Box::new(|s: SegmentHandle, at: Instant| s.comet_once(at)),
+                SegmentAnimation::Comet,
             ),
             (
                 Box::new(|s: SegmentHandle, at: Instant| s.wipe(at)),
@@ -3337,6 +3362,113 @@ mod tests {
             // lasting state must not masquerade as a notification
             assert!(map.segment_notifications.is_empty());
         }
+    }
+
+    #[test]
+    fn segment_effects_are_forward_unless_a_direction_is_set() {
+        let mut map = map_with_segments();
+        let now = Instant::now();
+        map.segment((1, 2)).unwrap().comet_once(now);
+        map.segment((3, 4)).unwrap().dash();
+        assert_eq!(
+            map.segment_notifications.get(&(1, 2)).unwrap().direction,
+            CometDirection::Forward
+        );
+        assert_eq!(
+            map.segment_states.get(&(3, 4)).unwrap().direction,
+            CometDirection::Forward
+        );
+    }
+
+    #[test]
+    fn direction_modifier_reaches_every_directional_segment_effect() {
+        let now = Instant::now();
+        for apply in [
+            Box::new(|s: SegmentHandle| s.comet_once(Instant::now()))
+                as Box<dyn FnOnce(SegmentHandle)>,
+            Box::new(|s: SegmentHandle| s.wipe(Instant::now())),
+        ] {
+            let mut map = map_with_segments();
+            apply(
+                map.segment((1, 2))
+                    .unwrap()
+                    .direction(CometDirection::Reverse),
+            );
+            assert_eq!(
+                map.segment_notifications.get(&(1, 2)).unwrap().direction,
+                CometDirection::Reverse
+            );
+        }
+        for apply in [
+            Box::new(|s: SegmentHandle| s.comet()) as Box<dyn FnOnce(SegmentHandle)>,
+            Box::new(|s: SegmentHandle| s.dash()),
+            Box::new(|s: SegmentHandle| s.glow_band()),
+            Box::new(|s: SegmentHandle| s.chevrons()),
+        ] {
+            let mut map = map_with_segments();
+            apply(
+                map.segment((1, 2))
+                    .unwrap()
+                    .direction(CometDirection::Reverse),
+            );
+            assert_eq!(
+                map.segment_states.get(&(1, 2)).unwrap().direction,
+                CometDirection::Reverse
+            );
+        }
+        // `flash` lights the whole line, so it has no direction to record.
+        let mut map = map_with_segments();
+        map.segment((1, 2))
+            .unwrap()
+            .direction(CometDirection::Reverse)
+            .flash(now);
+        assert_eq!(
+            map.segment_notifications.get(&(1, 2)).unwrap().direction,
+            CometDirection::Forward
+        );
+    }
+
+    #[test]
+    fn a_reversed_lasting_comet_is_drawn_from_the_second_endpoint() {
+        // The lasting `comet` sits on `a` at `t = 0` and moves towards `b`:
+        // draw one frame at time zero for each direction and check which end
+        // the dot is nearest to.
+        let dot_x = |direction: CometDirection| -> f32 {
+            let mut map = map_with_segments();
+            map.segment((1, 2)).unwrap().direction(direction).comet();
+            let ctx = Context::default();
+            let mut out = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))),
+                    time: Some(0.0),
+                    ..RawInput::default()
+                },
+                |ui| {
+                    ui.add(&mut map);
+                },
+            );
+            out.textures_delta.clear();
+            let dot = out
+                .shapes
+                .iter()
+                .find_map(|cs| match &cs.shape {
+                    Shape::Circle(c) => Some(c.center),
+                    _ => None,
+                })
+                .expect("the comet must paint a filled circle");
+            dot.x
+        };
+        // Segment (1, 2) is drawn left to right, so `Forward` starts on the
+        // left of `Reverse`.
+        let (forward, reverse) = (
+            dot_x(CometDirection::Forward),
+            dot_x(CometDirection::Reverse),
+        );
+        assert!(
+            forward < reverse,
+            "Forward must start at the first endpoint ({forward}) and Reverse at the \
+             second ({reverse})"
+        );
     }
 
     #[test]

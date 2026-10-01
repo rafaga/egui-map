@@ -120,7 +120,8 @@ fn map_segment_effects() {
         .dash();
     map.segment((3, 4))
         .expect("segment (3, 4) is loaded")
-        .comet_once(Instant::now(), CometDirection::Reverse);
+        .direction(CometDirection::Reverse)
+        .comet_once(Instant::now());
     map.segment((4, 5))
         .expect("segment (4, 5) is loaded")
         .wipe(Instant::now());
