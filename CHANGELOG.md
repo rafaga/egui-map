@@ -8,6 +8,29 @@ any minor bump may include breaking changes, called out below as such).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** the ribbon of the `dash` segment effect ("marching ants") is
+  as thick as the line it runs over, at every zoom. Its width was
+  `Dash::width * zoom` (3 by default) while the default stroke has a constant
+  `Style::line_width` (2 by default), so the dashes came out thicker than the
+  line and drifted further from it as the map was zoomed.
+  - `Dash::width` is now an `Option<f32>` in **screen pixels**, not scaled by
+    zoom, like `Dash::period_px`. `None`, the default, follows
+    `Style::line_width`; `Some(width)` is used as it is. Code that set
+    `dash.width = 12.0` becomes `dash.width = Some(12.0)`, and means 12 pixels
+    at any zoom instead of `12 * zoom`.
+  - `DASH_WIDTH`, the width used when there is no default stroke to follow
+    (`line_width` of `None`), is now 2 pixels (it was 3, before the zoom
+    multiplier).
+  - `SegmentAnimations::with_line_width` resolves that for you. The map applies
+    it before handing the animations to the segment effects and to a
+    `SegmentTemplate`, so `ctx.animation.dash.width` is already the line's
+    width there; call it yourself only when you draw segment effects on your
+    own.
+  - `Animation::dash` no longer uses its `zoom` argument; it stays so every
+    steady segment effect keeps the same signature.
+
 ### Fixed
 
 - Region labels are laid out again when `pixels_per_point` changes (the
