@@ -695,143 +695,14 @@ impl Widget for &mut Map {
                 let rect_midpoint = RawPoint::from(resp.rect.center());
                 let min_point = self.current.pos - rect_midpoint;
 
-                if !self.region_labels.is_empty() {
-                    // Region labels are the deepest layer: painted first so
-                    // every other element (connection lines, nodes,
-                    // free-floating `MapLabel`s) draws over them. See
-                    // `RegionLabel`'s own doc for how this differs from
-                    // `MapLabel`.
-                    let theme = self.theme_colors();
-                    // A more transparent color than ordinary text, so region
-                    // labels read as a backdrop rather than competing with
-                    // foreground content.
-                    let color = scale_alpha(theme.text, self.settings.region_label_alpha);
-                    let zoom = self.zoom;
-                    // `Style::region_label_font` configures only the built-in
-                    // renderer below; a custom `LabelTemplate` picks its own
-                    // font, the same way `NodeTemplate`/`SegmentTemplate`
-                    // implementations pick their own fonts freely. It is
-                    // mandatory (no `Option`), so there is no fallback to
-                    // resolve here: `size` (still scaled *by* zoom instead
-                    // of staying screen-constant, unlike
-                    // `node_text_size`/`label_text_size`) and `family` come
-                    // straight from it. Each read is its own statement so
-                    // the immutable borrow of `self` ends before the
-                    // `&mut self.region_label_cache` borrow the loop below
-                    // needs.
-                    let region_label_size = self.settings.style.region_label_font.size * zoom;
-                    let region_label_family = self.settings.style.region_label_font.family.clone();
-                    let region_label_font = FontId::new(region_label_size, region_label_family);
-                    // Every label's projected `position` is checked against this
-                    // before any layout/paint work happens. Without it, all of
-                    // `self.region_labels` (113 for the whole-galaxy view this
-                    // type ships for) were laid out and painted every frame
-                    // regardless of whether they were anywhere near the screen --
-                    // and at high zoom `region_label_size` grows right along with
-                    // it (see that field's own doc), making each one of those
-                    // off-screen-but-still-evaluated labels progressively more
-                    // expensive too. See `REGION_LABEL_CULL_MARGIN_FACTOR` for why
-                    // this uses a margin instead of the label's exact (not yet
-                    // known) rendered size.
-                    let visible_rect = resp
-                        .rect
-                        .expand(region_label_size * REGION_LABEL_CULL_MARGIN_FACTOR);
-                    let template = self.label_template.clone();
-                    if let Some(template) = &template {
-                        for label in &self.region_labels {
-                            let position: Pos2 =
-                                (RawPoint::from(label.center) * zoom - min_point).into();
-                            if !visible_rect.contains(position) {
-                                continue;
-                            }
-                            template.label_ui(
-                                &paint,
-                                LabelContext {
-                                    position,
-                                    zoom,
-                                    label,
-                                    size: region_label_size,
-                                    color,
-                                    theme,
-                                },
-                            );
-                        }
-                    } else {
-                        // `paint_region_label` needs `&mut self` (it caches into
-                        // `self.region_label_cache`), so it can't be called while
-                        // `self.region_labels` is still borrowed -- each iteration
-                        // extracts what it needs (`position`, an owned `text`) in a
-                        // block that ends that borrow before the method call.
-                        //
-                        // Cull on `position` *before* cloning `label.text`: most
-                        // region labels are off-screen at any given zoom, and
-                        // cloning their names only to drop them immediately was
-                        // wasted work. Same for the font, resolved once here
-                        // instead of cloned per label.
-                        for i in 0..self.region_labels.len() {
-                            let position: Pos2 = {
-                                let label = &self.region_labels[i];
-                                (RawPoint::from(label.center) * zoom - min_point).into()
-                            };
-                            if !visible_rect.contains(position) {
-                                continue;
-                            }
-                            let text = self.region_labels[i].text.clone();
-                            self.paint_region_label(
-                                &paint,
-                                position,
-                                text,
-                                region_label_font.clone(),
-                                color,
-                            );
-                        }
-                    }
-                }
+                self.paint_region_labels(&paint, &resp, &min_point);
 
-                if self.zoom < self.settings.line_visible_zoom {
-                    // filling text settings
-                    let mut text_settings = TextSettings {
-                        // Screen-space size: unlike the map geometry this is
-                        // NOT multiplied by the zoom, so the label stays just
-                        // as readable however far the map is zoomed out.
-                        size: self.settings.label_text_size,
-                        anchor: Align2::CENTER_CENTER,
-                        family: FontFamily::Proportional,
-                        text: String::new(),
-                        position: RawPoint::default(),
-                        // The active theme's own text color, not egui's
-                        // surrounding-UI text color -- so labels stay
-                        // legible against a custom `MapTheme`'s palette
-                        // instead of silently following the host app's
-                        // light/dark mode.
-                        text_color: self.theme_colors().text,
-                    };
-                    for label in &self.labels {
-                        text_settings.text.clone_from(&label.text);
-                        // `MapLabel::center` is in map coordinates, so project
-                        // it exactly like the nodes do (`coords * zoom -
-                        // min_point`). Using it verbatim (as this used to)
-                        // pinned every label to a fixed screen pixel that
-                        // ignored pan and zoom entirely.
-                        text_settings.position =
-                            RawPoint::from(label.center) * self.zoom - min_point;
-                        self.paint_label(&paint, &text_settings);
-                    }
-                }
+                self.paint_free_labels(&paint, &min_point);
+
+                self.drop_stale_notifications();
 
                 let vec_points = &self.visible_points;
                 let hashm = &self.points;
-
-                // Safety net: drop stale notifications even if their node/
-                // segment is outside the viewport and never finishes its
-                // animation.
-                let now = Instant::now();
-                self.notifications.retain(|_, n| match n.until {
-                    Some(until) => now < until,
-                    None => now.duration_since(n.started).as_secs_f32() < 10.0,
-                });
-                self.segment_notifications
-                    .retain(|_, n| now.duration_since(n.started).as_secs_f32() < 10.0);
 
                 for segment in self.paint_map_lines(&paint, &min_point) {
                     self.segment_notifications.remove(&segment);
@@ -847,64 +718,7 @@ impl Widget for &mut Map {
                     }
                 }
 
-                // Resolved once for all markers below: the theme and color
-                // mode don't change within a frame.
-                let marker_theme = self.theme_colors();
-                let marker_time = ui.input(|i| i.time) as f32;
-                let marker_effect = self
-                    .settings
-                    .animation
-                    .state(self.settings.marker_animation);
-                // One repaint request for all markers, not one per marker.
-                let mut markers_repaint = false;
-                for marker in &self.markers {
-                    // A marker can arrive before its node does (the nodes
-                    // aren't loaded yet, or never will be): it is kept and
-                    // drawn once the node exists.
-                    if let Some(point) =
-                        self.points.as_ref().and_then(|points| points.get(marker.1))
-                    {
-                        let adjusted_point = RawPoint::from(point.coords) * self.zoom - min_point;
-                        // Plain markers have no color setting of their own to
-                        // override, unlike a node's lasting state -- both
-                        // fall back to the active theme's `marker` color,
-                        // the same persistent "this is flagged" role the
-                        // `node_states` branch below uses, distinct from the
-                        // one-off `alert` color transient notifications use.
-                        let color = marker_theme.marker;
-                        if let Some(template) = &self.node_template {
-                            template.marker_ui(
-                                ui,
-                                MarkerContext {
-                                    position: adjusted_point.into(),
-                                    zoom: self.zoom,
-                                    kind: self.settings.marker_animation,
-                                    node_id: *marker.1,
-                                    point,
-                                    color,
-                                    theme: marker_theme,
-                                    animation: self.settings.animation,
-                                },
-                            );
-                        } else {
-                            // One clock for every marker in this frame instead
-                            // of sampling the wall clock per marker, and the
-                            // effect resolved once above instead of per marker.
-                            marker_effect(
-                                ui.painter(),
-                                adjusted_point.into(),
-                                self.zoom,
-                                marker_time,
-                                color,
-                            );
-                            // Persistent effects never finish on their own.
-                            markers_repaint = true;
-                        }
-                    }
-                }
-                if markers_repaint {
-                    ui.ctx().request_repaint();
-                }
+                self.paint_markers(ui, &min_point);
 
                 self.paint_sub_components(ui, self.map_area);
 
@@ -933,6 +747,25 @@ impl Widget for &mut Map {
         // it consume twice its own height in the surrounding layout.
         inner_response.response
     }
+}
+
+/// What is the same for every node of one `paint_map_points` pass.
+struct NodePass<'a> {
+    paint: &'a Painter,
+    theme: ThemeColors,
+    background_color: Color32,
+    now: Instant,
+    time: f32,
+    /// The node under the pointer, `0` when there is none.
+    nearest_id: usize,
+}
+
+/// What a node pass hands back to its caller.
+#[derive(Default)]
+struct NodePassOutput {
+    shapes: Vec<Shape>,
+    nodes_to_remove: Vec<usize>,
+    needs_repaint: bool,
 }
 
 impl Map {
@@ -1505,6 +1338,210 @@ impl Map {
         });
     }
 
+    /// Region labels, the deepest layer: painted first so every other element
+    /// (connection lines, nodes, free-floating `MapLabel`s) draws over them.
+    fn paint_region_labels(&mut self, paint: &Painter, resp: &Response, min_point: &RawPoint) {
+        if !self.region_labels.is_empty() {
+            // Region labels are the deepest layer: painted first so
+            // every other element (connection lines, nodes,
+            // free-floating `MapLabel`s) draws over them. See
+            // `RegionLabel`'s own doc for how this differs from
+            // `MapLabel`.
+            let theme = self.theme_colors();
+            // A more transparent color than ordinary text, so region
+            // labels read as a backdrop rather than competing with
+            // foreground content.
+            let color = scale_alpha(theme.text, self.settings.region_label_alpha);
+            let zoom = self.zoom;
+            // `Style::region_label_font` configures only the built-in
+            // renderer below; a custom `LabelTemplate` picks its own
+            // font, the same way `NodeTemplate`/`SegmentTemplate`
+            // implementations pick their own fonts freely. It is
+            // mandatory (no `Option`), so there is no fallback to
+            // resolve here: `size` (still scaled *by* zoom instead
+            // of staying screen-constant, unlike
+            // `node_text_size`/`label_text_size`) and `family` come
+            // straight from it. Each read is its own statement so
+            // the immutable borrow of `self` ends before the
+            // `&mut self.region_label_cache` borrow the loop below
+            // needs.
+            let region_label_size = self.settings.style.region_label_font.size * zoom;
+            let region_label_family = self.settings.style.region_label_font.family.clone();
+            let region_label_font = FontId::new(region_label_size, region_label_family);
+            // Every label's projected `position` is checked against this
+            // before any layout/paint work happens. Without it, all of
+            // `self.region_labels` (113 for the whole-galaxy view this
+            // type ships for) were laid out and painted every frame
+            // regardless of whether they were anywhere near the screen --
+            // and at high zoom `region_label_size` grows right along with
+            // it (see that field's own doc), making each one of those
+            // off-screen-but-still-evaluated labels progressively more
+            // expensive too. See `REGION_LABEL_CULL_MARGIN_FACTOR` for why
+            // this uses a margin instead of the label's exact (not yet
+            // known) rendered size.
+            let visible_rect = resp
+                .rect
+                .expand(region_label_size * REGION_LABEL_CULL_MARGIN_FACTOR);
+            let template = self.label_template.clone();
+            if let Some(template) = &template {
+                for label in &self.region_labels {
+                    let position: Pos2 = (RawPoint::from(label.center) * zoom - min_point).into();
+                    if !visible_rect.contains(position) {
+                        continue;
+                    }
+                    template.label_ui(
+                        paint,
+                        LabelContext {
+                            position,
+                            zoom,
+                            label,
+                            size: region_label_size,
+                            color,
+                            theme,
+                        },
+                    );
+                }
+            } else {
+                // `paint_region_label` needs `&mut self` (it caches into
+                // `self.region_label_cache`), so it can't be called while
+                // `self.region_labels` is still borrowed -- each iteration
+                // extracts what it needs (`position`, an owned `text`) in a
+                // block that ends that borrow before the method call.
+                //
+                // Cull on `position` *before* cloning `label.text`: most
+                // region labels are off-screen at any given zoom, and
+                // cloning their names only to drop them immediately was
+                // wasted work. Same for the font, resolved once here
+                // instead of cloned per label.
+                for i in 0..self.region_labels.len() {
+                    let position: Pos2 = {
+                        let label = &self.region_labels[i];
+                        (RawPoint::from(label.center) * zoom - min_point).into()
+                    };
+                    if !visible_rect.contains(position) {
+                        continue;
+                    }
+                    let text = self.region_labels[i].text.clone();
+                    self.paint_region_label(
+                        paint,
+                        position,
+                        text,
+                        region_label_font.clone(),
+                        color,
+                    );
+                }
+            }
+        }
+    }
+
+    /// The free-floating `MapLabel`s, shown only when the map is zoomed out
+    /// far enough that the connection lines are hidden.
+    fn paint_free_labels(&self, paint: &Painter, min_point: &RawPoint) {
+        if self.zoom < self.settings.line_visible_zoom {
+            // filling text settings
+            let mut text_settings = TextSettings {
+                // Screen-space size: unlike the map geometry this is
+                // NOT multiplied by the zoom, so the label stays just
+                // as readable however far the map is zoomed out.
+                size: self.settings.label_text_size,
+                anchor: Align2::CENTER_CENTER,
+                family: FontFamily::Proportional,
+                text: String::new(),
+                position: RawPoint::default(),
+                // The active theme's own text color, not egui's
+                // surrounding-UI text color -- so labels stay
+                // legible against a custom `MapTheme`'s palette
+                // instead of silently following the host app's
+                // light/dark mode.
+                text_color: self.theme_colors().text,
+            };
+            for label in &self.labels {
+                text_settings.text.clone_from(&label.text);
+                // `MapLabel::center` is in map coordinates, so project
+                // it exactly like the nodes do (`coords * zoom -
+                // min_point`). Using it verbatim (as this used to)
+                // pinned every label to a fixed screen pixel that
+                // ignored pan and zoom entirely.
+                text_settings.position = RawPoint::from(label.center) * self.zoom - min_point;
+                self.paint_label(paint, &text_settings);
+            }
+        }
+    }
+
+    /// Notifications that never finish on their own.
+    fn drop_stale_notifications(&mut self) {
+        // Safety net: drop stale notifications even if their node/
+        // segment is outside the viewport and never finishes its
+        // animation.
+        let now = Instant::now();
+        self.notifications.retain(|_, n| match n.until {
+            Some(until) => now < until,
+            None => now.duration_since(n.started).as_secs_f32() < 10.0,
+        });
+        self.segment_notifications
+            .retain(|_, n| now.duration_since(n.started).as_secs_f32() < 10.0);
+    }
+
+    /// The plain markers set through `Map::update_marker`.
+    fn paint_markers(&self, ui: &mut Ui, min_point: &RawPoint) {
+        // Resolved once for all markers below: the theme and color
+        // mode don't change within a frame.
+        let marker_theme = self.theme_colors();
+        let marker_time = ui.input(|i| i.time) as f32;
+        let marker_effect = self
+            .settings
+            .animation
+            .state(self.settings.marker_animation);
+        // One repaint request for all markers, not one per marker.
+        let mut markers_repaint = false;
+        for marker in &self.markers {
+            // A marker can arrive before its node does (the nodes
+            // aren't loaded yet, or never will be): it is kept and
+            // drawn once the node exists.
+            if let Some(point) = self.points.as_ref().and_then(|points| points.get(marker.1)) {
+                let adjusted_point = RawPoint::from(point.coords) * self.zoom - min_point;
+                // Plain markers have no color setting of their own to
+                // override, unlike a node's lasting state -- both
+                // fall back to the active theme's `marker` color,
+                // the same persistent "this is flagged" role the
+                // `node_states` branch below uses, distinct from the
+                // one-off `alert` color transient notifications use.
+                let color = marker_theme.marker;
+                if let Some(template) = &self.node_template {
+                    template.marker_ui(
+                        ui,
+                        MarkerContext {
+                            position: adjusted_point.into(),
+                            zoom: self.zoom,
+                            kind: self.settings.marker_animation,
+                            node_id: *marker.1,
+                            point,
+                            color,
+                            theme: marker_theme,
+                            animation: self.settings.animation,
+                        },
+                    );
+                } else {
+                    // One clock for every marker in this frame instead
+                    // of sampling the wall clock per marker, and the
+                    // effect resolved once above instead of per marker.
+                    marker_effect(
+                        ui.painter(),
+                        adjusted_point.into(),
+                        self.zoom,
+                        marker_time,
+                        color,
+                    );
+                    // Persistent effects never finish on their own.
+                    markers_repaint = true;
+                }
+            }
+        }
+        if markers_repaint {
+            ui.ctx().request_repaint();
+        }
+    }
+
     fn paint_map_points(
         &self,
         vec_points: &Vec<isize>,
@@ -1521,58 +1558,28 @@ impl Map {
         // of every frame while measuring nothing that a single zone around the
         // loop does not already report.
         let _span = tracing::info_span!("paint_map_points").entered();
-        let mut nearest_id = None;
-        let mut nodes_to_remove = Vec::new();
-        let mut shape_vec = vec![];
-        // Any animated node wants a repaint; requesting it once at the end of
-        // the loop instead of once per node keeps a heavily animated frame
-        // (many alerts at a zoomed-out view) from issuing thousands of
-        // redundant requests.
-        let mut needs_repaint = false;
 
-        if hashm.is_none() {
+        let Some(points) = hashm else {
             return Err(());
-        }
+        };
         if vec_points.is_empty() {
             return Err(());
         }
-        // detecting the nearest hover node
-        if self.settings.node_text_visibility == VisibilitySetting::Hover
-            && resp.hovered()
-            && let Some(point) = resp.hover_pos()
-        {
-            let raw_point = RawPoint::from(point);
-            let hovered_map_point = (*min_point + raw_point) / self.zoom;
-            if let Ok(nearest_node) = self.tree.as_ref().unwrap().nearest(
-                &hovered_map_point.components,
-                1,
-                &squared_euclidean,
-            ) {
-                nearest_id = Some(nearest_node.first().unwrap().1);
-            }
-        }
-        // Resolved once for the whole batch of nodes below, instead of once
-        // per role per node (`selected`, `marker`, `alert`, `node`, plus a
-        // whole `theme: self.theme_colors()` copy for up to four separate
-        // context structs) -- `Theme::colors` is cheap (a `const fn` over
-        // plain `Color32` literals, no allocation), but there is no reason
-        // to repeat it dozens of times a frame when the active theme and
-        // color mode can't change mid-frame. Same reasoning for
-        // `background_color`: the surrounding UI's visuals don't change
-        // node to node either.
-        let theme = self.theme_colors();
-        let background_color = ui_obj.ctx().theme().default_visuals().extreme_bg_color;
-        // One clock for every node's marker fade this frame.
-        let now = Instant::now();
-        // One clock for every built-in effect this frame too, instead of a
-        // `ui.input` lock per animated node.
-        let time = ui_obj.input(|i| i.time) as f32;
-        // Whether any node carries lasting state / a notification this frame:
-        // when they are empty (the common case) the per-node `get`s below are
-        // skipped entirely, which matters at a zoomed-out view where the
-        // loop runs over every node.
-        let has_states = !self.node_states.is_empty();
-        let has_notifications = !self.notifications.is_empty();
+        // Everything that is the same for every node of this pass is resolved
+        // once here. The theme colors are cheap (a `const fn` over plain
+        // `Color32` literals), but there is no reason to repeat them dozens of
+        // times a frame when the active theme and color mode can't change
+        // mid-frame; same for the surrounding UI's background color.
+        let pass = NodePass {
+            paint,
+            theme: self.theme_colors(),
+            background_color: ui_obj.ctx().theme().default_visuals().extreme_bg_color,
+            // One clock for every node's marker fade and every built-in effect
+            // this frame, instead of a `ui.input` lock per animated node.
+            now: Instant::now(),
+            time: ui_obj.input(|i| i.time) as f32,
+            nearest_id: self.nearest_hovered_node(resp, min_point).unwrap_or(0),
+        };
 
         // filling text settings
         let mut text_settings = TextSettings {
@@ -1586,173 +1593,258 @@ impl Map {
             position: RawPoint::default(),
             // Same reasoning as the free-floating label above: the active
             // theme's text color, so node names honor a custom `MapTheme`.
-            text_color: theme.text,
+            text_color: pass.theme.text,
         };
 
         // Drawing Points
+        let mut out = NodePassOutput::default();
         for temp_point in vec_points {
-            let parsed_point = temp_point.cast_unsigned();
-            if let Some(system) = hashm.as_ref().unwrap().get(&parsed_point) {
-                let viewport_point = RawPoint::from(system.coords) * self.zoom - min_point;
-                if let Some(node_template) = &self.node_template {
-                    if nearest_id.unwrap_or(&0usize) == &system.get_id() {
-                        node_template.selection_ui(
-                            ui_obj,
-                            SelectionContext {
-                                position: viewport_point.into(),
-                                zoom: self.zoom,
-                                point: system,
-                                color: theme.selected,
-                                theme,
-                            },
-                        );
-                    }
-                } else if self.zoom > self.settings.label_visible_zoom
-                    && self.settings.node_text_visibility == VisibilitySetting::Always
-                    || (self.settings.node_text_visibility == VisibilitySetting::Hover
-                        && nearest_id.unwrap_or(&0usize) == &system.get_id())
-                {
-                    let mut viewport_text = viewport_point;
-                    viewport_text.components[0] += 3.0 * self.zoom;
-                    viewport_text.components[1] -= 3.0 * self.zoom;
-                    text_settings.position = viewport_text;
-                    text_settings.text = system.get_name();
-                    self.paint_label(paint, &text_settings);
-                }
-
-                let system_id = system.get_id();
-
-                // Persistent node state is drawn first so a notification --
-                // the *event* -- sits on top of the *state*.
-                if has_states && let Some(state) = self.node_states.get(&system_id) {
-                    let color = state.color.unwrap_or(theme.marker);
-                    if let Some(template) = &self.node_template {
-                        // There is no dedicated template hook for node state:
-                        // `marker_ui` is the persistent-visual one, so state and
-                        // markers share it -- `kind` is enough for a template to
-                        // pick the right built-in effect either way, but the
-                        // hook still cannot tell *which* of the two call sites
-                        // (state vs. a `Map::update_marker` marker) it is.
-                        template.marker_ui(
-                            ui_obj,
-                            MarkerContext {
-                                position: viewport_point.into(),
-                                zoom: self.zoom,
-                                kind: state.animation,
-                                node_id: system_id,
-                                point: system,
-                                color,
-                                theme,
-                                animation: self.settings.animation,
-                            },
-                        );
-                    } else {
-                        let effect = self.settings.animation.state(state.animation);
-                        effect(paint, viewport_point.into(), self.zoom, time, color);
-                    }
-                    // Persistent effects never finish on their own.
-                    needs_repaint = true;
-                }
-
-                if has_notifications && let Some(notification) = self.notifications.get(&system_id)
-                {
-                    let color = notification
-                        .color
-                        .unwrap_or(theme.alert)
-                        .gamma_multiply(notification.remaining(now));
-                    if notification.expired(now) {
-                        nodes_to_remove.push(system_id);
-                    } else if let Some(template) = &self.node_template {
-                        let running = template.notification_ui(
-                            ui_obj,
-                            NotificationContext {
-                                position: viewport_point.into(),
-                                zoom: self.zoom,
-                                initial_time: notification.started,
-                                color,
-                                kind: notification.animation,
-                                until: notification.until,
-                                node_id: system_id,
-                                point: system,
-                                theme,
-                                animation: self.settings.animation,
-                            },
-                        );
-                        if !running {
-                            nodes_to_remove.push(system_id);
-                        }
-                    } else {
-                        let effect = self.settings.animation.event(notification.animation);
-                        // A lasting notification restarts the effect every
-                        // cycle until `until`; a plain one plays it once.
-                        let started = if notification.until.is_some() {
-                            animation::cycle_start(
-                                notification.started,
-                                now,
-                                self.settings
-                                    .animation
-                                    .event_duration(notification.animation),
-                            )
-                        } else {
-                            notification.started
-                        };
-                        let running =
-                            effect(paint, viewport_point.into(), self.zoom, started, color);
-                        if running || notification.until.is_some() {
-                            needs_repaint = true;
-                        } else {
-                            nodes_to_remove.push(system_id);
-                        }
-                    }
-                }
-                // The color requested for this node: its own override if it
-                // has one, otherwise the active theme's node color -- the
-                // single fallback both the built-in circle and a
-                // `NodeTemplate` (via `NodeContext::color`) paint with. The
-                // active theme's full palette is handed over separately
-                // (`NodeContext::theme`) so a template can tell the
-                // two apart.
-                let node_color = system.color.unwrap_or(theme.node);
-                if let Some(node_template) = &self.node_template {
-                    let (marker, marker_fading) = self.marker_level(system_id, now);
-                    if marker_fading {
-                        needs_repaint = true;
-                    }
-                    let node_context = NodeContext {
-                        position: viewport_point.into(),
-                        zoom: self.zoom,
-                        point: system,
-                        color: node_color,
-                        background_color,
-                        theme,
-                        marker,
-                        animation: self.settings.animation,
-                    };
-                    // Learn how far this template's nodes reach, in map
-                    // units, for `find_hovered_node`'s search radius.
-                    let reach = node_template
-                        .outline(node_context.hit())
-                        .extent_from(node_context.position)
-                        / self.zoom;
-                    if reach > self.outline_reach.get() {
-                        self.outline_reach.set(reach);
-                    }
-                    node_template.node_ui(ui_obj, node_context);
-                } else {
-                    shape_vec.push(Shape::circle_filled(
-                        viewport_point.into(),
-                        4.00 * self.zoom,
-                        node_color,
-                    ));
-                }
-            }
+            let Some(system) = points.get(&temp_point.cast_unsigned()) else {
+                continue;
+            };
+            let viewport_point = RawPoint::from(system.coords) * self.zoom - min_point;
+            self.paint_node_label(ui_obj, &pass, system, viewport_point, &mut text_settings);
+            self.paint_node_state(ui_obj, &pass, system, viewport_point, &mut out);
+            self.paint_node_notification(ui_obj, &pass, system, viewport_point, &mut out);
+            self.paint_node_body(ui_obj, &pass, system, viewport_point, &mut out);
         }
-        paint.extend(shape_vec);
-        if needs_repaint {
+        paint.extend(out.shapes);
+        // Any animated node wants a repaint; requesting it once at the end of
+        // the loop instead of once per node keeps a heavily animated frame
+        // (many alerts at a zoomed-out view) from issuing thousands of
+        // redundant requests.
+        if out.needs_repaint {
             ui_obj.ctx().request_repaint();
         }
 
-        Ok(nodes_to_remove)
+        Ok(out.nodes_to_remove)
+    }
+
+    /// The node under the pointer, when node names show on hover.
+    fn nearest_hovered_node(&self, resp: &Response, min_point: &RawPoint) -> Option<usize> {
+        if self.settings.node_text_visibility != VisibilitySetting::Hover || !resp.hovered() {
+            return None;
+        }
+        let point = resp.hover_pos()?;
+        let raw_point = RawPoint::from(point);
+        let hovered_map_point = (*min_point + raw_point) / self.zoom;
+        let nearest_node = self
+            .tree
+            .as_ref()
+            .unwrap()
+            .nearest(&hovered_map_point.components, 1, &squared_euclidean)
+            .ok()?;
+        Some(*nearest_node.first().unwrap().1)
+    }
+
+    /// A node's selection (through a template) or its name label.
+    fn paint_node_label(
+        &self,
+        ui_obj: &mut Ui,
+        pass: &NodePass,
+        system: &MapPoint,
+        viewport_point: RawPoint,
+        text_settings: &mut TextSettings,
+    ) {
+        // With no node under the pointer `nearest_id` is 0, as it always was.
+        let is_nearest = pass.nearest_id == system.get_id();
+        if let Some(node_template) = &self.node_template {
+            if is_nearest {
+                node_template.selection_ui(
+                    ui_obj,
+                    SelectionContext {
+                        position: viewport_point.into(),
+                        zoom: self.zoom,
+                        point: system,
+                        color: pass.theme.selected,
+                        theme: pass.theme,
+                    },
+                );
+            }
+        } else if self.zoom > self.settings.label_visible_zoom
+            && self.settings.node_text_visibility == VisibilitySetting::Always
+            || (self.settings.node_text_visibility == VisibilitySetting::Hover && is_nearest)
+        {
+            let mut viewport_text = viewport_point;
+            viewport_text.components[0] += 3.0 * self.zoom;
+            viewport_text.components[1] -= 3.0 * self.zoom;
+            text_settings.position = viewport_text;
+            text_settings.text = system.get_name();
+            self.paint_label(pass.paint, text_settings);
+        }
+    }
+
+    /// A node's persistent state, drawn before its notification so the
+    /// *event* sits on top of the *state*.
+    fn paint_node_state(
+        &self,
+        ui_obj: &mut Ui,
+        pass: &NodePass,
+        system: &MapPoint,
+        viewport_point: RawPoint,
+        out: &mut NodePassOutput,
+    ) {
+        // When there are no states (the common case) the per-node `get` is
+        // skipped entirely, which matters at a zoomed-out view where the loop
+        // runs over every node.
+        if self.node_states.is_empty() {
+            return;
+        }
+        let system_id = system.get_id();
+        let Some(state) = self.node_states.get(&system_id) else {
+            return;
+        };
+        let color = state.color.unwrap_or(pass.theme.marker);
+        if let Some(template) = &self.node_template {
+            // There is no dedicated template hook for node state:
+            // `marker_ui` is the persistent-visual one, so state and
+            // markers share it -- `kind` is enough for a template to
+            // pick the right built-in effect either way, but the
+            // hook still cannot tell *which* of the two call sites
+            // (state vs. a `Map::update_marker` marker) it is.
+            template.marker_ui(
+                ui_obj,
+                MarkerContext {
+                    position: viewport_point.into(),
+                    zoom: self.zoom,
+                    kind: state.animation,
+                    node_id: system_id,
+                    point: system,
+                    color,
+                    theme: pass.theme,
+                    animation: self.settings.animation,
+                },
+            );
+        } else {
+            let effect = self.settings.animation.state(state.animation);
+            effect(
+                pass.paint,
+                viewport_point.into(),
+                self.zoom,
+                pass.time,
+                color,
+            );
+        }
+        // Persistent effects never finish on their own.
+        out.needs_repaint = true;
+    }
+
+    /// A node's notification, if it has one; finished ones are queued for
+    /// removal in `out`.
+    fn paint_node_notification(
+        &self,
+        ui_obj: &mut Ui,
+        pass: &NodePass,
+        system: &MapPoint,
+        viewport_point: RawPoint,
+        out: &mut NodePassOutput,
+    ) {
+        // Same shortcut as the states: nothing to look up when empty.
+        if self.notifications.is_empty() {
+            return;
+        }
+        let system_id = system.get_id();
+        let Some(notification) = self.notifications.get(&system_id) else {
+            return;
+        };
+        let color = notification
+            .color
+            .unwrap_or(pass.theme.alert)
+            .gamma_multiply(notification.remaining(pass.now));
+        if notification.expired(pass.now) {
+            out.nodes_to_remove.push(system_id);
+        } else if let Some(template) = &self.node_template {
+            let running = template.notification_ui(
+                ui_obj,
+                NotificationContext {
+                    position: viewport_point.into(),
+                    zoom: self.zoom,
+                    initial_time: notification.started,
+                    color,
+                    kind: notification.animation,
+                    until: notification.until,
+                    node_id: system_id,
+                    point: system,
+                    theme: pass.theme,
+                    animation: self.settings.animation,
+                },
+            );
+            if !running {
+                out.nodes_to_remove.push(system_id);
+            }
+        } else {
+            let effect = self.settings.animation.event(notification.animation);
+            // A lasting notification restarts the effect every
+            // cycle until `until`; a plain one plays it once.
+            let started = if notification.until.is_some() {
+                animation::cycle_start(
+                    notification.started,
+                    pass.now,
+                    self.settings
+                        .animation
+                        .event_duration(notification.animation),
+                )
+            } else {
+                notification.started
+            };
+            let running = effect(pass.paint, viewport_point.into(), self.zoom, started, color);
+            if running || notification.until.is_some() {
+                out.needs_repaint = true;
+            } else {
+                out.nodes_to_remove.push(system_id);
+            }
+        }
+    }
+
+    /// The node itself: through its template, or as a filled circle.
+    fn paint_node_body(
+        &self,
+        ui_obj: &mut Ui,
+        pass: &NodePass,
+        system: &MapPoint,
+        viewport_point: RawPoint,
+        out: &mut NodePassOutput,
+    ) {
+        // The color requested for this node: its own override if it
+        // has one, otherwise the active theme's node color -- the
+        // single fallback both the built-in circle and a
+        // `NodeTemplate` (via `NodeContext::color`) paint with. The
+        // active theme's full palette is handed over separately
+        // (`NodeContext::theme`) so a template can tell the
+        // two apart.
+        let node_color = system.color.unwrap_or(pass.theme.node);
+        let Some(node_template) = &self.node_template else {
+            out.shapes.push(Shape::circle_filled(
+                viewport_point.into(),
+                4.00 * self.zoom,
+                node_color,
+            ));
+            return;
+        };
+        let (marker, marker_fading) = self.marker_level(system.get_id(), pass.now);
+        if marker_fading {
+            out.needs_repaint = true;
+        }
+        let node_context = NodeContext {
+            position: viewport_point.into(),
+            zoom: self.zoom,
+            point: system,
+            color: node_color,
+            background_color: pass.background_color,
+            theme: pass.theme,
+            marker,
+            animation: self.settings.animation,
+        };
+        // Learn how far this template's nodes reach, in map
+        // units, for `find_hovered_node`'s search radius.
+        let reach = node_template
+            .outline(node_context.hit())
+            .extent_from(node_context.position)
+            / self.zoom;
+        if reach > self.outline_reach.get() {
+            self.outline_reach.set(reach);
+        }
+        node_template.node_ui(ui_obj, node_context);
     }
 
     /// Draws the connection lines, plus any segment effects, returning the ids
