@@ -1,7 +1,8 @@
 //! Custom `NodeTemplate` that draws its own diamond-shaped nodes, but reuses
 //! the crate's built-in `Animation::*` functions for its effects instead of
 //! hand-rolling new ones -- contrast with `examples/custom_template.rs`,
-//! which hand-rolls a single effect of its own from scratch.
+//! which overrides nothing but `node_ui` and `outline` and lets the default
+//! hooks draw every effect.
 //!
 //! As of egui-map 0.5.0, [`NodeTemplate::notification_ui`] and
 //! [`NodeTemplate::marker_ui`] are told which built-in animation was

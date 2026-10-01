@@ -37,6 +37,11 @@ any minor bump may include breaking changes, called out below as such).
   (`Map::update_marker`, `Map::remove_marker`, whose return value tells
   whether there was one). The segment between Alpha and Beta is a dashed line
   whose pattern slides along it ("marching ants", `Map::segment(..).dash()`).
+- `examples/custom_template.rs` implements only `NodeTemplate::node_ui` and
+  `NodeTemplate::outline`; the hit area, the selection ring, the notification
+  effects and the marker are the defaults, drawn along that outline. It also
+  shows `NodeHandle::lasting`, a notification that repeats and fades out over
+  a few seconds.
 
 ### Fixed
 
