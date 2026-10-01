@@ -155,6 +155,13 @@ pub fn cycle_start(started: Instant, now: Instant, cycle: f32) -> Instant {
         .unwrap_or(now)
 }
 
+/// The fraction of a notification left, `1.0` when it starts down to `0.0` at
+/// `until` -- what a `countdown` shows over a lasting notification.
+fn remaining_until(started: Instant, until: Instant) -> f32 {
+    let total = until.saturating_duration_since(started).as_secs_f32();
+    (1.0 - elapsed(started) / total.max(f32::EPSILON)).clamp(0.0, 1.0)
+}
+
 /// Opacity factor of [`Animation::glow`] at `time`: a smooth `0 -> 1 -> 0`
 /// pulse of the given `period` (seconds), scaled by `strength` (clamped to
 /// `0.0..=1.0`).
@@ -907,6 +914,10 @@ impl Animation {
     /// The remaining arc is the remaining fraction of [`COUNTDOWN_DURATION`],
     /// which makes it a natural fit for *"how old is this information"*.
     /// Returns `true` while still playing.
+    ///
+    /// To count down over another time, ask for it with
+    /// [`NodeHandle::lasting`](crate::map::NodeHandle::lasting): a lasting
+    /// countdown empties over the whole notification.
     pub fn countdown_arc(
         &self,
         painter: &Painter,
@@ -915,19 +926,37 @@ impl Animation {
         initial_time: Instant,
         color: Color32,
     ) -> bool {
+        let secs = elapsed(initial_time);
+        let remaining = 1.0 - secs / self.countdown.duration;
+        self.paint_countdown(painter, center, zoom, remaining, color);
+        secs < self.countdown.duration
+    }
+
+    /// The ring of [`Animation::countdown_arc`] with `remaining` of it left
+    /// (`1.0` full, `0.0` empty).
+    fn paint_countdown(
+        &self,
+        painter: &Painter,
+        center: Pos2,
+        zoom: f32,
+        remaining: f32,
+        color: Color32,
+    ) {
         // Segments in a full turn; the arc draws a prefix of these.
         const STEPS: usize = 48;
-        let secs = elapsed(initial_time);
-        let remaining = (1.0 - secs / self.countdown.duration).clamp(0.0, 1.0);
+        let remaining = remaining.clamp(0.0, 1.0);
         let radius = self.countdown.radius * zoom;
 
-        let count = (STEPS as f32 * remaining).round() as usize;
-        if count >= 1 {
+        if remaining > 0.0 {
+            // The last point sits exactly at `remaining` of the turn, so the
+            // end of the arc moves smoothly instead of in steps of a 48th.
+            let count = (STEPS as f32 * remaining).ceil() as usize;
             let points = (0..=count)
                 .map(|i| {
+                    let turn = (i as f32 / STEPS as f32).min(remaining);
                     // Start at 12 o'clock and sweep clockwise. Screen y grows
                     // downwards, so a growing angle already turns clockwise.
-                    let angle = TAU * (i as f32 / STEPS as f32) - TAU / 4.0;
+                    let angle = TAU * turn - TAU / 4.0;
                     Pos2::new(
                         center.x + radius * angle.cos(),
                         center.y + radius * angle.sin(),
@@ -939,7 +968,6 @@ impl Animation {
                 Stroke::new(self.countdown.stroke * zoom, with_alpha(color, 1.0)),
             )));
         }
-        secs < self.countdown.duration
     }
 
     /// One frame of a disc that grows past its final size and settles back.
@@ -1047,26 +1075,38 @@ impl Animation {
     }
 
     /// The event effect for `kind` as a lasting notification
-    /// ([`NodeHandle::lasting`](crate::map::NodeHandle::lasting)) draws it:
-    /// repeated for as long as the notification lasts, which is up to the
-    /// caller to end. Call it with `(painter, center, zoom, started, color)`,
-    /// where `started` is when the notification began; it always returns
-    /// `true`.
+    /// ([`NodeHandle::lasting`](crate::map::NodeHandle::lasting)) draws it,
+    /// for as long as the notification lasts, which is up to the caller to
+    /// end. Call it with `(painter, center, zoom, started, until, color)`,
+    /// where `started` is when the notification began and `until` when it
+    /// ends; it always returns `true`.
     ///
     /// Most effects restart every [`event_duration`](Self::event_duration).
-    /// `ripple` instead keeps a new ring coming every stagger, so there is no
-    /// moment where the effect ends and starts over.
+    /// Two do not:
+    ///
+    /// - `ripple` keeps a new ring coming every stagger, so there is no
+    ///   moment where the effect ends and starts over.
+    /// - `countdown` empties its ring once, over the whole time the
+    ///   notification was asked to last (`until - started`), instead of
+    ///   every [`Countdown::duration`].
     pub fn lasting_event(
         &self,
         kind: NodeAnimation,
-    ) -> impl Fn(&Painter, Pos2, f32, Instant, Color32) -> bool + 'static {
+    ) -> impl Fn(&Painter, Pos2, f32, Instant, Instant, Color32) -> bool + 'static {
         let a = *self;
-        move |painter, center, zoom, started, color| {
-            if kind == NodeAnimation::Ripple {
-                a.paint_ripple(painter, center, zoom, elapsed(started), true, color);
-            } else {
-                let cycle = cycle_start(started, Instant::now(), a.event_duration(kind));
-                a.event(kind)(painter, center, zoom, cycle, color);
+        move |painter, center, zoom, started, until, color| {
+            match kind {
+                NodeAnimation::Ripple => {
+                    a.paint_ripple(painter, center, zoom, elapsed(started), true, color);
+                }
+                NodeAnimation::CountdownArc => {
+                    let remaining = remaining_until(started, until);
+                    a.paint_countdown(painter, center, zoom, remaining, color);
+                }
+                _ => {
+                    let cycle = cycle_start(started, Instant::now(), a.event_duration(kind));
+                    a.event(kind)(painter, center, zoom, cycle, color);
+                }
             }
             true
         }
@@ -1074,18 +1114,25 @@ impl Animation {
 
     /// [`Animation::lasting_event`] following an outline, like
     /// [`Animation::event_outline`]. Call it with
-    /// `(painter, outline, zoom, started, color)`.
+    /// `(painter, outline, zoom, started, until, color)`.
     pub fn lasting_event_outline(
         &self,
         kind: NodeAnimation,
-    ) -> impl Fn(&Painter, &NodeOutline, f32, Instant, Color32) -> bool + 'static {
+    ) -> impl Fn(&Painter, &NodeOutline, f32, Instant, Instant, Color32) -> bool + 'static {
         let a = *self;
-        move |painter, outline, zoom, started, color| {
-            if kind == NodeAnimation::Ripple {
-                a.paint_ripple_outline(painter, outline, zoom, elapsed(started), true, color);
-            } else {
-                let cycle = cycle_start(started, Instant::now(), a.event_duration(kind));
-                a.event_outline(kind)(painter, outline, zoom, cycle, color);
+        move |painter, outline, zoom, started, until, color| {
+            match kind {
+                NodeAnimation::Ripple => {
+                    a.paint_ripple_outline(painter, outline, zoom, elapsed(started), true, color);
+                }
+                NodeAnimation::CountdownArc => {
+                    let remaining = remaining_until(started, until);
+                    a.paint_countdown_outline(painter, outline, zoom, remaining, color);
+                }
+                _ => {
+                    let cycle = cycle_start(started, Instant::now(), a.event_duration(kind));
+                    a.event_outline(kind)(painter, outline, zoom, cycle, color);
+                }
             }
             true
         }
@@ -1094,8 +1141,8 @@ impl Animation {
     /// Length of one cycle of a node event effect, in seconds: how long it
     /// plays once, and how often a lasting notification
     /// ([`NodeHandle::lasting`](crate::map::NodeHandle::lasting)) restarts it
-    /// -- except `ripple`, which loops without restarting (see
-    /// [`Animation::lasting_event`]).
+    /// -- except `ripple`, which loops without restarting, and `countdown`,
+    /// which spans the whole notification (see [`Animation::lasting_event`]).
     pub fn event_duration(&self, kind: NodeAnimation) -> f32 {
         match kind {
             NodeAnimation::Pulse => self.pulse.duration,
@@ -1214,7 +1261,22 @@ impl Animation {
         color: Color32,
     ) -> bool {
         let secs = elapsed(initial_time);
-        let remaining = (1.0 - secs / self.countdown.duration).clamp(0.0, 1.0);
+        let remaining = 1.0 - secs / self.countdown.duration;
+        self.paint_countdown_outline(painter, outline, zoom, remaining, color);
+        secs < self.countdown.duration
+    }
+
+    /// The line of [`Animation::countdown_outline`] with `remaining` of it
+    /// left (`1.0` full, `0.0` empty).
+    fn paint_countdown_outline(
+        &self,
+        painter: &Painter,
+        outline: &NodeOutline,
+        zoom: f32,
+        remaining: f32,
+        color: Color32,
+    ) {
+        let remaining = remaining.clamp(0.0, 1.0);
         let points = partial_perimeter(
             &outline
                 .grown(self.countdown.outline_offset * zoom)
@@ -1227,7 +1289,6 @@ impl Animation {
                 Stroke::new(self.countdown.stroke * zoom, with_alpha(color, 1.0)),
             )));
         }
-        secs < self.countdown.duration
     }
 
     /// [`Animation::scale_in`] following `outline`: the node's shape grows
@@ -2438,6 +2499,7 @@ mod tests {
                             Pos2::new(50.0, 50.0),
                             1.0,
                             started,
+                            started + Duration::from_secs(3600),
                             Color32::RED,
                         ),
                         "a lasting effect never reports itself finished"
@@ -2457,6 +2519,92 @@ mod tests {
             let started = Instant::now() - Duration::from_secs_f32(secs);
             assert_eq!(rings(started), RIPPLE_RINGS, "{secs}s into the effect");
         }
+    }
+
+    #[test]
+    fn remaining_until_runs_from_one_to_zero_over_the_requested_time() {
+        let now = Instant::now();
+        let around = |before: u64, after: u64| {
+            remaining_until(
+                now - Duration::from_secs(before),
+                now + Duration::from_secs(after),
+            )
+        };
+        assert!((around(0, 20) - 1.0).abs() < 0.01, "full at the start");
+        assert!((around(10, 10) - 0.5).abs() < 0.01, "half way through");
+        assert!((around(15, 5) - 0.25).abs() < 0.01, "a quarter left");
+        assert_eq!(around(30, 0), 0.0, "empty at `until`");
+        // No time at all asked for: empty, not a division by zero.
+        assert_eq!(remaining_until(now, now), 0.0);
+    }
+
+    /// Where the ring `draw` paints ends: its last point, relative to the
+    /// center of the node it is drawn around.
+    fn countdown_end(animation: &Animation, draw: impl Fn(&Animation, &Painter, Pos2)) -> Vec2 {
+        let ctx = Context::default();
+        let center = Pos2::new(50.0, 50.0);
+        let mut out = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0))),
+                ..Default::default()
+            },
+            |ui| draw(animation, ui.painter(), center),
+        );
+        out.textures_delta.clear();
+        let end = out
+            .shapes
+            .iter()
+            .find_map(|cs| match &cs.shape {
+                egui::epaint::Shape::Path(path) => path.points.last().copied(),
+                _ => None,
+            })
+            .expect("the countdown must paint an arc");
+        end - center
+    }
+
+    #[test]
+    fn a_lasting_countdown_empties_over_the_time_asked_for() {
+        // Ten seconds into twenty, the ring is half empty: its end is at the
+        // bottom of the circle (the arc runs clockwise from 12 o'clock).
+        // `Countdown::duration` is 5 s, so the plain effect would be long
+        // over by then.
+        let animation = Animation::default();
+        let end = countdown_end(&animation, |animation, painter, center| {
+            let now = Instant::now();
+            animation.lasting_event(NodeAnimation::CountdownArc)(
+                painter,
+                center,
+                1.0,
+                now - Duration::from_secs(10),
+                now + Duration::from_secs(10),
+                Color32::RED,
+            );
+        });
+        assert!(
+            end.x.abs() < 0.5,
+            "half a turn ends below the center: {end:?}"
+        );
+        assert!(
+            (end.y - animation.countdown.radius).abs() < 0.5,
+            "half a turn ends one radius below the center: {end:?}"
+        );
+    }
+
+    #[test]
+    fn the_countdown_ring_empties_smoothly() {
+        // 0.505 of a turn: not a multiple of the 1/48 steps the arc is drawn
+        // in, so a ring that only draws whole steps ends at half a turn
+        // (straight below the center) instead of a little past it.
+        let animation = Animation::default().with(|a| a.countdown.radius = 100.0);
+        let end = countdown_end(&animation, |animation, painter, center| {
+            animation.paint_countdown(painter, center, 1.0, 0.505, Color32::RED);
+        });
+        let angle = end.y.atan2(end.x) + std::f32::consts::FRAC_PI_2;
+        let turn = angle.rem_euclid(TAU) / TAU;
+        assert!(
+            (turn - 0.505).abs() < 0.001,
+            "the arc ends at {turn} of a turn"
+        );
     }
 
     #[test]

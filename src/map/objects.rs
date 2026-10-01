@@ -1207,12 +1207,13 @@ pub trait NodeTemplate {
     /// lasting notification runs, repeats it ([`Animation::lasting_event_outline`]).
     fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
         let outline = self.outline(ctx.hit());
-        let running = if ctx.until.is_some() {
+        let running = if let Some(until) = ctx.until {
             ctx.animation.lasting_event_outline(ctx.kind)(
                 ui.painter(),
                 &outline,
                 ctx.zoom,
                 ctx.initial_time,
+                until,
                 ctx.color,
             )
         } else {
@@ -1358,9 +1359,11 @@ impl NotificationContext<'_> {
     /// cycle, so the effect repeats (see [`animation::cycle_start`]).
     ///
     /// The effect restarts every cycle, so one made of several staggered
-    /// parts (`ripple`) starts over from a single ring at each restart. Draw
-    /// with [`Animation::lasting_event`] (or `lasting_event_outline`) and
-    /// `initial_time` instead for a repetition with no break.
+    /// parts (`ripple`) starts over from a single ring at each restart, and a
+    /// `countdown` empties every `Countdown::duration` instead of over the
+    /// time the notification was asked to last. Draw with
+    /// [`Animation::lasting_event`] (or `lasting_event_outline`),
+    /// `initial_time` and `until` instead for either.
     pub fn effect_start(&self) -> Instant {
         match self.until {
             Some(_) => animation::cycle_start(

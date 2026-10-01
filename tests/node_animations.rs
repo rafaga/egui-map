@@ -211,6 +211,91 @@ fn a_lasting_ripple_follows_the_outline_of_a_template() {
     assert_eq!(rings(&render(&mut map)), 3);
 }
 
+#[test]
+fn a_lasting_countdown_spans_the_time_asked_for() {
+    // Ten seconds into twenty. The plain countdown lasts 5 s, so one that
+    // still follows `Countdown::duration` (or restarts every 5 s) would be
+    // over, or back to a full ring; the ring painted is an arc.
+    let mut map = map_with_one_node();
+    map.node(1)
+        .unwrap()
+        .lasting(Duration::from_secs(20))
+        .countdown(Instant::now() - Duration::from_secs(10));
+    let (center, end) = arc_center_and_end(&mut map);
+    // Half the time is gone, so the arc, which runs clockwise from 12
+    // o'clock, ends straight below the node. A countdown that restarted every
+    // 5 s would be back at a full ring (ending at the top) at this moment.
+    assert!(
+        (end.x - center.x).abs() < 0.5 && end.y > center.y + 5.0,
+        "the arc must end below the node at half the time: center {center:?}, end {end:?}"
+    );
+}
+
+/// The node's screen position and where the first arc painted ends.
+fn arc_center_and_end(map: &mut Map) -> (egui::Pos2, egui::Pos2) {
+    let ctx = Context::default();
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
+    let mut out = ctx.run_ui(
+        RawInput {
+            screen_rect: Some(screen),
+            ..RawInput::default()
+        },
+        |ui| {
+            ui.add(&mut *map);
+        },
+    );
+    out.textures_delta.clear();
+    let center = out
+        .shapes
+        .iter()
+        .find_map(|cs| match &cs.shape {
+            Shape::Circle(c) if c.fill.a() > 0 => Some(c.center),
+            _ => None,
+        })
+        .expect("the node is painted");
+    let end = out
+        .shapes
+        .iter()
+        .find_map(|cs| match &cs.shape {
+            Shape::Path(path) => path.points.last().copied(),
+            _ => None,
+        })
+        .expect("the countdown paints an arc");
+    (center, end)
+}
+
+#[test]
+fn a_lasting_countdown_follows_the_outline_of_a_template() {
+    use egui_map::map::objects::{HitContext, NodeContext, NodeOutline, NodeTemplate};
+    use std::rc::Rc;
+
+    struct Plain;
+    impl NodeTemplate for Plain {
+        fn node_ui(&self, ui: &mut egui::Ui, ctx: NodeContext) {
+            ui.painter()
+                .circle_filled(ctx.position, 4.0 * ctx.zoom, ctx.color);
+        }
+        fn outline(&self, ctx: HitContext) -> NodeOutline {
+            NodeOutline::Circle {
+                center: ctx.position,
+                radius: 4.0 * ctx.zoom,
+            }
+        }
+    }
+
+    let mut map = map_with_one_node();
+    map.set_node_template(Rc::new(Plain));
+    map.node(1)
+        .unwrap()
+        .lasting(Duration::from_secs(20))
+        .countdown(Instant::now() - Duration::from_secs(10));
+    let (center, end) = arc_center_and_end(&mut map);
+    assert!(
+        (end.x - center.x).abs() < 0.5 && end.y > center.y + 5.0,
+        "the arc must end below the node at half the time: center {center:?}, end {end:?}"
+    );
+}
+
 /// If the dispatch ignored the recorded choice these would coincide.
 #[test]
 fn the_effect_painted_is_the_one_requested() {

@@ -9,9 +9,10 @@
 //!   immediately and forever: `halo`, `blink`, `orbit`, and `ripple` with
 //!   `NodeHandle::lasting`, which keeps a new ring coming with no break where
 //!   it ends and starts over. Event ones are fired again on a timer of their
-//!   own: `pulse`, `countdown`, `scale_in`, `crosshair`, and `pulse` with
+//!   own: `pulse`, `scale_in`, `crosshair`, `pulse` with
 //!   `NodeHandle::lasting` too, which repeats and fades out for a few seconds
-//!   instead of playing once.
+//!   instead of playing once, and `countdown` with `lasting`, whose ring
+//!   empties over exactly the time asked for.
 //! - **Segment effects** (right), one segment each, between two plain nodes.
 //!   Lasting: `comet`, `dash`, `glow_band`, `chevrons`. Event: `flash`,
 //!   `comet_once` and `wipe`. Every one but `flash` has a direction, set with
@@ -263,7 +264,11 @@ fn main() -> eframe::Result<()> {
     // several different animations are usually playing at once.
     let mut repeaters = vec![
         on_node(4, 2200, 0, |node, at| node.pulse(at)),
-        on_node(6, 3000, 900, |node, at| node.countdown(at)),
+        // The ring empties over the time asked for with `lasting`: three
+        // seconds, then a pause before it is fired again.
+        on_node(6, 4000, 900, |node, at| {
+            node.lasting(Duration::from_secs(3)).countdown(at)
+        }),
         on_node(7, 1800, 200, |node, at| node.scale_in(at)),
         on_node(8, 2400, 700, |node, at| node.crosshair(at)),
         // Plays for four seconds each time, fading out.
