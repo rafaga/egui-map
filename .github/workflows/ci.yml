@@ -2,8 +2,8 @@ name: CI
 
 # One workflow for the three operating systems. Per system a single job runs
 # clippy, the all-features check and the tests one after the other, so the
-# expensive part of the build (egui, eframe for the examples, Tracy) is
-# compiled once and shared. Pull requests only read the build cache; it is
+# expensive part of the build (egui, eframe for the examples, Tracy)
+# is compiled once and shared. Pull requests only read the build cache; it is
 # written by pushes to master.
 #
 # `Cargo.lock` is not versioned (this is a library), so there is no `--locked`:
@@ -50,6 +50,8 @@ jobs:
           components: rustfmt
       - run: cargo fmt --all -- --check
 
+  # Every system: some code is platform-specific, so a library is checked
+  # natively on each one (the browser target has its own job below).
   test:
     name: clippy and test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
