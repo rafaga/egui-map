@@ -10,6 +10,14 @@
 //! - **A marker.** [`Map::update_marker`] puts one on a node and
 //!   [`Map::remove_marker`] takes it away. The marker fades in and out on its
 //!   own instead of switching on and off.
+//! - **A segment animation.** The line between Alpha and Beta is a dashed
+//!   line whose pattern slides along it ("marching ants"), started with
+//!   `Map::segment(..).dash()`. See `examples/animations.rs` for the whole
+//!   catalog of node and segment effects.
+//! - **A segment animation.** The line between Alpha and Beta is a dashed
+//!   line whose pattern slides along it ("marching ants"), started with
+//!   `Map::segment(..).dash()`. See `examples/animations.rs` for the whole
+//!   catalog of node and segment effects.
 //!
 //! Run with: cargo run --example basic
 
@@ -77,6 +85,13 @@ fn main() -> eframe::Result<()> {
     let mut map = Map::new();
     map.add_hashmap_points(points);
     map.add_lines(segments);
+
+    // A lasting segment effect: Alpha <-> Beta becomes a dashed line whose
+    // pattern keeps sliding along it ("marching ants"), until `clear` is
+    // called on the same handle.
+    map.segment((1, 2))
+        .expect("Alpha <-> Beta is loaded")
+        .dash();
 
     let mut theme = Theme::default();
     let mut marked = false;

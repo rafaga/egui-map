@@ -15,7 +15,8 @@ any minor bump may include breaking changes, called out below as such).
   buttons (`Map::set_theme`), a tooltip on the node under the pointer
   (`Map::hovered_node`) and a button that sets and clears a marker
   (`Map::update_marker`, `Map::remove_marker`, whose return value tells
-  whether there was one).
+  whether there was one). The segment between Alpha and Beta is a dashed line
+  whose pattern slides along it ("marching ants", `Map::segment(..).dash()`).
 
 ### Fixed
 
