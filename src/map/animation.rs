@@ -1534,7 +1534,12 @@ impl SegmentAnimations {
         let dir = delta / len;
         let width = self.dash.width.unwrap_or(DASH_WIDTH);
         let normal = Vec2::new(-dir.y, dir.x) * (width * 0.5);
-        let phase = (time * self.dash.speed).rem_euclid(1.0);
+        // Sampling a fixed screen point at an ever-larger `u` (`phase` growing
+        // with time) makes the pattern crawl towards `a`, against `comet`,
+        // `glow_band` and `chevrons`, which all go from `a` to `b`: negating
+        // the time term makes it slide towards `b` like them (see
+        // `chevrons`).
+        let phase = (-(time * self.dash.speed)).rem_euclid(1.0);
         let u0 = phase;
         let u1 = phase + len / self.dash.period_px;
 
@@ -2701,6 +2706,55 @@ mod tests {
         let animation = SegmentAnimations::default();
         assert_eq!(animation.dash.width, None);
         assert_eq!(dash_half_width(animation, 1.0), DASH_WIDTH / 2.0);
+    }
+
+    #[test]
+    fn dash_and_chevrons_slide_towards_the_second_endpoint() {
+        // The pattern is a texture sampled at `u = phase + x / period`, so a
+        // feature of it sits where that is constant: it moves towards `b`
+        // when the `u` at `a` goes down as time passes. `comet` and
+        // `glow_band` go from `a` to `b`, and the effects that slide a
+        // texture must agree with them.
+        let animation = SegmentAnimations::default();
+        let ctx = Context::default();
+        let u_at_a = |kind: SteadySegmentAnimation, time: f32| -> f32 {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0))),
+                    ..Default::default()
+                },
+                |ui| {
+                    animation.state(kind)(
+                        ui.painter(),
+                        Pos2::ZERO,
+                        Pos2::new(50.0, 0.0),
+                        1.0,
+                        time,
+                        Color32::GREEN,
+                    );
+                },
+            );
+            let u = out
+                .shapes
+                .iter()
+                .find_map(|cs| match &cs.shape {
+                    egui::epaint::Shape::Mesh(mesh) => Some(mesh.vertices[0].uv.x),
+                    _ => None,
+                })
+                .expect("the effect must draw a mesh");
+            out.textures_delta.clear();
+            u
+        };
+        for kind in [
+            SteadySegmentAnimation::Dash,
+            SteadySegmentAnimation::Chevrons,
+        ] {
+            let (early, later) = (u_at_a(kind, 0.1), u_at_a(kind, 0.11));
+            assert!(
+                later < early,
+                "{kind:?} must slide towards `b` (u at `a`: {early} then {later})"
+            );
+        }
     }
 
     #[test]
