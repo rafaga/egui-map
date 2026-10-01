@@ -71,6 +71,13 @@ any minor bump may include breaking changes, called out below as such).
 
 ### Fixed
 
+- The `dash` segment effect ("marching ants") slid from the second endpoint
+  of the segment towards the first, against `comet`, `glow_band` and
+  `chevrons`, which all go from the first to the second. Its pattern is a
+  texture sampled at a growing coordinate, which makes it crawl the other
+  way; `chevrons` already compensated for that, and `dash` now does too. A
+  dashed line that depended on the old sense (reversing the segment's
+  endpoints to make it flow the way the data goes) now runs the other way.
 - `examples/basic.rs` panicked at start-up: it indexed a `Vec` with the node
   ids (1 to 3), so the third one was out of range and the connections went
   to the wrong nodes. The nodes are now keyed by id in a `HashMap` like the
