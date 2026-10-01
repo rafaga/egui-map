@@ -414,6 +414,11 @@ impl NodeHandle<'_> {
     /// Lasting state (`halo`, `blink`, `orbit`) ignores it: it already runs
     /// until cleared.
     ///
+    /// Two effects follow the time you ask for instead of repeating:
+    /// `countdown` empties its ring once over the whole `duration`, so the
+    /// ring is the time left, and `ripple` keeps a new ring coming with no
+    /// break (see [`Animation::lasting_event`](crate::map::animation::Animation::lasting_event)).
+    ///
     /// ```
     /// # use egui_map::map::Map;
     /// # use egui_map::map::objects::MapPoint;
@@ -1806,7 +1811,7 @@ impl Map {
         } else {
             // A lasting notification repeats the effect until `until`; a
             // plain one plays it once.
-            let running = if notification.until.is_some() {
+            let running = if let Some(until) = notification.until {
                 self.settings
                     .animation
                     .lasting_event(notification.animation)(
@@ -1814,6 +1819,7 @@ impl Map {
                     viewport_point.into(),
                     self.zoom,
                     notification.started,
+                    until,
                     color,
                 )
             } else {

@@ -19,9 +19,11 @@ any minor bump may include breaking changes, called out below as such).
   segment itself.
 - `Animation::lasting_event` and `Animation::lasting_event_outline` draw a
   node event effect the way a lasting notification does (repeated, with the
-  `ripple` looping seamlessly), for a `NodeTemplate` that draws the effect
-  itself. `NotificationContext::effect_start`, which restarts the effect every
-  cycle, keeps working but cannot loop a `ripple` seamlessly.
+  `ripple` looping seamlessly and the `countdown` emptying over the whole
+  notification), for a `NodeTemplate` that draws the effect itself; they take
+  the moment the notification starts and the one it ends at.
+  `NotificationContext::effect_start`, which restarts the effect every cycle,
+  keeps working but can do neither.
 - `CometDirection::orient(a, b)` returns the `(from, to)` pair an effect runs
   along in that direction, for a `SegmentTemplate` that draws the effect
   itself. `SegmentStateContext` and `SegmentNotificationContext` have a new
@@ -121,6 +123,14 @@ any minor bump may include breaking changes, called out below as such).
   from a single ring every `duration`, which read as the effect ending and
   starting over. It now builds up its three rings once and then keeps a new
   one coming every stagger, until the notification ends.
+- A `countdown` empties its ring over the time it was asked to last. The ring
+  always emptied over `Countdown::duration` (5 s by default), whatever was
+  asked with `NodeHandle::lasting`: a countdown of 60 s started over every
+  5 s. A lasting `countdown` now empties once over the whole notification,
+  so the ring is the time left. A plain `countdown` still follows
+  `Countdown::duration`.
+- The `countdown` ring empties smoothly. It was drawn in steps of a 48th of a
+  turn, which showed as the end of the arc jumping on a slow countdown.
 - Region labels are laid out again when `pixels_per_point` changes (the
   window moved to a screen with another scale): the cached galleys were
   reused at the old scale, drawn blurry and made epaint warn on every frame.
