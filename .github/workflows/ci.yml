@@ -6,12 +6,15 @@ name: CI
 # is compiled once and shared. Pull requests only read the build cache; it is
 # written by pushes to master.
 #
+# Every pull request that targets master or dev runs it, whatever branch it
+# comes from (`branches` filters on the branch a pull request merges into).
+#
 # `Cargo.lock` is not versioned (this is a library), so there is no `--locked`:
 # CI builds against the newest dependencies that `Cargo.toml` allows, which is
 # what a consumer of the crate gets.
 on:
   pull_request:
-    branches: [master]
+    branches: [master, dev]
     paths-ignore:
       - "**.md"
   push:
