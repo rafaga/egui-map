@@ -42,6 +42,14 @@ any minor bump may include breaking changes, called out below as such).
   effects and the marker are the defaults, drawn along that outline. It also
   shows `NodeHandle::lasting`, a notification that repeats and fades out over
   a few seconds.
+- `examples/node_template_animations.rs` is a six node network (a ring of four
+  and two nodes hanging from opposite sides of it) drawn with a `NodeTemplate`:
+  hexagonal nodes with their name inside, declared with
+  `NodeOutline::Polygon` so the hit area and the selection follow the shape.
+  One node glows (`Animation::glow_outline`, driven by `NodeContext::marker`),
+  a segment has marching ants, and the window has the theme combo box, the
+  tooltip and the marker button of `examples/basic.rs`.
+- `examples/basic.rs`: removed a paragraph of the header that was repeated.
 
 ### Fixed
 

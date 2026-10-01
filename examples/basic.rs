@@ -14,10 +14,6 @@
 //!   line whose pattern slides along it ("marching ants"), started with
 //!   `Map::segment(..).dash()`. See `examples/animations.rs` for the whole
 //!   catalog of node and segment effects.
-//! - **A segment animation.** The line between Alpha and Beta is a dashed
-//!   line whose pattern slides along it ("marching ants"), started with
-//!   `Map::segment(..).dash()`. See `examples/animations.rs` for the whole
-//!   catalog of node and segment effects.
 //!
 //! Run with: cargo run --example basic
 
