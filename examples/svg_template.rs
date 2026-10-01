@@ -1,23 +1,38 @@
 //! SVG rendering example: a NodeTemplate that draws each node as an SVG icon
 //! using egui's image loader pipeline (which rasterizes and caches the
-//! textures automatically), plus a marker and a repeating notification pulse.
+//! textures automatically).
 //!
-//! Also adds a `RegionLabel` behind the network (`Map::add_region_labels`):
-//! unlike node names, its size scales *with* zoom instead of staying a fixed
-//! screen size, and it is always painted first, so it reads as a backdrop
-//! naming the whole rack rather than competing with the icons and lines
-//! drawn over it.
+//! The template writes two methods: [`NodeTemplate::node_ui`], which paints
+//! the icon and its name, and [`NodeTemplate::outline`], which says the node
+//! is the rounded square around them. The selection ring, the marker and the
+//! notification effects are the defaults of `NodeTemplate`, drawn along that
+//! outline, and `Map::hovered_node` uses it as the hit area -- here, to show a
+//! tooltip.
+//!
+//! - **A notification that lasts.** `NodeHandle::lasting` makes the pulse on
+//!   switch-01 repeat and fade out for a few seconds every so often.
+//! - **A region label.** `Map::add_region_labels` adds a `RegionLabel` behind
+//!   the network: unlike node names, its size scales *with* zoom, and it is
+//!   always painted first, so it reads as a backdrop naming the whole rack
+//!   rather than competing with the icons and lines drawn over it.
 //!
 //! Run with: cargo run --example svg_template
 
-use eframe::egui::{self, Align2, Color32, Stroke, Ui, Vec2};
+use eframe::egui::{self, Align2, Vec2};
 use egui_map::map::Map;
 use egui_map::map::objects::{
-    MapPoint, MapSegment, MarkerContext, NodeContext, NodeTemplate, NotificationContext,
-    RegionLabel, SelectionContext, VisibilitySetting,
+    HitContext, MapPoint, MapSegment, NodeContext, NodeOutline, NodeTemplate, RegionLabel,
 };
+use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// Side of the icon, before the zoom.
+const ICON_SIZE: f32 = 24.0;
+/// How long the notification on switch-01 lasts each time, and how often it
+/// starts.
+const NOTIFY_FOR: Duration = Duration::from_secs(5);
+const NOTIFY_EVERY: Duration = Duration::from_secs(8);
 
 struct SvgNodes;
 
@@ -25,8 +40,8 @@ impl NodeTemplate for SvgNodes {
     /// Custom node shape: an SVG icon with the node name below it. The icon
     /// has its own fixed colors, so this template has no use for `ctx.color`
     /// -- see `custom_template.rs` for one that paints with it.
-    fn node_ui(&self, ui: &mut Ui, ctx: NodeContext) {
-        let size = 24.0 * ctx.zoom;
+    fn node_ui(&self, ui: &mut egui::Ui, ctx: NodeContext) {
+        let size = ICON_SIZE * ctx.zoom;
         let source = match ctx.point.get_id() {
             1 => egui::include_image!("router_pool.svg"),
             2 => egui::include_image!("switch_pool.svg"),
@@ -46,47 +61,22 @@ impl NodeTemplate for SvgNodes {
         );
     }
 
-    /// Highlight ring over the node closest to the mouse pointer, outlined in
-    /// `ctx.color` -- the active theme's selection color.
-    fn selection_ui(&self, ui: &mut Ui, ctx: SelectionContext) {
-        ui.painter().circle_stroke(
-            ctx.position,
-            16.0 * ctx.zoom,
-            Stroke::new(2.0 * ctx.zoom, ctx.color),
-        );
-    }
-
-    /// Animated notification: an expanding ring that fades out over 2 seconds.
-    fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
-        let secs = ctx.initial_time.elapsed().as_secs_f32();
-        let alpha = (1.0 - secs / 2.0).clamp(0.0, 1.0);
-        let fading = Color32::from_rgba_unmultiplied(
-            ctx.color.r(),
-            ctx.color.g(),
-            ctx.color.b(),
-            (255.0 * alpha) as u8,
-        );
-        ui.painter().circle_stroke(
-            ctx.position,
-            (16.0 + 30.0 * secs) * ctx.zoom,
-            Stroke::new(3.0 * ctx.zoom, fading),
-        );
-        ui.ctx().request_repaint(); // keep the animation frames coming
-        secs < 2.0 // returning false removes the notification
-    }
-
-    /// Static marker ring drawn over the marked node.
-    fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext) {
-        ui.painter().circle_stroke(
-            ctx.position,
-            20.0 * ctx.zoom,
-            Stroke::new(2.0 * ctx.zoom, Color32::LIGHT_GREEN),
-        );
+    /// The square the icon fills, with rounded corners. The selection ring,
+    /// the marker and the notifications are derived from it by the default
+    /// hooks.
+    fn outline(&self, ctx: HitContext) -> NodeOutline {
+        let size = ICON_SIZE * ctx.zoom;
+        NodeOutline::RoundedRect {
+            rect: egui::Rect::from_center_size(ctx.position, Vec2::splat(size)),
+            corner_radius: 4.0 * ctx.zoom,
+        }
     }
 }
 
 fn main() -> eframe::Result<()> {
-    let mut points = Vec::new();
+    // 1. The nodes, keyed by id. `names` is kept apart for the tooltip.
+    let mut points: HashMap<usize, MapPoint> = HashMap::new();
+    let mut names: HashMap<usize, &str> = HashMap::new();
     for (id, name, x, y) in [
         (1, "router-01", 0.0, 0.0),
         (2, "switch-01", 100.0, 50.0),
@@ -94,39 +84,39 @@ fn main() -> eframe::Result<()> {
     ] {
         let mut point = MapPoint::new(id, [x, y]);
         point.set_name(name.to_string());
-        match point.get_id() {
-            1 => point.connections.push((0, 1)),
-            2 => {
-                point.connections.push((0, 1));
-                point.connections.push((1, 2));
-            }
-            _ => point.connections.push((1, 2)),
+        points.insert(id, point);
+        names.insert(id, name);
+    }
+
+    // 2. Register each connection id on BOTH endpoint nodes, and build the
+    //    line geometry keyed by the same id.
+    let mut segments = Vec::new();
+    for line_id in [(1, 2), (2, 3)] {
+        for endpoint in [line_id.0, line_id.1] {
+            points
+                .get_mut(&endpoint)
+                .expect("the endpoint is one of the nodes above")
+                .connections
+                .push(line_id);
         }
-        points.push(point);
+        let (from, to) = (points[&line_id.0].coords, points[&line_id.1].coords);
+        segments.push(MapSegment::new(line_id, from, to));
     }
-    let mut vec_segmnents = Vec::new();
-    let ids = vec![[1, 2], [2, 3]];
-    for (cont, id) in ids.into_iter().enumerate() {
-        let point1 = points.get(id[0]).unwrap();
-        let point2 = points.get(id[1]).unwrap();
-        let line = MapSegment::new((cont, cont + 1), point1.coords, point2.coords);
-        vec_segmnents.push(line);
-    }
+
+    // 3. Load the nodes, then the lines, the label and the template.
     let mut map = Map::new();
-    map.add_points(points);
-    map.add_lines(vec_segmnents);
+    map.add_hashmap_points(points);
+    map.add_lines(segments);
     map.add_region_labels(vec![RegionLabel {
         text: "Rack A".to_string(),
         center: egui::pos2(60.0, 60.0), // roughly the centroid of the three nodes above
         color: None,                    // default: the active theme's text color, faded
     }]);
     map.set_node_template(Rc::new(SvgNodes));
-    // Show node names on hover so selection_ui gets called.
-    map.settings.node_text_visibility = VisibilitySetting::Hover;
     map.update_marker(0, 3);
 
-    // Re-trigger the notification on node 2 every 3 seconds.
-    let mut last_pulse = Instant::now() - std::time::Duration::from_secs(3);
+    // Start the notification on node 2 right away, then every `NOTIFY_EVERY`.
+    let mut last_notified = Instant::now() - NOTIFY_EVERY;
     let mut loaders_installed = false;
 
     eframe::run_ui_native(
@@ -138,13 +128,18 @@ fn main() -> eframe::Result<()> {
                 egui_extras::install_image_loaders(ui.ctx());
                 loaders_installed = true;
             }
-            if last_pulse.elapsed().as_secs() >= 3 {
+            if last_notified.elapsed() >= NOTIFY_EVERY {
                 if let Some(node) = map.node(2) {
-                    node.pulse(Instant::now());
+                    node.lasting(NOTIFY_FOR).pulse(Instant::now());
                 }
-                last_pulse = Instant::now();
+                last_notified = Instant::now();
             }
-            ui.add(&mut map);
+            let response = ui.add(&mut map);
+            // The node under the pointer: a tooltip with its name and id.
+            if let Some(id) = map.hovered_node() {
+                let name = names.get(&id).copied().unwrap_or("unknown");
+                response.on_hover_text_at_pointer(format!("{name} (node {id})"));
+            }
         },
     )
 }

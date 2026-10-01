@@ -49,6 +49,13 @@ any minor bump may include breaking changes, called out below as such).
   One node glows (`Animation::glow_outline`, driven by `NodeContext::marker`),
   a segment has marching ants, and the window has the theme combo box, the
   tooltip and the marker button of `examples/basic.rs`.
+- `examples/svg_template.rs` implements only `NodeTemplate::node_ui` and
+  `NodeTemplate::outline` (a rounded square around the icon); the selection,
+  the marker and the notification are the defaults, and the pulse on
+  switch-01 uses `NodeHandle::lasting`. A tooltip on the node under the
+  pointer (`Map::hovered_node`) replaces the node-text-on-hover setting. The
+  example also stops indexing a `Vec` with node ids that start at 1, which
+  paired the wrong nodes in the segments.
 - `examples/basic.rs`: removed a paragraph of the header that was repeated.
 
 ### Fixed
