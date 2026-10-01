@@ -61,6 +61,13 @@ any minor bump may include breaking changes, called out below as such).
   indexed a `Vec` with node ids that start at 1, which paired the wrong nodes
   in the segments.
 - `examples/basic.rs`: removed a paragraph of the header that was repeated.
+- `examples/animations.rs` is a visual catalog of the built-in effects on a
+  grid, so nothing overlaps: the node effects on the left (the lasting ones,
+  the event ones, and `pulse` with `NodeHandle::lasting`) and the segment
+  effects on the right, one segment each. Two `RegionLabel`s title the
+  blocks, and the window has the theme combo box and the tooltip of
+  `examples/basic.rs`. The timers are one generic repeater instead of one per
+  kind of effect.
 
 ### Fixed
 
