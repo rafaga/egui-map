@@ -122,24 +122,26 @@ pub const GLOW_PERIOD: f32 = 2.5;
 /// Length, in **screen pixels**, of one chevron repeat of
 /// [`Animation::chevrons`]. Deliberately not scaled by zoom, same reasoning
 /// as [`DASH_PERIOD_PX`].
-pub const CHEVRON_PERIOD_PX: f32 = 60.0;
+pub const CHEVRON_PERIOD_PX: f32 = 12.0;
 /// How many repeats of the chevron pattern [`Animation::chevrons`] slides
 /// through per second. With [`CHEVRON_PERIOD_PX`] this is a little faster than
 /// [`DASH_SPEED`]'s marching ants (18 against 14 pixels per second).
-pub const CHEVRON_SPEED: f32 = 0.3;
+pub const CHEVRON_SPEED: f32 = 1.5;
 /// Width, in **screen pixels**, of the ribbon [`Animation::chevrons`] paints.
 /// Not scaled by zoom, like [`CHEVRON_PERIOD_PX`]: the arrow's shape depends on
 /// the ratio of the two, so scaling only one of them squashed or stretched it
 /// every time the zoom changed.
-pub const CHEVRON_WIDTH: f32 = 28.0;
+pub const CHEVRON_WIDTH: f32 = 16.0;
 /// How far the legs of each [`Animation::chevrons`] arrow sweep back from its
 /// tip, see [`Chevrons::leg_slope`]. With [`CHEVRON_WIDTH`] and
-/// [`CHEVRON_PERIOD_PX`] it makes the legs about 45 degrees to the segment.
-pub const CHEVRON_LEG_SLOPE: f32 = 0.45;
+/// [`CHEVRON_PERIOD_PX`] it makes the legs about 45 degrees to the segment
+/// (`width / period`).
+pub const CHEVRON_LEG_SLOPE: f32 = 1.33;
 /// Stroke thickness of each [`Animation::chevrons`] arrow as a fraction of the
-/// period, see [`Chevrons::stroke`]: a bold arrow, about 10 pixels thick at the
-/// default period (it was about 2).
-pub const CHEVRON_STROKE: f32 = 0.12;
+/// period, see [`Chevrons::stroke`]: a bold arrow, a little over 7 pixels
+/// across at the default period (it was about 4), leaving a gap of about 5
+/// pixels to the next one. Above roughly `0.4` the arrows run into each other.
+pub const CHEVRON_STROKE: f32 = 0.30;
 /// Radius, in screen pixels at `zoom == 1`, of the dot of
 /// [`Animation::comet`] and [`Animation::comet_once`]: the width of the
 /// stroke [`Animation::wipe`] draws (`Wipe::width`), so the dot reads as a
@@ -1959,7 +1961,11 @@ impl SegmentAnimations {
             let ideal_u = TIP_U - leg_slope * (v - 0.5).abs();
             for i in 0..WIDTH {
                 let u = i as f32 / WIDTH as f32;
-                let distance = (u - ideal_u).abs();
+                // Measured around the tile (it repeats along `u`), so a stroke
+                // wide enough to spill past an edge continues on the other
+                // side instead of leaving a seam where two tiles meet.
+                let around = (u - ideal_u).abs();
+                let distance = around.min(1.0 - around);
                 let alpha = (1.0 - distance / stroke).clamp(0.0, 1.0);
                 let alpha = alpha * alpha * (3.0 - 2.0 * alpha); // smoothstep
                 pixels.push(Color32::from_white_alpha((255.0 * alpha).round() as u8));
@@ -2760,9 +2766,9 @@ mod tests {
         let ctx = Context::default();
         let default = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, CHEVRON_STROKE);
         let flatter = SegmentAnimations::chevrons_texture(&ctx, 0.0, CHEVRON_STROKE);
-        let thicker = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, 0.3);
+        let thinner = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, 0.1);
         assert_ne!(default.id(), flatter.id());
-        assert_ne!(default.id(), thicker.id());
+        assert_ne!(default.id(), thinner.id());
         // A zero stroke must not divide by zero.
         let _ = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, 0.0);
     }
