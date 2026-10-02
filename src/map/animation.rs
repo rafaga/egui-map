@@ -119,32 +119,22 @@ pub const GLOW_BAND_THICKNESS: f32 = 5.0;
 /// How long one full pulse of [`Animation::glow`] takes (dim, bright, dim),
 /// in seconds.
 pub const GLOW_PERIOD: f32 = 2.5;
-/// Length, in **screen pixels**, of one chevron repeat of
-/// [`Animation::chevrons`]. Deliberately not scaled by zoom, same reasoning
-/// as [`DASH_PERIOD_PX`].
-pub const CHEVRON_PERIOD_PX: f32 = 12.0;
+/// Length of one chevron repeat of [`Animation::chevrons`], in widths of the
+/// ribbon ([`Chevrons::width`], the thickness of the segment line): the blocks
+/// are as tall as the line and their spacing follows from that, so the shape
+/// is the same whatever the line width or the zoom.
+pub const CHEVRON_PERIOD: f32 = 3.0;
 /// How many repeats of the chevron pattern [`Animation::chevrons`] slides
-/// through per second. With [`CHEVRON_PERIOD_PX`] this is a little faster than
-/// [`DASH_SPEED`]'s marching ants (18 against 14 pixels per second).
-pub const CHEVRON_SPEED: f32 = 1.5;
-/// Width, in **screen pixels**, of the ribbon [`Animation::chevrons`] paints.
-/// Not scaled by zoom, like [`CHEVRON_PERIOD_PX`]: the arrow's shape depends on
-/// the ratio of the two, so scaling only one of them squashed or stretched it
-/// every time the zoom changed.
-///
-/// The same as [`GLOW_BAND_THICKNESS`]: the arrows are never taller than the
-/// glow band, so the two lasting effects take the same room on the line.
-pub const CHEVRON_WIDTH: f32 = GLOW_BAND_THICKNESS;
-/// How far the legs of each [`Animation::chevrons`] arrow sweep back from its
-/// tip, see [`Chevrons::leg_slope`]. With [`CHEVRON_WIDTH`] and
-/// [`CHEVRON_PERIOD_PX`] the legs are a little flatter than 45 degrees to the
-/// segment, which reads better on a ribbon this low.
-pub const CHEVRON_LEG_SLOPE: f32 = 0.5;
-/// Stroke thickness of each [`Animation::chevrons`] arrow as a fraction of the
-/// period, see [`Chevrons::stroke`]: about 4 pixels across at the default
-/// period, as thick as the low ribbon allows, with a gap of about 8 pixels to
-/// the next one. Above roughly `0.4` the arrows run into each other.
-pub const CHEVRON_STROKE: f32 = 0.16;
+/// through per second. With the default line width (2 pixels) that is
+/// 12 pixels per second, about the pace of [`DASH_SPEED`]'s marching ants.
+pub const CHEVRON_SPEED: f32 = 2.0;
+/// How much of the period each [`Animation::chevrons`] block occupies along
+/// the segment, see [`Chevrons::fill`]; the rest is the gap to the next one.
+pub const CHEVRON_FILL: f32 = 0.75;
+/// How deep the point of each [`Animation::chevrons`] block is, as a fraction
+/// of the ribbon width, see [`Chevrons::tip_depth`]. A half makes the edges
+/// 45 degrees to the segment.
+pub const CHEVRON_TIP_DEPTH: f32 = 0.5;
 /// Radius, in screen pixels at `zoom == 1`, of the dot of
 /// [`Animation::comet`] and [`Animation::comet_once`]: the width of the
 /// stroke [`Animation::wipe`] draws (`Wipe::width`), so the dot reads as a
@@ -301,10 +291,11 @@ impl SegmentAnimations {
     }
 
     /// `self` with the effects that follow the default segment stroke given
-    /// its width: a [`Dash::width`] of `None` becomes `line_width` (screen
-    /// pixels), so [`SegmentAnimations::dash`] is as thick as the line it runs
-    /// over. With no default stroke (`line_width` of `None`) it stays `None`
-    /// and falls back to [`DASH_WIDTH`]. A width set explicitly is kept.
+    /// its width: a [`Dash::width`] or [`Chevrons::width`] of `None` becomes
+    /// `line_width` (screen pixels), so [`SegmentAnimations::dash`] and
+    /// [`SegmentAnimations::chevrons`] are as thick as the line they run over.
+    /// With no default stroke (`line_width` of `None`) they stay `None` and
+    /// fall back to [`DASH_WIDTH`]. A width set explicitly is kept.
     ///
     /// The map applies this before handing the animations to the segment
     /// effects and to a [`SegmentTemplate`](crate::map::objects::SegmentTemplate),
@@ -313,6 +304,9 @@ impl SegmentAnimations {
         self.with(|animation| {
             if animation.dash.width.is_none() {
                 animation.dash.width = line_width;
+            }
+            if animation.chevrons.width.is_none() {
+                animation.chevrons.width = line_width;
             }
         })
     }
@@ -507,27 +501,27 @@ impl Default for GlowBand {
     }
 }
 
-/// Tunables of [`SegmentAnimations::chevrons`]: arrows sliding along the
-/// segment.
+/// Tunables of [`SegmentAnimations::chevrons`]: solid arrow-shaped blocks
+/// sliding along the segment, as tall as the line itself.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Chevrons {
-    /// Length of one chevron repeat, in **screen pixels** (not scaled by zoom).
-    pub period_px: f32,
+    /// Length of one repeat, in widths of the ribbon ([`Self::width`]).
+    pub period: f32,
     /// How many repeats slide through per second.
     pub speed: f32,
-    /// Ribbon width, in **screen pixels** (not scaled by zoom, so the arrow
-    /// keeps its shape at any zoom).
-    pub width: f32,
-    /// How far the two legs of each arrow sweep back from the tip, as a
-    /// fraction of [`Self::period_px`] per unit of the ribbon's width: `0.0`
-    /// is a straight bar across the segment, larger values a more open `>`.
-    /// The default makes the legs about 45 degrees to the segment with the
-    /// default [`Self::width`] and [`Self::period_px`]; keep it near
-    /// `width / period_px` if you change those.
-    pub leg_slope: f32,
-    /// Stroke thickness of the arrow, as a fraction of [`Self::period_px`].
-    /// Soft-edged either way.
-    pub stroke: f32,
+    /// How much of the period each block occupies along the segment, `0.0` to
+    /// `1.0`; the rest is the gap to the next block.
+    pub fill: f32,
+    /// How deep the point of each block is (and the notch at its back), as a
+    /// fraction of the ribbon width: `0.0` makes plain rectangles, `0.5` edges
+    /// at 45 degrees to the segment.
+    pub tip_depth: f32,
+    /// Ribbon width, in **screen pixels** (not scaled by zoom, so the blocks
+    /// keep their shape at any zoom): `None` follows the thickness of the
+    /// default segment stroke, like [`Dash::width`], and falls back to
+    /// [`DASH_WIDTH`] without one. The blocks are as tall as the line, and
+    /// [`Self::period`] is measured in this width.
+    pub width: Option<f32>,
 }
 
 impl Chevrons {
@@ -541,11 +535,12 @@ impl Chevrons {
 impl Default for Chevrons {
     fn default() -> Self {
         Self {
-            period_px: CHEVRON_PERIOD_PX,
+            period: CHEVRON_PERIOD,
             speed: CHEVRON_SPEED,
-            width: CHEVRON_WIDTH,
-            leg_slope: CHEVRON_LEG_SLOPE,
-            stroke: CHEVRON_STROKE,
+            fill: CHEVRON_FILL,
+            tip_depth: CHEVRON_TIP_DEPTH,
+            // Follows the default stroke unless it is set.
+            width: None,
         }
     }
 }
@@ -1845,10 +1840,10 @@ impl SegmentAnimations {
         handle
     }
 
-    /// One frame of a row of arrow shapes sliding along the segment. `time`
-    /// is the frame time in seconds; the pattern repeats every
-    /// [`Chevrons::period_px`] screen pixels and slides at
-    /// [`Chevrons::speed`] repeats per second.
+    /// One frame of a row of solid arrow-shaped blocks sliding along the
+    /// segment, as tall as the line. `time` is the frame time in seconds; the
+    /// pattern repeats every [`Chevrons::period`] widths of the ribbon and
+    /// slides at [`Chevrons::speed`] repeats per second.
     ///
     /// Reads as *"direction of travel"*, more explicit at a glance than
     /// [`SegmentAnimations::comet`]'s single dot. Same mesh-building shape as
@@ -1861,9 +1856,10 @@ impl SegmentAnimations {
     ///
     /// The ribbon is [`Chevrons::width`] screen pixels wide whatever the zoom
     /// (`zoom` is unused, and kept so every steady segment effect has the same
-    /// signature, like [`SegmentAnimations::dash`]): the arrow's shape is the
-    /// ratio of that width to [`Chevrons::period_px`], and both are in screen
-    /// pixels, so it never gets squashed or stretched when the map is zoomed.
+    /// signature, like [`SegmentAnimations::dash`]): the shape of a block is
+    /// the ratio of that width to the period, and the period is measured in
+    /// that width, so it never gets squashed or stretched when the map is
+    /// zoomed or the line width changes.
     pub fn chevrons(
         &self,
         painter: &Painter,
@@ -1879,7 +1875,8 @@ impl SegmentAnimations {
             return;
         }
         let dir = delta / len;
-        let normal = Vec2::new(-dir.y, dir.x) * (self.chevrons.width * 0.5);
+        let width = self.chevrons.width.unwrap_or(DASH_WIDTH);
+        let normal = Vec2::new(-dir.y, dir.x) * (width * 0.5);
         // `u0 < u1` (below) maps the texture's own +u direction onto the
         // segment's `a -> b` direction, and the arrow tip sits at the
         // texture's higher `u` (see `chevrons_texture`) -- so in any single
@@ -1891,10 +1888,13 @@ impl SegmentAnimations {
         // keeps the two in agreement.
         let phase = (-(time * self.chevrons.speed)).rem_euclid(1.0);
         let u0 = phase;
-        let u1 = phase + len / self.chevrons.period_px;
+        let u1 = phase + len / (self.chevrons.period * width);
 
-        let texture =
-            Self::chevrons_texture(painter.ctx(), self.chevrons.leg_slope, self.chevrons.stroke);
+        // How far the edges of a block sweep back from its tip, in fractions
+        // of the period per unit of ribbon width: `tip_depth` ribbon widths
+        // over a period of `period` ribbon widths.
+        let leg_slope = 2.0 * self.chevrons.tip_depth / self.chevrons.period;
+        let texture = Self::chevrons_texture(painter.ctx(), leg_slope, self.chevrons.fill);
         let mut mesh = Mesh::with_texture(texture.id());
         mesh.vertices.extend([
             Vertex {
@@ -1927,54 +1927,30 @@ impl SegmentAnimations {
     /// pattern as [`SegmentAnimations::dash_texture`].
     ///
     /// A genuinely 2D tile, unlike `dash`'s 1x32 strip: for each row `v`
-    /// (0 at one long edge of the ribbon, 1 at the other) the arrow's stroke
-    /// sits at an "ideal" `u` that moves back from a tip near the leading
-    /// edge as `v` moves away from the centreline in either direction --
-    /// tracing the two legs of a `>` shape -- and each texel's alpha falls
-    /// off with its distance from that ideal `u`, smoothstepped for a soft
-    /// stroke. [`TextureWrapMode::Repeat`] tiles it along `u`; `v` never
-    /// leaves `[0, 1]` in the mesh above, so wrapping never triggers on that
-    /// axis.
+    /// (0 at one long edge of the ribbon, 1 at the other) the solid block
+    /// ends at a front edge `u` that moves back from a tip as `v` moves away
+    /// from the centreline in either direction -- tracing the point of a `>`
+    /// -- and starts `fill` of the period behind it, parallel to the front,
+    /// which cuts the matching notch at its back. A texel's alpha is its
+    /// coverage by the block, with a one-texel soft edge.
+    /// [`TextureWrapMode::Repeat`] tiles it along `u`; `v` never leaves
+    /// `[0, 1]` in the mesh above, so wrapping never triggers on that axis.
     ///
-    /// The shape comes from [`Chevrons::leg_slope`] and [`Chevrons::stroke`];
-    /// one texture is cached per distinct pair, so changing them while the
-    /// app runs registers a new one (a few kilobytes) the first time it is
-    /// drawn.
-    fn chevrons_texture(ctx: &Context, leg_slope: f32, stroke: f32) -> TextureHandle {
+    /// The shape comes from `leg_slope` (how far the edges sweep back, see
+    /// [`SegmentAnimations::chevrons`]) and [`Chevrons::fill`]; one texture is
+    /// cached per distinct pair, so changing them while the app runs
+    /// registers a new one (a few kilobytes) the first time it is drawn.
+    fn chevrons_texture(ctx: &Context, leg_slope: f32, fill: f32) -> TextureHandle {
         let id = Id::new((
             "egui_map::chevrons_texture",
             leg_slope.to_bits(),
-            stroke.to_bits(),
+            fill.to_bits(),
         ));
         if let Some(handle) = ctx.data(|d| d.get_temp::<TextureHandle>(id)) {
             return handle;
         }
 
-        // Finer than `dash`'s strip: the ribbon is only a few pixels wide, so
-        // the tile needs the rows to keep the arrow's legs smooth.
-        const WIDTH: usize = 64;
-        const HEIGHT: usize = 32;
-        const TIP_U: f32 = 0.75;
-        // Guards the division below against a zero or negative stroke.
-        let stroke = stroke.max(f32::EPSILON);
-
-        let mut pixels = Vec::with_capacity(WIDTH * HEIGHT);
-        for j in 0..HEIGHT {
-            let v = j as f32 / (HEIGHT - 1) as f32;
-            let ideal_u = TIP_U - leg_slope * (v - 0.5).abs();
-            for i in 0..WIDTH {
-                let u = i as f32 / WIDTH as f32;
-                // Measured around the tile (it repeats along `u`), so a stroke
-                // wide enough to spill past an edge continues on the other
-                // side instead of leaving a seam where two tiles meet.
-                let around = (u - ideal_u).abs();
-                let distance = around.min(1.0 - around);
-                let alpha = (1.0 - distance / stroke).clamp(0.0, 1.0);
-                let alpha = alpha * alpha * (3.0 - 2.0 * alpha); // smoothstep
-                pixels.push(Color32::from_white_alpha((255.0 * alpha).round() as u8));
-            }
-        }
-        let image = ColorImage::new([WIDTH, HEIGHT], pixels);
+        let image = Self::chevrons_image(leg_slope, fill);
         let handle = ctx.load_texture(
             "egui_map::chevrons",
             image,
@@ -1987,6 +1963,48 @@ impl SegmentAnimations {
         );
         ctx.data_mut(|d| d.insert_temp(id, handle.clone()));
         handle
+    }
+
+    /// Texture width, in texels (along the segment).
+    const CHEVRON_TILE_WIDTH: usize = 64;
+    /// Texture height, in texels (across the ribbon).
+    const CHEVRON_TILE_HEIGHT: usize = 32;
+    /// Where the tip of the block sits in the tile, in tile units.
+    const CHEVRON_TIP_U: f32 = 0.9;
+
+    /// The pixels of the tile [`Self::chevrons_texture`] uploads: white with
+    /// an alpha that is `1` inside a block and `0` in the gap (see there for
+    /// how the shape is traced). Finer than `dash`'s strip because the ribbon
+    /// is only a few pixels wide, so the tile needs the rows to keep the
+    /// edges of the point smooth.
+    fn chevrons_image(leg_slope: f32, fill: f32) -> ColorImage {
+        let (width, height) = (Self::CHEVRON_TILE_WIDTH, Self::CHEVRON_TILE_HEIGHT);
+        // Width of the soft edge, in tile units: one texel.
+        let soft = 1.0 / width as f32;
+        let fill = fill.clamp(0.0, 1.0);
+        let margin = (1.0 - fill) * 0.5;
+
+        let mut pixels = Vec::with_capacity(width * height);
+        for j in 0..height {
+            let v = j as f32 / (height - 1) as f32;
+            let front = Self::CHEVRON_TIP_U - leg_slope * (v - 0.5).abs();
+            for i in 0..width {
+                let u = (i as f32 + 0.5) / width as f32;
+                // How far this texel is behind the block's front edge (negative
+                // ahead of it), around the tile (it repeats along `u`), so a
+                // block that spills past an edge continues on the other side
+                // instead of leaving a seam where two tiles meet. The window
+                // is centred on the block, so the gap is split evenly on both
+                // sides of it. Inside the block while it is between `0` and
+                // `fill`; each of the two edges is one texel wide.
+                let behind = (front - u + margin).rem_euclid(1.0) - margin;
+                let alpha = (behind / soft + 0.5)
+                    .min((fill - behind) / soft + 0.5)
+                    .clamp(0.0, 1.0);
+                pixels.push(Color32::from_white_alpha((255.0 * alpha).round() as u8));
+            }
+        }
+        ColorImage::new([width, height], pixels)
     }
 }
 
@@ -2756,24 +2774,70 @@ mod tests {
         animation.chevrons(&painter, a, a, 1.0, 0.0, Color32::GREEN);
     }
 
+    /// The `leg_slope` the default tunables give `chevrons`.
+    fn default_chevron_slope() -> f32 {
+        2.0 * CHEVRON_TIP_DEPTH / CHEVRON_PERIOD
+    }
+
     #[test]
     fn chevrons_texture_is_registered_once_per_context() {
         let ctx = Context::default();
-        let first = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, CHEVRON_STROKE);
-        let second = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, CHEVRON_STROKE);
+        let slope = default_chevron_slope();
+        let first = SegmentAnimations::chevrons_texture(&ctx, slope, CHEVRON_FILL);
+        let second = SegmentAnimations::chevrons_texture(&ctx, slope, CHEVRON_FILL);
         assert_eq!(first.id(), second.id());
     }
 
     #[test]
     fn chevrons_texture_follows_its_shape_settings() {
         let ctx = Context::default();
-        let default = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, CHEVRON_STROKE);
-        let flatter = SegmentAnimations::chevrons_texture(&ctx, 0.0, CHEVRON_STROKE);
-        let thinner = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, 0.1);
-        assert_ne!(default.id(), flatter.id());
-        assert_ne!(default.id(), thinner.id());
-        // A zero stroke must not divide by zero.
-        let _ = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, 0.0);
+        let slope = default_chevron_slope();
+        let default = SegmentAnimations::chevrons_texture(&ctx, slope, CHEVRON_FILL);
+        let square = SegmentAnimations::chevrons_texture(&ctx, 0.0, CHEVRON_FILL);
+        let shorter = SegmentAnimations::chevrons_texture(&ctx, slope, 0.5);
+        assert_ne!(default.id(), square.id());
+        assert_ne!(default.id(), shorter.id());
+        // Out-of-range fills are clamped, not a panic.
+        let _ = SegmentAnimations::chevrons_texture(&ctx, slope, -1.0);
+        let _ = SegmentAnimations::chevrons_texture(&ctx, slope, 5.0);
+    }
+
+    #[test]
+    fn chevrons_image_is_a_solid_block_with_a_point_and_a_gap() {
+        let image = SegmentAnimations::chevrons_image(default_chevron_slope(), CHEVRON_FILL);
+        let width = SegmentAnimations::CHEVRON_TILE_WIDTH;
+        let height = SegmentAnimations::CHEVRON_TILE_HEIGHT;
+        let alpha =
+            |row: usize, u: f32| image.pixels[row * width + (u * width as f32) as usize].a();
+        let middle = height / 2;
+        let edge = 0;
+
+        // On the centreline the block runs from its notch (about 0.15) to its
+        // tip (about 0.9); the rest of the tile is the gap.
+        assert_eq!(alpha(middle, 0.5), 255, "inside the block");
+        assert_eq!(alpha(middle, 0.88), 255, "just behind the tip");
+        assert_eq!(alpha(middle, 0.95), 0, "in the gap ahead of the tip");
+        assert_eq!(alpha(middle, 0.05), 0, "in the gap behind the notch");
+        // At the edge of the ribbon the front has swept back (the point) and
+        // the back with it (the notch).
+        assert_eq!(alpha(edge, 0.8), 0, "ahead of the front at the edge");
+        assert_eq!(alpha(edge, 0.1), 255, "where the notch is not yet cut");
+        assert_eq!(alpha(middle, 0.1), 0, "the notch at the centreline");
+    }
+
+    #[test]
+    fn chevrons_image_has_no_seam_between_repeats() {
+        // Plain rectangles (no point) filling 0.95 of the period run from
+        // `-0.05` to the front at `0.9`: the block spills past the tile's edge
+        // and must continue on the other side, with the gap only at
+        // `0.9..0.95`.
+        let image = SegmentAnimations::chevrons_image(0.0, 0.95);
+        let width = SegmentAnimations::CHEVRON_TILE_WIDTH;
+        let row = SegmentAnimations::CHEVRON_TILE_HEIGHT / 2;
+        let alpha = |column: usize| image.pixels[row * width + column].a();
+        assert_eq!(alpha(0), 255, "first column, inside the block");
+        assert_eq!(alpha(width - 1), 255, "last column, the block's other side");
+        assert_eq!(alpha((0.92 * width as f32) as usize), 0, "the gap");
     }
 
     #[test]
@@ -2832,11 +2896,12 @@ mod tests {
         assert_eq!(
             a.chevrons,
             Chevrons {
-                period_px: CHEVRON_PERIOD_PX,
+                period: CHEVRON_PERIOD,
                 speed: CHEVRON_SPEED,
-                width: CHEVRON_WIDTH,
-                leg_slope: CHEVRON_LEG_SLOPE,
-                stroke: CHEVRON_STROKE
+                fill: CHEVRON_FILL,
+                tip_depth: CHEVRON_TIP_DEPTH,
+                // Follows the default stroke unless it is set.
+                width: None
             }
         );
     }
@@ -2889,22 +2954,41 @@ mod tests {
     /// straddle the segment line, so the farthest vertex from the centerline
     /// is half the ribbon.
     fn dash_half_width(animation: SegmentAnimations, zoom: f32) -> f32 {
+        ribbon_half_width(|painter| {
+            animation.dash(
+                painter,
+                Pos2::ZERO,
+                Pos2::new(50.0, 0.0),
+                zoom,
+                0.0,
+                Color32::GREEN,
+            );
+        })
+    }
+
+    /// [`dash_half_width`] for the chevrons.
+    fn chevrons_half_width(animation: SegmentAnimations, zoom: f32) -> f32 {
+        ribbon_half_width(|painter| {
+            animation.chevrons(
+                painter,
+                Pos2::ZERO,
+                Pos2::new(50.0, 0.0),
+                zoom,
+                0.0,
+                Color32::GREEN,
+            );
+        })
+    }
+
+    /// Half the width of the mesh `draw` paints along a horizontal segment.
+    fn ribbon_half_width(draw: impl Fn(&Painter)) -> f32 {
         let ctx = Context::default();
         let mut out = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0))),
                 ..Default::default()
             },
-            |ui| {
-                animation.dash(
-                    ui.painter(),
-                    Pos2::ZERO,
-                    Pos2::new(50.0, 0.0),
-                    zoom,
-                    0.0,
-                    Color32::GREEN,
-                );
-            },
+            |ui| draw(ui.painter()),
         );
         let offset = out
             .shapes
@@ -2918,9 +3002,30 @@ mod tests {
                 ),
                 _ => None,
             })
-            .expect("dash must draw a mesh");
+            .expect("the effect must draw a mesh");
         out.textures_delta.clear();
         offset
+    }
+
+    #[test]
+    fn the_chevrons_are_as_tall_as_the_line_and_do_not_depend_on_the_zoom() {
+        for line_width in [1.0, 2.0, 5.0, 10.0] {
+            let animation = SegmentAnimations::default().with_line_width(Some(line_width));
+            for zoom in [0.1, 1.0, 8.0] {
+                assert_eq!(
+                    chevrons_half_width(animation, zoom) * 2.0,
+                    line_width,
+                    "line_width {line_width}, zoom {zoom}"
+                );
+            }
+        }
+        // An explicit width wins, and with no line to follow it is the dash's.
+        let explicit = SegmentAnimations::default().with(|s| s.chevrons.width = Some(7.0));
+        assert_eq!(chevrons_half_width(explicit, 1.0) * 2.0, 7.0);
+        assert_eq!(
+            chevrons_half_width(SegmentAnimations::default(), 1.0) * 2.0,
+            DASH_WIDTH
+        );
     }
 
     #[test]
@@ -3022,20 +3127,29 @@ mod tests {
     }
 
     #[test]
-    fn with_line_width_fills_in_only_a_missing_dash_width() {
+    fn with_line_width_fills_in_only_a_missing_dash_and_chevrons_width() {
         let followed = SegmentAnimations::default().with_line_width(Some(4.0));
         assert_eq!(followed.dash.width, Some(4.0));
+        assert_eq!(followed.chevrons.width, Some(4.0));
         // A width set on purpose wins over the line's.
         let explicit = SegmentAnimations::default()
-            .with(|s| s.dash.width = Some(9.0))
+            .with(|s| {
+                s.dash.width = Some(9.0);
+                s.chevrons.width = Some(6.0);
+            })
             .with_line_width(Some(4.0));
         assert_eq!(explicit.dash.width, Some(9.0));
+        assert_eq!(explicit.chevrons.width, Some(6.0));
         // No default stroke to follow: left to fall back to `DASH_WIDTH`.
         let none = SegmentAnimations::default().with_line_width(None);
         assert_eq!(none.dash.width, None);
+        assert_eq!(none.chevrons.width, None);
         // Nothing else is touched.
         assert_eq!(
-            followed.with(|s| s.dash.width = None),
+            followed.with(|s| {
+                s.dash.width = None;
+                s.chevrons.width = None;
+            }),
             SegmentAnimations::default()
         );
     }

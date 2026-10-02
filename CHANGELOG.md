@@ -37,20 +37,21 @@ any minor bump may include breaking changes, called out below as such).
 - The comet dot is smaller: it has the radius of the `wipe` stroke
   (`COMET_DOT_RADIUS`, 2.5 pixels, down from 4, with a floor of
   `COMET_DOT_MIN`, 1.5) in `comet` and `comet_once`.
-- The `chevrons` are a closer, lower, soft-edged arrow: the period is
-  `CHEVRON_PERIOD_PX` 12 (was 28) and the stroke `CHEVRON_STROKE` 0.16 of it,
-  about 4 pixels across with a gap of about 8 to the next arrow, on a ribbon
-  as high as the glow band (`CHEVRON_WIDTH`, 5, was 10), sliding at
-  `CHEVRON_SPEED` 1.5 (a little faster than `dash`). A stroke above about 0.4
-  of the period makes the arrows run into each other. The texture is continuous across repeats now,
-  so a wide stroke leaves no seam. All of it is tunable through
-  `SegmentAnimations`, and the shape of the arrow now is too:
-  `Chevrons::leg_slope` (how open the `>` is) and `Chevrons::stroke` (how
-  thick), with `CHEVRON_LEG_SLOPE` and `CHEVRON_STROKE` as defaults. A texture
-  is cached per distinct pair of them. The ribbon width of `chevrons` is now
-  in screen pixels like its period, instead of being multiplied by the zoom:
-  the arrow's shape is the ratio of the two, so it was squashed or stretched
-  whenever the map was zoomed.
+- **Breaking:** the `chevrons` are solid arrow-shaped blocks as tall as the
+  segment line, instead of thin arrow outlines on a ribbon of their own.
+  `Chevrons` is now `period` (in widths of the ribbon, `CHEVRON_PERIOD` 3),
+  `speed` (`CHEVRON_SPEED` 2 repeats per second), `fill` (how much of the
+  period a block takes, `CHEVRON_FILL` 0.75), `tip_depth` (how deep the point
+  is as a fraction of the width, `CHEVRON_TIP_DEPTH` 0.5, edges at 45 degrees)
+  and `width`, which like `Dash::width` is `None` to follow the default
+  segment stroke (`SegmentAnimations::with_line_width` fills it in) and falls
+  back to `DASH_WIDTH`. The old `period_px`, `leg_slope` and `stroke` are gone,
+  and `CHEVRON_PERIOD_PX`, `CHEVRON_WIDTH`, `CHEVRON_LEG_SLOPE` and
+  `CHEVRON_STROKE` with them. The ribbon width is in screen pixels, not
+  multiplied by the zoom, and the period follows it, so a block keeps its
+  shape when the map is zoomed or the line gets thicker. They are drawn with
+  the theme's `alert` color, or the `color()` you gave. A texture is cached
+  per distinct pair of shape settings.
 - **Breaking:** `comet_once` takes its direction like every other segment
   effect, with the modifier: `segment.direction(CometDirection::Reverse)
   .comet_once(at)` instead of `segment.comet_once(at, CometDirection::Reverse)`.
