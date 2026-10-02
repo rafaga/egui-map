@@ -117,8 +117,10 @@ pub const GLOW_BAND_PERIOD: f32 = 2.2;
 /// [`Animation::glow_band`] paints. Deliberately not scaled by zoom, same
 /// reasoning as [`DASH_PERIOD_PX`].
 pub const GLOW_BAND_LENGTH_PX: f32 = 40.0;
-/// Width, before the `zoom` multiplier, of the ribbon [`Animation::glow_band`]
-/// paints.
+/// Width, in **screen pixels**, of the ribbon [`Animation::glow_band`] paints.
+/// Not scaled by zoom, like the default stroke it runs over and the other
+/// lasting segment effects ([`DASH_WIDTH`], [`Chevrons::width`]): the band
+/// keeps the same thickness however far the map is zoomed.
 pub const GLOW_BAND_THICKNESS: f32 = 5.0;
 /// How long one full pulse of [`Animation::glow`] takes (dim, bright, dim),
 /// in seconds.
@@ -517,7 +519,7 @@ pub struct GlowBand {
     pub period: f32,
     /// Length of the visible band, in **screen pixels** (not scaled by zoom).
     pub length_px: f32,
-    /// Ribbon width, before the `zoom` multiplier.
+    /// Ribbon width, in **screen pixels** (not scaled by zoom).
     pub thickness: f32,
 }
 
@@ -1804,12 +1806,17 @@ impl SegmentAnimations {
     /// `1.0`, sampling clamps to that zero-alpha edge texel, so the band
     /// fades out before either endpoint instead of popping back in like
     /// `dash`'s repeating pattern would. A zero-length segment is skipped.
+    ///
+    /// The ribbon is [`GlowBand::thickness`] screen pixels wide whatever the
+    /// zoom (`zoom` is unused, and kept so every steady segment effect has the
+    /// same signature, like [`SegmentAnimations::dash`] and
+    /// [`SegmentAnimations::chevrons`]).
     pub fn glow_band(
         &self,
         painter: &Painter,
         a: Pos2,
         b: Pos2,
-        zoom: f32,
+        _zoom: f32,
         time: f32,
         color: Color32,
     ) {
@@ -1819,7 +1826,7 @@ impl SegmentAnimations {
             return;
         }
         let dir = delta / len;
-        let normal = Vec2::new(-dir.y, dir.x) * (self.glow_band.thickness * zoom * 0.5);
+        let normal = Vec2::new(-dir.y, dir.x) * (self.glow_band.thickness * 0.5);
 
         // Half-width of the visible band, as a fraction of the segment's own
         // length -- capped at 0.5 so the band can never cover more than the
@@ -3138,6 +3145,20 @@ mod tests {
         })
     }
 
+    /// [`dash_half_width`] for the glow band.
+    fn glow_band_half_width(animation: SegmentAnimations, zoom: f32) -> f32 {
+        ribbon_half_width(|painter| {
+            animation.glow_band(
+                painter,
+                Pos2::ZERO,
+                Pos2::new(50.0, 0.0),
+                zoom,
+                0.0,
+                Color32::GREEN,
+            );
+        })
+    }
+
     /// Half the width of the mesh `draw` paints along a horizontal segment.
     fn ribbon_half_width(draw: impl Fn(&Painter)) -> f32 {
         let ctx = Context::default();
@@ -3254,6 +3275,22 @@ mod tests {
                 later < early,
                 "{kind:?} must slide towards `b` (u at `a`: {early} then {later})"
             );
+        }
+    }
+
+    #[test]
+    fn the_glow_band_ribbon_does_not_depend_on_the_zoom() {
+        // Like the dash and the chevrons: its thickness is in screen pixels.
+        for thickness in [2.0, GLOW_BAND_THICKNESS, 12.0] {
+            let animation =
+                SegmentAnimations::default().with(|s| s.glow_band.thickness = thickness);
+            for zoom in [0.1, 0.25, 1.0, 2.0, 8.0] {
+                assert_eq!(
+                    glow_band_half_width(animation, zoom) * 2.0,
+                    thickness,
+                    "thickness {thickness}, zoom {zoom}"
+                );
+            }
         }
     }
 
