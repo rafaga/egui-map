@@ -116,9 +116,12 @@ pub const CHEVRON_PERIOD_PX: f32 = 20.0;
 /// through per second. With [`CHEVRON_PERIOD_PX`] this is about the speed of
 /// [`DASH_SPEED`]'s marching ants.
 pub const CHEVRON_SPEED: f32 = 0.7;
-/// Width, before the `zoom` multiplier, of the ribbon [`Animation::chevrons`]
-/// paints. Close to [`GLOW_BAND_THICKNESS`], so the arrows sit on the line
-/// like the other lasting segment effects instead of dwarfing it.
+/// Width, in **screen pixels**, of the ribbon [`Animation::chevrons`] paints.
+/// Not scaled by zoom, like [`CHEVRON_PERIOD_PX`]: the arrow's shape depends on
+/// the ratio of the two, so scaling only one of them squashed or stretched it
+/// every time the zoom changed. Close to [`GLOW_BAND_THICKNESS`], so the
+/// arrows sit on the line like the other lasting segment effects instead of
+/// dwarfing it.
 pub const CHEVRON_WIDTH: f32 = 6.0;
 /// How far the legs of each [`Animation::chevrons`] arrow sweep back from its
 /// tip, see [`Chevrons::leg_slope`].
@@ -491,7 +494,8 @@ pub struct Chevrons {
     pub period_px: f32,
     /// How many repeats slide through per second.
     pub speed: f32,
-    /// Ribbon width, before the `zoom` multiplier.
+    /// Ribbon width, in **screen pixels** (not scaled by zoom, so the arrow
+    /// keeps its shape at any zoom).
     pub width: f32,
     /// How far the two legs of each arrow sweep back from the tip, as a
     /// fraction of [`Self::period_px`] per unit of the ribbon's width: `0.0`
@@ -1833,12 +1837,18 @@ impl SegmentAnimations {
     /// instead, so the interpolated `uv.y` sweeps across a genuinely 2D
     /// texture and traces out the arrow shape. A zero-length segment is
     /// skipped.
+    ///
+    /// The ribbon is [`Chevrons::width`] screen pixels wide whatever the zoom
+    /// (`zoom` is unused, and kept so every steady segment effect has the same
+    /// signature, like [`SegmentAnimations::dash`]): the arrow's shape is the
+    /// ratio of that width to [`Chevrons::period_px`], and both are in screen
+    /// pixels, so it never gets squashed or stretched when the map is zoomed.
     pub fn chevrons(
         &self,
         painter: &Painter,
         a: Pos2,
         b: Pos2,
-        zoom: f32,
+        _zoom: f32,
         time: f32,
         color: Color32,
     ) {
@@ -1848,7 +1858,7 @@ impl SegmentAnimations {
             return;
         }
         let dir = delta / len;
-        let normal = Vec2::new(-dir.y, dir.x) * (self.chevrons.width * zoom * 0.5);
+        let normal = Vec2::new(-dir.y, dir.x) * (self.chevrons.width * 0.5);
         // `u0 < u1` (below) maps the texture's own +u direction onto the
         // segment's `a -> b` direction, and the arrow tip sits at the
         // texture's higher `u` (see `chevrons_texture`) -- so in any single

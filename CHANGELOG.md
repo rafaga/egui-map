@@ -40,7 +40,10 @@ any minor bump may include breaking changes, called out below as such).
   is tunable through `SegmentAnimations`, and the shape of the arrow now is
   too: `Chevrons::leg_slope` (how open the `>` is) and `Chevrons::stroke` (how
   thick), with `CHEVRON_LEG_SLOPE` and `CHEVRON_STROKE` as defaults. A texture
-  is cached per distinct pair of them.
+  is cached per distinct pair of them. The ribbon width of `chevrons` is now
+  in screen pixels like its period, instead of being multiplied by the zoom:
+  the arrow's shape is the ratio of the two, so it was squashed or stretched
+  whenever the map was zoomed.
 - **Breaking:** `comet_once` takes its direction like every other segment
   effect, with the modifier: `segment.direction(CometDirection::Reverse)
   .comet_once(at)` instead of `segment.comet_once(at, CometDirection::Reverse)`.
