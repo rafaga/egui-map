@@ -31,6 +31,11 @@ any minor bump may include breaking changes, called out below as such).
 
 ### Changed
 
+- The `glow_band` ribbon is `GlowBand::thickness` screen pixels wide whatever
+  the zoom (it was multiplied by it), like the default stroke, the `dash` and
+  the `chevrons`: the lasting segment effects keep their thickness when the
+  map is zoomed. `GLOW_BAND_THICKNESS` (5) is unchanged, so only a zoom other
+  than 1 looks different.
 - `wipe` wipes the line back out once it is drawn, in the same direction it
   was drawn in: the colour leaves from the first endpoint towards the second,
   behind the edge that drew it. `Wipe::out_duration` (`WIPE_OUT_DURATION`, 0.9
