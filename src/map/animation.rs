@@ -73,6 +73,17 @@ pub const SCALE_IN_DURATION: f32 = 0.45;
 pub const CROSSHAIR_DURATION: f32 = 0.6;
 /// How long [`Animation::flash_decay`] takes to fade back out, in seconds.
 pub const FLASH_DECAY_DURATION: f32 = 1.0;
+/// Stroke width, before the `zoom` multiplier, [`Animation::flash_decay`]
+/// settles to as it fades.
+pub const FLASH_BASE_WIDTH: f32 = 2.0;
+/// Width, before the `zoom` multiplier, [`Animation::flash_decay`] adds at its
+/// start. With [`FLASH_BASE_WIDTH`] the widest the flash gets is 8, the
+/// diameter of the built-in node (radius `4 * zoom`): it never swells past the
+/// nodes at the ends of the segment.
+pub const FLASH_EXTRA_WIDTH: f32 = 6.0;
+// Checked when compiling: raising either constant past the built-in node's
+// diameter (8) fails the build instead of silently bringing the flash back.
+const _: () = assert!(FLASH_BASE_WIDTH + FLASH_EXTRA_WIDTH <= 8.0);
 /// How long [`Animation::comet`] takes for one end-to-end pass, in seconds.
 pub const COMET_PERIOD: f32 = 1.6;
 /// How long a single [`Animation::comet_once`] pass takes to cross the
@@ -311,6 +322,12 @@ pub struct FlashDecay {
     pub base_width: f32,
     /// Extra width, before the `zoom` multiplier, at the very start of the
     /// effect (added to [`Self::base_width`] and shed over its lifetime).
+    ///
+    /// The widest the line gets is `base_width + extra_width`; the default
+    /// keeps that at the diameter of the built-in node (`8 * zoom`), so the
+    /// flash never swells past the nodes it joins. Keep it under the diameter
+    /// of your own nodes if you use a [`NodeTemplate`](crate::map::objects::NodeTemplate)
+    /// with a different size.
     pub extra_width: f32,
     /// How long the effect plays, in seconds.
     pub duration: f32,
@@ -327,8 +344,8 @@ impl FlashDecay {
 impl Default for FlashDecay {
     fn default() -> Self {
         Self {
-            base_width: 2.0,
-            extra_width: 10.0,
+            base_width: FLASH_BASE_WIDTH,
+            extra_width: FLASH_EXTRA_WIDTH,
             duration: FLASH_DECAY_DURATION,
         }
     }
@@ -2759,8 +2776,8 @@ mod tests {
         assert_eq!(
             a.flash_decay,
             FlashDecay {
-                base_width: 2.0,
-                extra_width: 10.0,
+                base_width: FLASH_BASE_WIDTH,
+                extra_width: FLASH_EXTRA_WIDTH,
                 duration: FLASH_DECAY_DURATION
             }
         );

@@ -31,6 +31,9 @@ any minor bump may include breaking changes, called out below as such).
 
 ### Changed
 
+- `flash` no longer swells past the nodes it joins: its widest point is the
+  diameter of the built-in node (8, was 12), with `FLASH_BASE_WIDTH` 2 and
+  `FLASH_EXTRA_WIDTH` 6 as defaults (`FlashDecay::extra_width` was 10).
 - The default look of `comet`, `comet_once` and `chevrons` is lighter, closer
   to the other segment effects. The comet dot has the radius of the `wipe`
   stroke (`COMET_DOT_RADIUS`, 2.5 pixels, down from 4, with a floor of
