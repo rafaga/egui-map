@@ -397,9 +397,10 @@ pub struct Wipe {
     /// How long the line takes to draw in, in seconds.
     pub duration: f32,
     /// How long the line takes to go back out once it is drawn, in seconds:
-    /// the way in played backwards, so the colour disappears from the far
-    /// endpoint back towards the one it started from. `0.0` makes the line
-    /// vanish the moment it is complete, as it used to.
+    /// the colour is taken away in the same direction it was drawn in, from
+    /// the endpoint it started from towards the other, so the line is wiped
+    /// out the way it was wiped in. `0.0` makes the line vanish the moment it
+    /// is complete, as it used to.
     pub out_duration: f32,
 }
 
@@ -416,16 +417,19 @@ impl Wipe {
         self.duration + self.out_duration
     }
 
-    /// How much of the segment is coloured `secs` seconds in, as a fraction of
-    /// its length counted from the first endpoint: it grows from `0.0` to
-    /// `1.0` over [`Self::duration`], then shrinks back to `0.0` over
-    /// [`Self::out_duration`]. `None` once the effect is over.
-    pub fn coloured_fraction(&self, secs: f32) -> Option<f32> {
+    /// The part of the segment that is coloured `secs` seconds in, as
+    /// `(start, end)` fractions of its length counted from the first endpoint.
+    /// On the way in it is `(0.0, 0.0)` growing to `(0.0, 1.0)` over
+    /// [`Self::duration`]; on the way out the start catches up, `(0.0, 1.0)`
+    /// shrinking to `(1.0, 1.0)` over [`Self::out_duration`], so both edges
+    /// travel the same way, from the first endpoint to the second. `None`
+    /// once the effect is over.
+    pub fn coloured_span(&self, secs: f32) -> Option<(f32, f32)> {
         if secs < self.duration {
-            return Some((secs / self.duration).clamp(0.0, 1.0));
+            return Some((0.0, (secs / self.duration).clamp(0.0, 1.0)));
         }
         let out = secs - self.duration;
-        (out < self.out_duration).then(|| (1.0 - out / self.out_duration).clamp(0.0, 1.0))
+        (out < self.out_duration).then(|| ((out / self.out_duration).clamp(0.0, 1.0), 1.0))
     }
 }
 
@@ -1628,8 +1632,8 @@ impl SegmentAnimations {
     }
 
     /// One frame of the segment drawing itself in, from `a` towards `b`, and
-    /// then taking itself back out, from `b` back towards `a`, so the colour
-    /// disappears the way it came. Reads as *"this route was just
+    /// then wiping itself out the same way, the colour leaving from `a`
+    /// towards `b` behind the edge that drew it. Reads as *"this route was just
     /// established"* — where [`SegmentAnimations::comet_once`] shows something
     /// moving along an existing route, this shows the route itself appearing.
     /// Plays for [`Wipe::duration`] plus [`Wipe::out_duration`]. Returns
@@ -1647,16 +1651,18 @@ impl SegmentAnimations {
         initial_time: Instant,
         color: Color32,
     ) -> bool {
-        let Some(fraction) = self.wipe.coloured_fraction(elapsed(initial_time)) else {
+        let Some((start, end)) = self.wipe.coloured_span(elapsed(initial_time)) else {
             return false;
         };
-        // Coloured from `a` up to the leading edge: that edge advances to `b`
-        // on the way in and comes back to `a` on the way out.
-        let leading_edge = a + (b - a) * fraction;
-        painter.line_segment(
-            [a, leading_edge],
-            Stroke::new(self.wipe.width * zoom, color),
-        );
+        // Coloured between two edges that both travel from `a` to `b`: the
+        // leading one draws the line in, the trailing one wipes it out.
+        let delta = b - a;
+        if end > start {
+            painter.line_segment(
+                [a + delta * start, a + delta * end],
+                Stroke::new(self.wipe.width * zoom, color),
+            );
+        }
         true
     }
 
@@ -2779,30 +2785,41 @@ mod tests {
     }
 
     #[test]
-    fn wipe_draws_in_then_goes_back_out_the_way_it_came() {
+    fn wipe_draws_in_then_wipes_out_in_the_same_direction() {
         let wipe = Wipe {
             width: 2.0,
             duration: 1.0,
             out_duration: 2.0,
         };
         assert_eq!(wipe.total_duration(), 3.0);
-        // In: from nothing to the whole segment.
-        assert_eq!(wipe.coloured_fraction(0.0), Some(0.0));
-        assert_eq!(wipe.coloured_fraction(0.5), Some(0.5));
-        // Out: the same way backwards, from the whole segment to nothing.
-        assert_eq!(wipe.coloured_fraction(1.0), Some(1.0));
-        assert_eq!(wipe.coloured_fraction(2.0), Some(0.5));
-        assert!(wipe.coloured_fraction(2.99).unwrap() < 0.01);
+        // In: the leading edge goes from the first endpoint to the second,
+        // the start stays at the first.
+        assert_eq!(wipe.coloured_span(0.0), Some((0.0, 0.0)));
+        assert_eq!(wipe.coloured_span(0.5), Some((0.0, 0.5)));
+        assert_eq!(wipe.coloured_span(1.0), Some((0.0, 1.0)));
+        // Out: now the trailing edge goes the same way, from the first
+        // endpoint to the second, and the end stays at the second.
+        assert_eq!(wipe.coloured_span(2.0), Some((0.5, 1.0)));
+        let (start, end) = wipe.coloured_span(2.99).unwrap();
+        assert!(start > 0.99 && end == 1.0, "({start}, {end})");
+        // Both edges only ever move forward.
+        let mut last = (0.0, 0.0);
+        for step in 0..300 {
+            let (start, end) = wipe.coloured_span(step as f32 * 0.01).unwrap();
+            assert!(start >= last.0 && end >= last.1, "edge went back at {step}");
+            assert!(start <= end);
+            last = (start, end);
+        }
         // Over.
-        assert_eq!(wipe.coloured_fraction(3.0), None);
-        assert_eq!(wipe.coloured_fraction(30.0), None);
+        assert_eq!(wipe.coloured_span(3.0), None);
+        assert_eq!(wipe.coloured_span(30.0), None);
         // No way out: gone the moment it is complete, as it used to be.
         let abrupt = Wipe {
             out_duration: 0.0,
             ..wipe
         };
-        assert_eq!(abrupt.coloured_fraction(0.5), Some(0.5));
-        assert_eq!(abrupt.coloured_fraction(1.0), None);
+        assert_eq!(abrupt.coloured_span(0.5), Some((0.0, 0.5)));
+        assert_eq!(abrupt.coloured_span(1.0), None);
     }
 
     #[test]

@@ -31,13 +31,13 @@ any minor bump may include breaking changes, called out below as such).
 
 ### Changed
 
-- `wipe` takes the line back out once it is drawn: the colour disappears from
-  the far endpoint back towards the one it started from, the way in played
-  backwards. `Wipe::out_duration` (`WIPE_OUT_DURATION`, 0.9 seconds) sets how
-  long that takes, `0.0` brings back the line vanishing as soon as it is
-  complete, and `Wipe::total_duration` / `Wipe::coloured_fraction` give the
-  whole length and the coloured part of the segment at a given time. The
-  effect now plays for `duration + out_duration` (1.8 seconds by default).
+- `wipe` wipes the line back out once it is drawn, in the same direction it
+  was drawn in: the colour leaves from the first endpoint towards the second,
+  behind the edge that drew it. `Wipe::out_duration` (`WIPE_OUT_DURATION`, 0.9
+  seconds) sets how long that takes, `0.0` brings back the line vanishing as
+  soon as it is complete, and `Wipe::total_duration` / `Wipe::coloured_span`
+  give the whole length and the coloured part of the segment at a given time.
+  The effect now plays for `duration + out_duration` (1.8 seconds by default).
 - `flash` no longer swells past the nodes it joins: its widest point is the
   diameter of the built-in node (8, was 12), with `FLASH_BASE_WIDTH` 2 and
   `FLASH_EXTRA_WIDTH` 6 as defaults (`FlashDecay::extra_width` was 10).
