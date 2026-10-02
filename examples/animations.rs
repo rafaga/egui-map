@@ -9,10 +9,11 @@
 //!   immediately and forever: `halo`, `blink`, `orbit`, and `ripple` with
 //!   `NodeHandle::lasting`, which keeps a new ring coming with no break where
 //!   it ends and starts over. Event ones are fired again on a timer of their
-//!   own: `pulse`, `scale_in`, `crosshair`, `pulse` with
-//!   `NodeHandle::lasting` too, which repeats and fades out for a few seconds
-//!   instead of playing once, and `countdown` with `lasting`, whose ring
-//!   empties over exactly the time asked for.
+//!   own: `scale_in`, `crosshair`, and `pulse` and `countdown` with
+//!   `lasting`: the pulse repeats and fades out over the time asked for, and
+//!   the countdown's ring empties over exactly that time. (A `lasting` pulse
+//!   is the same effect as a plain one, only repeated, so there is a single
+//!   entry for it.)
 //! - **Segment effects** (right), one segment each, between two plain nodes.
 //!   Lasting: `comet`, `dash`, `glow_band`, `chevrons`. Event: `flash`,
 //!   `comet_once` and `wipe`. Every one but `flash` has a direction, set with
@@ -62,7 +63,7 @@ const THEMES: [Theme; 15] = [
 
 /// The node effects, in grid order (three per row): name, and the id the
 /// node gets.
-const NODE_EFFECTS: [&str; 9] = [
+const NODE_EFFECTS: [&str; 8] = [
     "halo",
     "blink",
     "orbit",
@@ -71,7 +72,6 @@ const NODE_EFFECTS: [&str; 9] = [
     "countdown",
     "scale_in",
     "crosshair",
-    "pulse (lasting)",
 ];
 
 /// The segment effects: the lasting ones in the first column, the event ones
@@ -263,7 +263,11 @@ fn main() -> eframe::Result<()> {
     // Event effects: each on its own independent, non-synchronized timer, so
     // several different animations are usually playing at once.
     let mut repeaters = vec![
-        on_node(4, 2200, 0, |node, at| node.pulse(at)),
+        // Like the countdown, a `lasting` pulse: it repeats and fades out over
+        // the three seconds asked for, then a pause before it is fired again.
+        on_node(4, 4200, 0, |node, at| {
+            node.lasting(Duration::from_secs(3)).pulse(at)
+        }),
         // The ring empties over the time asked for with `lasting`: three
         // seconds, then a pause before it is fired again.
         on_node(6, 4000, 900, |node, at| {
@@ -271,10 +275,6 @@ fn main() -> eframe::Result<()> {
         }),
         on_node(7, 1800, 200, |node, at| node.scale_in(at)),
         on_node(8, 2400, 700, |node, at| node.crosshair(at)),
-        // Plays for four seconds each time, fading out.
-        on_node(9, 7000, 0, |node, at| {
-            node.lasting(Duration::from_secs(4)).pulse(at)
-        }),
         on_segment(segment_ids["flash"], 1800, 300, |segment, at| {
             segment.flash(at)
         }),
