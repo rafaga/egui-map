@@ -120,6 +120,13 @@ pub const CHEVRON_SPEED: f32 = 0.7;
 /// paints. Close to [`GLOW_BAND_THICKNESS`], so the arrows sit on the line
 /// like the other lasting segment effects instead of dwarfing it.
 pub const CHEVRON_WIDTH: f32 = 6.0;
+/// How far the legs of each [`Animation::chevrons`] arrow sweep back from its
+/// tip, see [`Chevrons::leg_slope`].
+pub const CHEVRON_LEG_SLOPE: f32 = 0.35;
+/// Stroke thickness of each [`Animation::chevrons`] arrow as a fraction of the
+/// period, see [`Chevrons::stroke`]: about 2 pixels at the default period, the
+/// weight of the segment line itself.
+pub const CHEVRON_STROKE: f32 = 0.10;
 /// Radius, in screen pixels at `zoom == 1`, of the dot of
 /// [`Animation::comet`] and [`Animation::comet_once`]: the width of the
 /// stroke [`Animation::wipe`] draws (`Wipe::width`), so the dot reads as a
@@ -486,6 +493,16 @@ pub struct Chevrons {
     pub speed: f32,
     /// Ribbon width, before the `zoom` multiplier.
     pub width: f32,
+    /// How far the two legs of each arrow sweep back from the tip, as a
+    /// fraction of [`Self::period_px`] per unit of the ribbon's width: `0.0`
+    /// is a straight bar across the segment, larger values a more open `>`.
+    /// The default makes the legs about 45 degrees to the segment with the
+    /// default [`Self::width`] and [`Self::period_px`]; keep it near
+    /// `width / period_px` if you change those.
+    pub leg_slope: f32,
+    /// Stroke thickness of the arrow, as a fraction of [`Self::period_px`].
+    /// Soft-edged either way.
+    pub stroke: f32,
 }
 
 impl Chevrons {
@@ -502,6 +519,8 @@ impl Default for Chevrons {
             period_px: CHEVRON_PERIOD_PX,
             speed: CHEVRON_SPEED,
             width: CHEVRON_WIDTH,
+            leg_slope: CHEVRON_LEG_SLOPE,
+            stroke: CHEVRON_STROKE,
         }
     }
 }
@@ -1843,7 +1862,8 @@ impl SegmentAnimations {
         let u0 = phase;
         let u1 = phase + len / self.chevrons.period_px;
 
-        let texture = Self::chevrons_texture(painter.ctx());
+        let texture =
+            Self::chevrons_texture(painter.ctx(), self.chevrons.leg_slope, self.chevrons.stroke);
         let mut mesh = Mesh::with_texture(texture.id());
         mesh.vertices.extend([
             Vertex {
@@ -1884,8 +1904,17 @@ impl SegmentAnimations {
     /// stroke. [`TextureWrapMode::Repeat`] tiles it along `u`; `v` never
     /// leaves `[0, 1]` in the mesh above, so wrapping never triggers on that
     /// axis.
-    fn chevrons_texture(ctx: &Context) -> TextureHandle {
-        let id = Id::new("egui_map::chevrons_texture");
+    ///
+    /// The shape comes from [`Chevrons::leg_slope`] and [`Chevrons::stroke`];
+    /// one texture is cached per distinct pair, so changing them while the
+    /// app runs registers a new one (a few kilobytes) the first time it is
+    /// drawn.
+    fn chevrons_texture(ctx: &Context, leg_slope: f32, stroke: f32) -> TextureHandle {
+        let id = Id::new((
+            "egui_map::chevrons_texture",
+            leg_slope.to_bits(),
+            stroke.to_bits(),
+        ));
         if let Some(handle) = ctx.data(|d| d.get_temp::<TextureHandle>(id)) {
             return handle;
         }
@@ -1895,21 +1924,17 @@ impl SegmentAnimations {
         const WIDTH: usize = 64;
         const HEIGHT: usize = 32;
         const TIP_U: f32 = 0.75;
-        // With the default ribbon width and period (6 and 20 screen pixels)
-        // this makes the legs about 45 degrees to the segment.
-        const LEG_SLOPE: f32 = 0.35;
-        // Thin, soft stroke: about 2 pixels at the default period, the
-        // weight of the segment line itself.
-        const STROKE_THICKNESS: f32 = 0.10;
+        // Guards the division below against a zero or negative stroke.
+        let stroke = stroke.max(f32::EPSILON);
 
         let mut pixels = Vec::with_capacity(WIDTH * HEIGHT);
         for j in 0..HEIGHT {
             let v = j as f32 / (HEIGHT - 1) as f32;
-            let ideal_u = TIP_U - LEG_SLOPE * (v - 0.5).abs();
+            let ideal_u = TIP_U - leg_slope * (v - 0.5).abs();
             for i in 0..WIDTH {
                 let u = i as f32 / WIDTH as f32;
                 let distance = (u - ideal_u).abs();
-                let alpha = (1.0 - distance / STROKE_THICKNESS).clamp(0.0, 1.0);
+                let alpha = (1.0 - distance / stroke).clamp(0.0, 1.0);
                 let alpha = alpha * alpha * (3.0 - 2.0 * alpha); // smoothstep
                 pixels.push(Color32::from_white_alpha((255.0 * alpha).round() as u8));
             }
@@ -2699,9 +2724,21 @@ mod tests {
     #[test]
     fn chevrons_texture_is_registered_once_per_context() {
         let ctx = Context::default();
-        let first = SegmentAnimations::chevrons_texture(&ctx);
-        let second = SegmentAnimations::chevrons_texture(&ctx);
+        let first = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, CHEVRON_STROKE);
+        let second = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, CHEVRON_STROKE);
         assert_eq!(first.id(), second.id());
+    }
+
+    #[test]
+    fn chevrons_texture_follows_its_shape_settings() {
+        let ctx = Context::default();
+        let default = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, CHEVRON_STROKE);
+        let flatter = SegmentAnimations::chevrons_texture(&ctx, 0.0, CHEVRON_STROKE);
+        let thicker = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, 0.3);
+        assert_ne!(default.id(), flatter.id());
+        assert_ne!(default.id(), thicker.id());
+        // A zero stroke must not divide by zero.
+        let _ = SegmentAnimations::chevrons_texture(&ctx, CHEVRON_LEG_SLOPE, 0.0);
     }
 
     #[test]
@@ -2762,7 +2799,9 @@ mod tests {
             Chevrons {
                 period_px: CHEVRON_PERIOD_PX,
                 speed: CHEVRON_SPEED,
-                width: CHEVRON_WIDTH
+                width: CHEVRON_WIDTH,
+                leg_slope: CHEVRON_LEG_SLOPE,
+                stroke: CHEVRON_STROKE
             }
         );
     }
