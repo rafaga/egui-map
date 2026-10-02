@@ -34,14 +34,16 @@ any minor bump may include breaking changes, called out below as such).
 - `flash` no longer swells past the nodes it joins: its widest point is the
   diameter of the built-in node (8, was 12), with `FLASH_BASE_WIDTH` 2 and
   `FLASH_EXTRA_WIDTH` 6 as defaults (`FlashDecay::extra_width` was 10).
-- The default look of `comet`, `comet_once` and `chevrons` is lighter, closer
-  to the other segment effects. The comet dot has the radius of the `wipe`
-  stroke (`COMET_DOT_RADIUS`, 2.5 pixels, down from 4, with a floor of
-  `COMET_DOT_MIN`, 1.5). The chevrons are a thinner, softer arrow on a narrower
-  ribbon (`CHEVRON_WIDTH` 6, down from 10; `CHEVRON_PERIOD_PX` 20, down from
-  28; `CHEVRON_SPEED` 0.7, up from 0.5, about the speed of `dash`). All of it
-  is tunable through `SegmentAnimations`, and the shape of the arrow now is
-  too: `Chevrons::leg_slope` (how open the `>` is) and `Chevrons::stroke` (how
+- The comet dot is smaller: it has the radius of the `wipe` stroke
+  (`COMET_DOT_RADIUS`, 2.5 pixels, down from 4, with a floor of
+  `COMET_DOT_MIN`, 1.5) in `comet` and `comet_once`.
+- The `chevrons` are a bold, soft-edged arrow, about five times thicker than
+  before: the stroke is about 10 pixels (`CHEVRON_STROKE` 0.12 of the period),
+  on a ribbon of `CHEVRON_WIDTH` 28 (was 10) and a `CHEVRON_PERIOD_PX` of 60
+  (was 28) so the arrows keep their distance, sliding at `CHEVRON_SPEED` 0.3
+  (a little faster than `dash`). All of it is tunable through
+  `SegmentAnimations`, and the shape of the arrow now is too:
+  `Chevrons::leg_slope` (how open the `>` is) and `Chevrons::stroke` (how
   thick), with `CHEVRON_LEG_SLOPE` and `CHEVRON_STROKE` as defaults. A texture
   is cached per distinct pair of them. The ribbon width of `chevrons` is now
   in screen pixels like its period, instead of being multiplied by the zoom:

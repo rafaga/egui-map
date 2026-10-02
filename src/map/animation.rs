@@ -122,25 +122,24 @@ pub const GLOW_PERIOD: f32 = 2.5;
 /// Length, in **screen pixels**, of one chevron repeat of
 /// [`Animation::chevrons`]. Deliberately not scaled by zoom, same reasoning
 /// as [`DASH_PERIOD_PX`].
-pub const CHEVRON_PERIOD_PX: f32 = 20.0;
+pub const CHEVRON_PERIOD_PX: f32 = 60.0;
 /// How many repeats of the chevron pattern [`Animation::chevrons`] slides
-/// through per second. With [`CHEVRON_PERIOD_PX`] this is about the speed of
-/// [`DASH_SPEED`]'s marching ants.
-pub const CHEVRON_SPEED: f32 = 0.7;
+/// through per second. With [`CHEVRON_PERIOD_PX`] this is a little faster than
+/// [`DASH_SPEED`]'s marching ants (18 against 14 pixels per second).
+pub const CHEVRON_SPEED: f32 = 0.3;
 /// Width, in **screen pixels**, of the ribbon [`Animation::chevrons`] paints.
 /// Not scaled by zoom, like [`CHEVRON_PERIOD_PX`]: the arrow's shape depends on
 /// the ratio of the two, so scaling only one of them squashed or stretched it
-/// every time the zoom changed. Close to [`GLOW_BAND_THICKNESS`], so the
-/// arrows sit on the line like the other lasting segment effects instead of
-/// dwarfing it.
-pub const CHEVRON_WIDTH: f32 = 6.0;
+/// every time the zoom changed.
+pub const CHEVRON_WIDTH: f32 = 28.0;
 /// How far the legs of each [`Animation::chevrons`] arrow sweep back from its
-/// tip, see [`Chevrons::leg_slope`].
-pub const CHEVRON_LEG_SLOPE: f32 = 0.35;
+/// tip, see [`Chevrons::leg_slope`]. With [`CHEVRON_WIDTH`] and
+/// [`CHEVRON_PERIOD_PX`] it makes the legs about 45 degrees to the segment.
+pub const CHEVRON_LEG_SLOPE: f32 = 0.45;
 /// Stroke thickness of each [`Animation::chevrons`] arrow as a fraction of the
-/// period, see [`Chevrons::stroke`]: about 2 pixels at the default period, the
-/// weight of the segment line itself.
-pub const CHEVRON_STROKE: f32 = 0.10;
+/// period, see [`Chevrons::stroke`]: a bold arrow, about 10 pixels thick at the
+/// default period (it was about 2).
+pub const CHEVRON_STROKE: f32 = 0.12;
 /// Radius, in screen pixels at `zoom == 1`, of the dot of
 /// [`Animation::comet`] and [`Animation::comet_once`]: the width of the
 /// stroke [`Animation::wipe`] draws (`Wipe::width`), so the dot reads as a
