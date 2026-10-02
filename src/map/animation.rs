@@ -105,6 +105,10 @@ pub const DASH_SPEED: f32 = 0.6;
 pub const DASH_WIDTH: f32 = 2.0;
 /// How long [`Animation::wipe`] takes to draw the line in, in seconds.
 pub const WIPE_DURATION: f32 = 0.9;
+/// How long [`Animation::wipe`] takes to take the line back out once it is
+/// drawn, in seconds: the same as drawing it in, so the way out is the way in
+/// played backwards.
+pub const WIPE_OUT_DURATION: f32 = 0.9;
 /// How long one full traverse-and-loop of [`Animation::glow_band`] takes, in
 /// seconds -- the band fades out past one end before it reappears at the
 /// other, so this covers the whole cycle, not just the visible crossing.
@@ -384,13 +388,19 @@ impl Default for CometOnce {
     }
 }
 
-/// Tunables of [`SegmentAnimations::wipe`]: the segment drawing itself in.
+/// Tunables of [`SegmentAnimations::wipe`]: the segment drawing itself in and
+/// then taking itself back out.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Wipe {
     /// Stroke width, before the `zoom` multiplier.
     pub width: f32,
-    /// How long the effect plays, in seconds.
+    /// How long the line takes to draw in, in seconds.
     pub duration: f32,
+    /// How long the line takes to go back out once it is drawn, in seconds:
+    /// the way in played backwards, so the colour disappears from the far
+    /// endpoint back towards the one it started from. `0.0` makes the line
+    /// vanish the moment it is complete, as it used to.
+    pub out_duration: f32,
 }
 
 impl Wipe {
@@ -399,6 +409,24 @@ impl Wipe {
         f(&mut self);
         self
     }
+
+    /// How long the whole effect plays, in seconds: the way in and the way
+    /// out.
+    pub fn total_duration(&self) -> f32 {
+        self.duration + self.out_duration
+    }
+
+    /// How much of the segment is coloured `secs` seconds in, as a fraction of
+    /// its length counted from the first endpoint: it grows from `0.0` to
+    /// `1.0` over [`Self::duration`], then shrinks back to `0.0` over
+    /// [`Self::out_duration`]. `None` once the effect is over.
+    pub fn coloured_fraction(&self, secs: f32) -> Option<f32> {
+        if secs < self.duration {
+            return Some((secs / self.duration).clamp(0.0, 1.0));
+        }
+        let out = secs - self.duration;
+        (out < self.out_duration).then(|| (1.0 - out / self.out_duration).clamp(0.0, 1.0))
+    }
 }
 
 impl Default for Wipe {
@@ -406,6 +434,7 @@ impl Default for Wipe {
         Self {
             width: 2.5,
             duration: WIPE_DURATION,
+            out_duration: WIPE_OUT_DURATION,
         }
     }
 }
@@ -1598,11 +1627,13 @@ impl SegmentAnimations {
         secs < self.comet_once.duration
     }
 
-    /// One frame of the segment drawing itself in, from `a` towards `b`, then
-    /// gone. Reads as *"this route was just established"* — where
-    /// [`SegmentAnimations::comet_once`] shows something moving along an
-    /// existing route, this shows the route itself appearing. Plays for
-    /// [`Wipe::duration`]. Returns `true` while still playing.
+    /// One frame of the segment drawing itself in, from `a` towards `b`, and
+    /// then taking itself back out, from `b` back towards `a`, so the colour
+    /// disappears the way it came. Reads as *"this route was just
+    /// established"* — where [`SegmentAnimations::comet_once`] shows something
+    /// moving along an existing route, this shows the route itself appearing.
+    /// Plays for [`Wipe::duration`] plus [`Wipe::out_duration`]. Returns
+    /// `true` while still playing.
     ///
     /// Cheaper than the mesh technique [`SegmentAnimations::dash`] uses: the
     /// progressively-revealed portion is still just a straight line, so a
@@ -1616,14 +1647,17 @@ impl SegmentAnimations {
         initial_time: Instant,
         color: Color32,
     ) -> bool {
-        let secs = elapsed(initial_time);
-        let progress = (secs / self.wipe.duration).clamp(0.0, 1.0);
-        let leading_edge = a + (b - a) * progress;
+        let Some(fraction) = self.wipe.coloured_fraction(elapsed(initial_time)) else {
+            return false;
+        };
+        // Coloured from `a` up to the leading edge: that edge advances to `b`
+        // on the way in and comes back to `a` on the way out.
+        let leading_edge = a + (b - a) * fraction;
         painter.line_segment(
             [a, leading_edge],
             Stroke::new(self.wipe.width * zoom, color),
         );
-        secs < self.wipe.duration
+        true
     }
 
     // ----------------------------------------------------- persistent/segment
@@ -2414,7 +2448,11 @@ mod tests {
                 SegmentAnimation::FlashDecay,
                 FLASH_DECAY_DURATION,
             ),
-            ("wipe", SegmentAnimation::Wipe, WIPE_DURATION),
+            (
+                "wipe",
+                SegmentAnimation::Wipe,
+                WIPE_DURATION + WIPE_OUT_DURATION,
+            ),
         ]
     }
 
@@ -2741,6 +2779,33 @@ mod tests {
     }
 
     #[test]
+    fn wipe_draws_in_then_goes_back_out_the_way_it_came() {
+        let wipe = Wipe {
+            width: 2.0,
+            duration: 1.0,
+            out_duration: 2.0,
+        };
+        assert_eq!(wipe.total_duration(), 3.0);
+        // In: from nothing to the whole segment.
+        assert_eq!(wipe.coloured_fraction(0.0), Some(0.0));
+        assert_eq!(wipe.coloured_fraction(0.5), Some(0.5));
+        // Out: the same way backwards, from the whole segment to nothing.
+        assert_eq!(wipe.coloured_fraction(1.0), Some(1.0));
+        assert_eq!(wipe.coloured_fraction(2.0), Some(0.5));
+        assert!(wipe.coloured_fraction(2.99).unwrap() < 0.01);
+        // Over.
+        assert_eq!(wipe.coloured_fraction(3.0), None);
+        assert_eq!(wipe.coloured_fraction(30.0), None);
+        // No way out: gone the moment it is complete, as it used to be.
+        let abrupt = Wipe {
+            out_duration: 0.0,
+            ..wipe
+        };
+        assert_eq!(abrupt.coloured_fraction(0.5), Some(0.5));
+        assert_eq!(abrupt.coloured_fraction(1.0), None);
+    }
+
+    #[test]
     fn dash_runs_at_any_time_and_skips_zero_length_segments() {
         let painter = headless_painter();
         let animation = SegmentAnimations::default();
@@ -2936,7 +3001,8 @@ mod tests {
             a.wipe,
             Wipe {
                 width: 2.5,
-                duration: WIPE_DURATION
+                duration: WIPE_DURATION,
+                out_duration: WIPE_OUT_DURATION
             }
         );
         assert_eq!(
@@ -3005,8 +3071,12 @@ mod tests {
             Instant::now(),
             Color32::RED
         ));
-        // It honors the config: a tiny `wipe.duration` is already done.
-        let quick = SegmentAnimations::default().with(|s| s.wipe.duration = 0.001);
+        // It honors the config: a tiny `wipe.duration` and `wipe.out_duration`
+        // are already done.
+        let quick = SegmentAnimations::default().with(|s| {
+            s.wipe.duration = 0.001;
+            s.wipe.out_duration = 0.001;
+        });
         let past = Instant::now() - Duration::from_secs_f32(1.0);
         assert!(!quick.event(SegmentAnimation::Wipe)(
             &painter,
