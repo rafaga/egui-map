@@ -39,9 +39,11 @@ any minor bump may include breaking changes, called out below as such).
   `COMET_DOT_MIN`, 1.5) in `comet` and `comet_once`.
 - **Breaking:** the `chevrons` are solid arrow-shaped blocks as tall as the
   segment line, instead of thin arrow outlines on a ribbon of their own.
-  `Chevrons` is now `period` (in widths of the ribbon, `CHEVRON_PERIOD` 3),
+  `Chevrons` is now `period` (in widths of the ribbon, `CHEVRON_PERIOD` 4.5,
+  never shorter than the chevron drawn in it, see `Chevrons::layout`),
   `speed` (`CHEVRON_SPEED` 2 repeats per second), `fill` (how much of the
-  period a block takes, `CHEVRON_FILL` 0.75), `tip_depth` (how deep the point
+  period a block takes, `CHEVRON_FILL` 0.38, which leaves a gap as long as the
+  chevron), `tip_depth` (how deep the point
   is as a fraction of the width, `CHEVRON_TIP_DEPTH` 0.5, edges at 45 degrees)
   and `width`, which like `Dash::width` is `None` to follow the default
   segment stroke (`SegmentAnimations::with_line_width` fills it in) and falls

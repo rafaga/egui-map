@@ -123,14 +123,19 @@ pub const GLOW_PERIOD: f32 = 2.5;
 /// ribbon ([`Chevrons::width`], the thickness of the segment line): the blocks
 /// are as tall as the line and their spacing follows from that, so the shape
 /// is the same whatever the line width or the zoom.
-pub const CHEVRON_PERIOD: f32 = 3.0;
+///
+/// With [`CHEVRON_FILL`] and [`CHEVRON_TIP_DEPTH`] the gap between two
+/// chevrons is as long as a chevron (about 2.2 widths each).
+pub const CHEVRON_PERIOD: f32 = 4.5;
 /// How many repeats of the chevron pattern [`Animation::chevrons`] slides
 /// through per second. With the default line width (2 pixels) that is
-/// 12 pixels per second, about the pace of [`DASH_SPEED`]'s marching ants.
+/// 18 pixels per second, a little faster than [`DASH_SPEED`]'s marching ants.
 pub const CHEVRON_SPEED: f32 = 2.0;
 /// How much of the period each [`Animation::chevrons`] block occupies along
 /// the segment, see [`Chevrons::fill`]; the rest is the gap to the next one.
-pub const CHEVRON_FILL: f32 = 0.75;
+/// Together with [`CHEVRON_TIP_DEPTH`] the whole chevron is a little under
+/// half the period, so the gap is at least as long as the chevron.
+pub const CHEVRON_FILL: f32 = 0.38;
 /// How deep the point of each [`Animation::chevrons`] block is, as a fraction
 /// of the ribbon width, see [`Chevrons::tip_depth`]. A half makes the edges
 /// 45 degrees to the segment.
@@ -505,7 +510,9 @@ impl Default for GlowBand {
 /// sliding along the segment, as tall as the line itself.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Chevrons {
-    /// Length of one repeat, in widths of the ribbon ([`Self::width`]).
+    /// Length of one repeat, in widths of the ribbon ([`Self::width`]). Never
+    /// shorter than the chevron drawn in it, whatever you set: see
+    /// [`Self::layout`].
     pub period: f32,
     /// How many repeats slide through per second.
     pub speed: f32,
@@ -529,6 +536,22 @@ impl Chevrons {
     pub fn with(mut self, f: impl FnOnce(&mut Self)) -> Self {
         f(&mut self);
         self
+    }
+
+    /// The `(period, fill)` the effect draws with: [`Self::period`] and
+    /// [`Self::fill`], adjusted so that one repeat is never shorter than the
+    /// chevron drawn in it.
+    ///
+    /// A block is [`Self::fill`] of the period long on the centreline, and
+    /// its edges sweep back another [`Self::tip_depth`] widths at the sides of
+    /// the ribbon, so the whole chevron spans `fill * period + tip_depth`
+    /// widths. The period is raised to at least that (`tip_depth / (1 - fill)`
+    /// widths) so a chevron never reaches into the next repeat, and `fill` is
+    /// held below `0.95` so that floor stays finite.
+    pub fn layout(&self) -> (f32, f32) {
+        let fill = self.fill.clamp(0.0, 0.95);
+        let period = self.period.max(self.tip_depth.max(0.0) / (1.0 - fill));
+        (period.max(f32::EPSILON), fill)
     }
 }
 
@@ -1886,15 +1909,16 @@ impl SegmentAnimations {
         // time) is what would make it crawl towards `a` instead, backwards
         // from the way the arrows point. Negating the time term here is what
         // keeps the two in agreement.
+        let (period, fill) = self.chevrons.layout();
         let phase = (-(time * self.chevrons.speed)).rem_euclid(1.0);
         let u0 = phase;
-        let u1 = phase + len / (self.chevrons.period * width);
+        let u1 = phase + len / (period * width);
 
         // How far the edges of a block sweep back from its tip, in fractions
         // of the period per unit of ribbon width: `tip_depth` ribbon widths
         // over a period of `period` ribbon widths.
-        let leg_slope = 2.0 * self.chevrons.tip_depth / self.chevrons.period;
-        let texture = Self::chevrons_texture(painter.ctx(), leg_slope, self.chevrons.fill);
+        let leg_slope = 2.0 * self.chevrons.tip_depth / period;
+        let texture = Self::chevrons_texture(painter.ctx(), leg_slope, fill);
         let mut mesh = Mesh::with_texture(texture.id());
         mesh.vertices.extend([
             Vertex {
@@ -2803,8 +2827,55 @@ mod tests {
     }
 
     #[test]
+    fn a_chevron_repeat_is_never_shorter_than_the_chevron() {
+        // The chevron spans `fill * period + tip_depth` widths, notch to tip
+        // at the sides of the ribbon; the repeat must hold all of it.
+        let drawn = |c: Chevrons| {
+            let (period, fill) = c.layout();
+            (fill * period + c.tip_depth, period)
+        };
+        let default = Chevrons::default();
+        let (length, period) = drawn(default);
+        assert!(length <= period, "default: {length} in {period}");
+        // And by default the gap between two chevrons is as long as one.
+        assert!(
+            period - length >= length,
+            "default: a gap of {} widths after a chevron of {length}",
+            period - length
+        );
+        // The default period is already long enough: left as it is.
+        assert_eq!(default.layout(), (CHEVRON_PERIOD, CHEVRON_FILL));
+
+        for (period, fill, tip_depth) in [
+            (1.0, 0.75, 0.5),
+            (0.5, 0.9, 1.0),
+            (2.0, 5.0, 0.5),
+            (0.0, 0.75, 0.5),
+            (3.0, 0.75, 0.0),
+        ] {
+            let c = Chevrons::default().with(|c| {
+                c.period = period;
+                c.fill = fill;
+                c.tip_depth = tip_depth;
+            });
+            let (length, period) = drawn(c);
+            assert!(
+                length <= period + 1e-4,
+                "{c:?}: a chevron of {length} widths in a repeat of {period}"
+            );
+            assert!(period.is_finite() && period > 0.0);
+        }
+        // A longer period than needed is respected.
+        let long = Chevrons::default().with(|c| c.period = 8.0);
+        assert_eq!(long.layout().0, 8.0);
+    }
+
+    #[test]
     fn chevrons_image_is_a_solid_block_with_a_point_and_a_gap() {
-        let image = SegmentAnimations::chevrons_image(default_chevron_slope(), CHEVRON_FILL);
+        // A fixed shape (a block of 0.75 of the tile, edges at 45 degrees for a
+        // period of three widths), not the defaults, so the positions below
+        // hold whatever the defaults are tuned to.
+        let image = SegmentAnimations::chevrons_image(1.0 / 3.0, 0.75);
         let width = SegmentAnimations::CHEVRON_TILE_WIDTH;
         let height = SegmentAnimations::CHEVRON_TILE_HEIGHT;
         let alpha =
