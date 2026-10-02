@@ -37,12 +37,12 @@ any minor bump may include breaking changes, called out below as such).
 - The comet dot is smaller: it has the radius of the `wipe` stroke
   (`COMET_DOT_RADIUS`, 2.5 pixels, down from 4, with a floor of
   `COMET_DOT_MIN`, 1.5) in `comet` and `comet_once`.
-- The `chevrons` are a closer, bolder, soft-edged arrow: the period is
-  `CHEVRON_PERIOD_PX` 12 (was 28) and the stroke `CHEVRON_STROKE` 0.30 of it,
-  a little over 7 pixels across with a gap of about 5 to the next arrow, on a
-  ribbon of `CHEVRON_WIDTH` 16 (was 10), sliding at `CHEVRON_SPEED` 1.5 (a
-  little faster than `dash`). A stroke above about 0.4 of the period makes the
-  arrows run into each other. The texture is continuous across repeats now,
+- The `chevrons` are a closer, lower, soft-edged arrow: the period is
+  `CHEVRON_PERIOD_PX` 12 (was 28) and the stroke `CHEVRON_STROKE` 0.16 of it,
+  about 4 pixels across with a gap of about 8 to the next arrow, on a ribbon
+  as high as the glow band (`CHEVRON_WIDTH`, 5, was 10), sliding at
+  `CHEVRON_SPEED` 1.5 (a little faster than `dash`). A stroke above about 0.4
+  of the period makes the arrows run into each other. The texture is continuous across repeats now,
   so a wide stroke leaves no seam. All of it is tunable through
   `SegmentAnimations`, and the shape of the arrow now is too:
   `Chevrons::leg_slope` (how open the `>` is) and `Chevrons::stroke` (how

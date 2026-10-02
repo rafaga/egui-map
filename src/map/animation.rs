@@ -131,17 +131,20 @@ pub const CHEVRON_SPEED: f32 = 1.5;
 /// Not scaled by zoom, like [`CHEVRON_PERIOD_PX`]: the arrow's shape depends on
 /// the ratio of the two, so scaling only one of them squashed or stretched it
 /// every time the zoom changed.
-pub const CHEVRON_WIDTH: f32 = 16.0;
+///
+/// The same as [`GLOW_BAND_THICKNESS`]: the arrows are never taller than the
+/// glow band, so the two lasting effects take the same room on the line.
+pub const CHEVRON_WIDTH: f32 = GLOW_BAND_THICKNESS;
 /// How far the legs of each [`Animation::chevrons`] arrow sweep back from its
 /// tip, see [`Chevrons::leg_slope`]. With [`CHEVRON_WIDTH`] and
-/// [`CHEVRON_PERIOD_PX`] it makes the legs about 45 degrees to the segment
-/// (`width / period`).
-pub const CHEVRON_LEG_SLOPE: f32 = 1.33;
+/// [`CHEVRON_PERIOD_PX`] the legs are a little flatter than 45 degrees to the
+/// segment, which reads better on a ribbon this low.
+pub const CHEVRON_LEG_SLOPE: f32 = 0.5;
 /// Stroke thickness of each [`Animation::chevrons`] arrow as a fraction of the
-/// period, see [`Chevrons::stroke`]: a bold arrow, a little over 7 pixels
-/// across at the default period (it was about 4), leaving a gap of about 5
-/// pixels to the next one. Above roughly `0.4` the arrows run into each other.
-pub const CHEVRON_STROKE: f32 = 0.30;
+/// period, see [`Chevrons::stroke`]: about 4 pixels across at the default
+/// period, as thick as the low ribbon allows, with a gap of about 8 pixels to
+/// the next one. Above roughly `0.4` the arrows run into each other.
+pub const CHEVRON_STROKE: f32 = 0.16;
 /// Radius, in screen pixels at `zoom == 1`, of the dot of
 /// [`Animation::comet`] and [`Animation::comet_once`]: the width of the
 /// stroke [`Animation::wipe`] draws (`Wipe::width`), so the dot reads as a
