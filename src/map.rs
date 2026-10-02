@@ -4014,7 +4014,12 @@ mod tests {
             }
         }
 
-        let expected = SegmentAnimations::default().with(|s| s.dash.width = Some(77.0));
+        // Both widths set on purpose, so the map's default stroke does not
+        // fill either of them in.
+        let expected = SegmentAnimations::default().with(|s| {
+            s.dash.width = Some(77.0);
+            s.chevrons.width = Some(55.0);
+        });
         let mut map = Map::new();
         map.add_lines(vec![MapSegment::new((1, 2), [0.0, 0.0], [50.0, 0.0])]);
         map.settings.segment_animation = expected;
@@ -4039,6 +4044,70 @@ mod tests {
         assert_eq!(template.base.borrow().as_ref(), Some(&expected));
         assert_eq!(template.notification.borrow().as_ref(), Some(&expected));
         assert_eq!(template.state.borrow().as_ref(), Some(&expected));
+    }
+
+    #[test]
+    fn the_chevrons_are_painted_with_the_theme_alert_color() {
+        // A lasting segment effect has no `marker` role: with no `color()` it
+        // takes the installed theme's `alert`, and an explicit color wins.
+        use crate::map::theme::ThemeColors;
+        use egui::{Context, RawInput, Shape};
+
+        struct FixedPalette;
+        impl MapTheme for FixedPalette {
+            fn colors(&self, _mode: ColorMode) -> ThemeColors {
+                ThemeColors {
+                    node: Color32::from_rgb(1, 2, 3),
+                    segment: Color32::from_rgb(4, 5, 6),
+                    selected: Color32::from_rgb(7, 8, 9),
+                    alert: Color32::from_rgb(200, 100, 50),
+                    marker: Color32::from_rgb(16, 17, 18),
+                    text: Color32::from_rgb(13, 14, 15),
+                    background: Color32::from_rgb(19, 20, 21),
+                }
+            }
+        }
+
+        // The tint of the first mesh the widget draws with the chevron texture:
+        // the vertex color is the one the effect was given.
+        let chevron_tint = |color: Option<Color32>| -> Color32 {
+            let mut map = Map::new();
+            map.set_theme(Rc::new(FixedPalette));
+            map.add_points(vec![
+                MapPoint::new(1, [0.0, 0.0]),
+                MapPoint::new(2, [50.0, 0.0]),
+            ]);
+            map.add_lines(vec![MapSegment::new((1, 2), [0.0, 0.0], [50.0, 0.0])]);
+            let handle = map.segment((1, 2)).unwrap();
+            match color {
+                Some(color) => handle.color(color).chevrons(),
+                None => handle.chevrons(),
+            }
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 300.0));
+            let ctx = Context::default();
+            let mut output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(screen),
+                    ..RawInput::default()
+                },
+                |ui| {
+                    ui.add(&mut map);
+                },
+            );
+            output.textures_delta.clear();
+            output
+                .shapes
+                .iter()
+                .find_map(|cs| match &cs.shape {
+                    Shape::Mesh(mesh) if !mesh.vertices.is_empty() => Some(mesh.vertices[0].color),
+                    _ => None,
+                })
+                .expect("the chevrons must draw a mesh")
+        };
+
+        assert_eq!(chevron_tint(None), Color32::from_rgb(200, 100, 50));
+        let custom = Color32::from_rgb(1, 200, 3);
+        assert_eq!(chevron_tint(Some(custom)), custom);
     }
 
     #[test]

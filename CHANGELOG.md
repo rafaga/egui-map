@@ -31,6 +31,36 @@ any minor bump may include breaking changes, called out below as such).
 
 ### Changed
 
+- `wipe` wipes the line back out once it is drawn, in the same direction it
+  was drawn in: the colour leaves from the first endpoint towards the second,
+  behind the edge that drew it. `Wipe::out_duration` (`WIPE_OUT_DURATION`, 0.9
+  seconds) sets how long that takes, `0.0` brings back the line vanishing as
+  soon as it is complete, and `Wipe::total_duration` / `Wipe::coloured_span`
+  give the whole length and the coloured part of the segment at a given time.
+  The effect now plays for `duration + out_duration` (1.8 seconds by default).
+- `flash` no longer swells past the nodes it joins: its widest point is the
+  diameter of the built-in node (8, was 12), with `FLASH_BASE_WIDTH` 2 and
+  `FLASH_EXTRA_WIDTH` 6 as defaults (`FlashDecay::extra_width` was 10).
+- The comet dot is smaller: it has the radius of the `wipe` stroke
+  (`COMET_DOT_RADIUS`, 2.5 pixels, down from 4, with a floor of
+  `COMET_DOT_MIN`, 1.5) in `comet` and `comet_once`.
+- **Breaking:** the `chevrons` are solid arrow-shaped blocks as tall as the
+  segment line, instead of thin arrow outlines on a ribbon of their own.
+  `Chevrons` is now `period` (in widths of the ribbon, `CHEVRON_PERIOD` 4.5,
+  never shorter than the chevron drawn in it, see `Chevrons::layout`),
+  `speed` (`CHEVRON_SPEED` 2 repeats per second), `fill` (how much of the
+  period a block takes, `CHEVRON_FILL` 0.38, which leaves a gap as long as the
+  chevron), `tip_depth` (how deep the point
+  is as a fraction of the width, `CHEVRON_TIP_DEPTH` 0.5, edges at 45 degrees)
+  and `width`, which like `Dash::width` is `None` to follow the default
+  segment stroke (`SegmentAnimations::with_line_width` fills it in) and falls
+  back to `DASH_WIDTH`. The old `period_px`, `leg_slope` and `stroke` are gone,
+  and `CHEVRON_PERIOD_PX`, `CHEVRON_WIDTH`, `CHEVRON_LEG_SLOPE` and
+  `CHEVRON_STROKE` with them. The ribbon width is in screen pixels, not
+  multiplied by the zoom, and the period follows it, so a block keeps its
+  shape when the map is zoomed or the line gets thicker. They are drawn with
+  the theme's `alert` color, or the `color()` you gave. A texture is cached
+  per distinct pair of shape settings.
 - **Breaking:** `comet_once` takes its direction like every other segment
   effect, with the modifier: `segment.direction(CometDirection::Reverse)
   .comet_once(at)` instead of `segment.comet_once(at, CometDirection::Reverse)`.

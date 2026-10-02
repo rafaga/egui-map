@@ -73,6 +73,17 @@ pub const SCALE_IN_DURATION: f32 = 0.45;
 pub const CROSSHAIR_DURATION: f32 = 0.6;
 /// How long [`Animation::flash_decay`] takes to fade back out, in seconds.
 pub const FLASH_DECAY_DURATION: f32 = 1.0;
+/// Stroke width, before the `zoom` multiplier, [`Animation::flash_decay`]
+/// settles to as it fades.
+pub const FLASH_BASE_WIDTH: f32 = 2.0;
+/// Width, before the `zoom` multiplier, [`Animation::flash_decay`] adds at its
+/// start. With [`FLASH_BASE_WIDTH`] the widest the flash gets is 8, the
+/// diameter of the built-in node (radius `4 * zoom`): it never swells past the
+/// nodes at the ends of the segment.
+pub const FLASH_EXTRA_WIDTH: f32 = 6.0;
+// Checked when compiling: raising either constant past the built-in node's
+// diameter (8) fails the build instead of silently bringing the flash back.
+const _: () = assert!(FLASH_BASE_WIDTH + FLASH_EXTRA_WIDTH <= 8.0);
 /// How long [`Animation::comet`] takes for one end-to-end pass, in seconds.
 pub const COMET_PERIOD: f32 = 1.6;
 /// How long a single [`Animation::comet_once`] pass takes to cross the
@@ -94,6 +105,10 @@ pub const DASH_SPEED: f32 = 0.6;
 pub const DASH_WIDTH: f32 = 2.0;
 /// How long [`Animation::wipe`] takes to draw the line in, in seconds.
 pub const WIPE_DURATION: f32 = 0.9;
+/// How long [`Animation::wipe`] takes to take the line back out once it is
+/// drawn, in seconds: the same as drawing it in, so the way out is the way in
+/// played backwards.
+pub const WIPE_OUT_DURATION: f32 = 0.9;
 /// How long one full traverse-and-loop of [`Animation::glow_band`] takes, in
 /// seconds -- the band fades out past one end before it reappears at the
 /// other, so this covers the whole cycle, not just the visible crossing.
@@ -108,16 +123,34 @@ pub const GLOW_BAND_THICKNESS: f32 = 5.0;
 /// How long one full pulse of [`Animation::glow`] takes (dim, bright, dim),
 /// in seconds.
 pub const GLOW_PERIOD: f32 = 2.5;
-/// Length, in **screen pixels**, of one chevron repeat of
-/// [`Animation::chevrons`]. Deliberately not scaled by zoom, same reasoning
-/// as [`DASH_PERIOD_PX`].
-pub const CHEVRON_PERIOD_PX: f32 = 28.0;
+/// Length of one chevron repeat of [`Animation::chevrons`], in widths of the
+/// ribbon ([`Chevrons::width`], the thickness of the segment line): the blocks
+/// are as tall as the line and their spacing follows from that, so the shape
+/// is the same whatever the line width or the zoom.
+///
+/// With [`CHEVRON_FILL`] and [`CHEVRON_TIP_DEPTH`] the gap between two
+/// chevrons is as long as a chevron (about 2.2 widths each).
+pub const CHEVRON_PERIOD: f32 = 4.5;
 /// How many repeats of the chevron pattern [`Animation::chevrons`] slides
-/// through per second.
-pub const CHEVRON_SPEED: f32 = 0.5;
-/// Width, before the `zoom` multiplier, of the ribbon [`Animation::chevrons`]
-/// paints.
-pub const CHEVRON_WIDTH: f32 = 10.0;
+/// through per second. With the default line width (2 pixels) that is
+/// 18 pixels per second, a little faster than [`DASH_SPEED`]'s marching ants.
+pub const CHEVRON_SPEED: f32 = 2.0;
+/// How much of the period each [`Animation::chevrons`] block occupies along
+/// the segment, see [`Chevrons::fill`]; the rest is the gap to the next one.
+/// Together with [`CHEVRON_TIP_DEPTH`] the whole chevron is a little under
+/// half the period, so the gap is at least as long as the chevron.
+pub const CHEVRON_FILL: f32 = 0.38;
+/// How deep the point of each [`Animation::chevrons`] block is, as a fraction
+/// of the ribbon width, see [`Chevrons::tip_depth`]. A half makes the edges
+/// 45 degrees to the segment.
+pub const CHEVRON_TIP_DEPTH: f32 = 0.5;
+/// Radius, in screen pixels at `zoom == 1`, of the dot of
+/// [`Animation::comet`] and [`Animation::comet_once`]: the width of the
+/// stroke [`Animation::wipe`] draws (`Wipe::width`), so the dot reads as a
+/// bead on the line rather than a blob over it.
+pub const COMET_DOT_RADIUS: f32 = 2.5;
+/// Floor for [`COMET_DOT_RADIUS`], in screen pixels.
+pub const COMET_DOT_MIN: f32 = 1.5;
 
 /// Shapes smaller than this many screen points across are effectively
 /// invisible; the `*_outline`/circular effects skip tessellating them. Only
@@ -267,10 +300,11 @@ impl SegmentAnimations {
     }
 
     /// `self` with the effects that follow the default segment stroke given
-    /// its width: a [`Dash::width`] of `None` becomes `line_width` (screen
-    /// pixels), so [`SegmentAnimations::dash`] is as thick as the line it runs
-    /// over. With no default stroke (`line_width` of `None`) it stays `None`
-    /// and falls back to [`DASH_WIDTH`]. A width set explicitly is kept.
+    /// its width: a [`Dash::width`] or [`Chevrons::width`] of `None` becomes
+    /// `line_width` (screen pixels), so [`SegmentAnimations::dash`] and
+    /// [`SegmentAnimations::chevrons`] are as thick as the line they run over.
+    /// With no default stroke (`line_width` of `None`) they stay `None` and
+    /// fall back to [`DASH_WIDTH`]. A width set explicitly is kept.
     ///
     /// The map applies this before handing the animations to the segment
     /// effects and to a [`SegmentTemplate`](crate::map::objects::SegmentTemplate),
@@ -279,6 +313,9 @@ impl SegmentAnimations {
         self.with(|animation| {
             if animation.dash.width.is_none() {
                 animation.dash.width = line_width;
+            }
+            if animation.chevrons.width.is_none() {
+                animation.chevrons.width = line_width;
             }
         })
     }
@@ -292,6 +329,12 @@ pub struct FlashDecay {
     pub base_width: f32,
     /// Extra width, before the `zoom` multiplier, at the very start of the
     /// effect (added to [`Self::base_width`] and shed over its lifetime).
+    ///
+    /// The widest the line gets is `base_width + extra_width`; the default
+    /// keeps that at the diameter of the built-in node (`8 * zoom`), so the
+    /// flash never swells past the nodes it joins. Keep it under the diameter
+    /// of your own nodes if you use a [`NodeTemplate`](crate::map::objects::NodeTemplate)
+    /// with a different size.
     pub extra_width: f32,
     /// How long the effect plays, in seconds.
     pub duration: f32,
@@ -308,8 +351,8 @@ impl FlashDecay {
 impl Default for FlashDecay {
     fn default() -> Self {
         Self {
-            base_width: 2.0,
-            extra_width: 10.0,
+            base_width: FLASH_BASE_WIDTH,
+            extra_width: FLASH_EXTRA_WIDTH,
             duration: FLASH_DECAY_DURATION,
         }
     }
@@ -338,20 +381,27 @@ impl CometOnce {
 impl Default for CometOnce {
     fn default() -> Self {
         Self {
-            dot_radius: 4.0,
-            dot_min: 2.5,
+            dot_radius: COMET_DOT_RADIUS,
+            dot_min: COMET_DOT_MIN,
             duration: COMET_TRAVEL_DURATION,
         }
     }
 }
 
-/// Tunables of [`SegmentAnimations::wipe`]: the segment drawing itself in.
+/// Tunables of [`SegmentAnimations::wipe`]: the segment drawing itself in and
+/// then taking itself back out.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Wipe {
     /// Stroke width, before the `zoom` multiplier.
     pub width: f32,
-    /// How long the effect plays, in seconds.
+    /// How long the line takes to draw in, in seconds.
     pub duration: f32,
+    /// How long the line takes to go back out once it is drawn, in seconds:
+    /// the colour is taken away in the same direction it was drawn in, from
+    /// the endpoint it started from towards the other, so the line is wiped
+    /// out the way it was wiped in. `0.0` makes the line vanish the moment it
+    /// is complete, as it used to.
+    pub out_duration: f32,
 }
 
 impl Wipe {
@@ -360,6 +410,27 @@ impl Wipe {
         f(&mut self);
         self
     }
+
+    /// How long the whole effect plays, in seconds: the way in and the way
+    /// out.
+    pub fn total_duration(&self) -> f32 {
+        self.duration + self.out_duration
+    }
+
+    /// The part of the segment that is coloured `secs` seconds in, as
+    /// `(start, end)` fractions of its length counted from the first endpoint.
+    /// On the way in it is `(0.0, 0.0)` growing to `(0.0, 1.0)` over
+    /// [`Self::duration`]; on the way out the start catches up, `(0.0, 1.0)`
+    /// shrinking to `(1.0, 1.0)` over [`Self::out_duration`], so both edges
+    /// travel the same way, from the first endpoint to the second. `None`
+    /// once the effect is over.
+    pub fn coloured_span(&self, secs: f32) -> Option<(f32, f32)> {
+        if secs < self.duration {
+            return Some((0.0, (secs / self.duration).clamp(0.0, 1.0)));
+        }
+        let out = secs - self.duration;
+        (out < self.out_duration).then(|| ((out / self.out_duration).clamp(0.0, 1.0), 1.0))
+    }
 }
 
 impl Default for Wipe {
@@ -367,6 +438,7 @@ impl Default for Wipe {
         Self {
             width: 2.5,
             duration: WIPE_DURATION,
+            out_duration: WIPE_OUT_DURATION,
         }
     }
 }
@@ -393,8 +465,8 @@ impl Comet {
 impl Default for Comet {
     fn default() -> Self {
         Self {
-            dot_radius: 4.0,
-            dot_min: 2.5,
+            dot_radius: COMET_DOT_RADIUS,
+            dot_min: COMET_DOT_MIN,
             period: COMET_PERIOD,
         }
     }
@@ -467,16 +539,29 @@ impl Default for GlowBand {
     }
 }
 
-/// Tunables of [`SegmentAnimations::chevrons`]: arrows sliding along the
-/// segment.
+/// Tunables of [`SegmentAnimations::chevrons`]: solid arrow-shaped blocks
+/// sliding along the segment, as tall as the line itself.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Chevrons {
-    /// Length of one chevron repeat, in **screen pixels** (not scaled by zoom).
-    pub period_px: f32,
+    /// Length of one repeat, in widths of the ribbon ([`Self::width`]). Never
+    /// shorter than the chevron drawn in it, whatever you set: see
+    /// [`Self::layout`].
+    pub period: f32,
     /// How many repeats slide through per second.
     pub speed: f32,
-    /// Ribbon width, before the `zoom` multiplier.
-    pub width: f32,
+    /// How much of the period each block occupies along the segment, `0.0` to
+    /// `1.0`; the rest is the gap to the next block.
+    pub fill: f32,
+    /// How deep the point of each block is (and the notch at its back), as a
+    /// fraction of the ribbon width: `0.0` makes plain rectangles, `0.5` edges
+    /// at 45 degrees to the segment.
+    pub tip_depth: f32,
+    /// Ribbon width, in **screen pixels** (not scaled by zoom, so the blocks
+    /// keep their shape at any zoom): `None` follows the thickness of the
+    /// default segment stroke, like [`Dash::width`], and falls back to
+    /// [`DASH_WIDTH`] without one. The blocks are as tall as the line, and
+    /// [`Self::period`] is measured in this width.
+    pub width: Option<f32>,
 }
 
 impl Chevrons {
@@ -485,14 +570,33 @@ impl Chevrons {
         f(&mut self);
         self
     }
+
+    /// The `(period, fill)` the effect draws with: [`Self::period`] and
+    /// [`Self::fill`], adjusted so that one repeat is never shorter than the
+    /// chevron drawn in it.
+    ///
+    /// A block is [`Self::fill`] of the period long on the centreline, and
+    /// its edges sweep back another [`Self::tip_depth`] widths at the sides of
+    /// the ribbon, so the whole chevron spans `fill * period + tip_depth`
+    /// widths. The period is raised to at least that (`tip_depth / (1 - fill)`
+    /// widths) so a chevron never reaches into the next repeat, and `fill` is
+    /// held below `0.95` so that floor stays finite.
+    pub fn layout(&self) -> (f32, f32) {
+        let fill = self.fill.clamp(0.0, 0.95);
+        let period = self.period.max(self.tip_depth.max(0.0) / (1.0 - fill));
+        (period.max(f32::EPSILON), fill)
+    }
 }
 
 impl Default for Chevrons {
     fn default() -> Self {
         Self {
-            period_px: CHEVRON_PERIOD_PX,
+            period: CHEVRON_PERIOD,
             speed: CHEVRON_SPEED,
-            width: CHEVRON_WIDTH,
+            fill: CHEVRON_FILL,
+            tip_depth: CHEVRON_TIP_DEPTH,
+            // Follows the default stroke unless it is set.
+            width: None,
         }
     }
 }
@@ -1527,11 +1631,13 @@ impl SegmentAnimations {
         secs < self.comet_once.duration
     }
 
-    /// One frame of the segment drawing itself in, from `a` towards `b`, then
-    /// gone. Reads as *"this route was just established"* — where
-    /// [`SegmentAnimations::comet_once`] shows something moving along an
-    /// existing route, this shows the route itself appearing. Plays for
-    /// [`Wipe::duration`]. Returns `true` while still playing.
+    /// One frame of the segment drawing itself in, from `a` towards `b`, and
+    /// then wiping itself out the same way, the colour leaving from `a`
+    /// towards `b` behind the edge that drew it. Reads as *"this route was just
+    /// established"* — where [`SegmentAnimations::comet_once`] shows something
+    /// moving along an existing route, this shows the route itself appearing.
+    /// Plays for [`Wipe::duration`] plus [`Wipe::out_duration`]. Returns
+    /// `true` while still playing.
     ///
     /// Cheaper than the mesh technique [`SegmentAnimations::dash`] uses: the
     /// progressively-revealed portion is still just a straight line, so a
@@ -1545,14 +1651,19 @@ impl SegmentAnimations {
         initial_time: Instant,
         color: Color32,
     ) -> bool {
-        let secs = elapsed(initial_time);
-        let progress = (secs / self.wipe.duration).clamp(0.0, 1.0);
-        let leading_edge = a + (b - a) * progress;
-        painter.line_segment(
-            [a, leading_edge],
-            Stroke::new(self.wipe.width * zoom, color),
-        );
-        secs < self.wipe.duration
+        let Some((start, end)) = self.wipe.coloured_span(elapsed(initial_time)) else {
+            return false;
+        };
+        // Coloured between two edges that both travel from `a` to `b`: the
+        // leading one draws the line in, the trailing one wipes it out.
+        let delta = b - a;
+        if end > start {
+            painter.line_segment(
+                [a + delta * start, a + delta * end],
+                Stroke::new(self.wipe.width * zoom, color),
+            );
+        }
+        true
     }
 
     // ----------------------------------------------------- persistent/segment
@@ -1792,10 +1903,10 @@ impl SegmentAnimations {
         handle
     }
 
-    /// One frame of a row of arrow shapes sliding along the segment. `time`
-    /// is the frame time in seconds; the pattern repeats every
-    /// [`Chevrons::period_px`] screen pixels and slides at
-    /// [`Chevrons::speed`] repeats per second.
+    /// One frame of a row of solid arrow-shaped blocks sliding along the
+    /// segment, as tall as the line. `time` is the frame time in seconds; the
+    /// pattern repeats every [`Chevrons::period`] widths of the ribbon and
+    /// slides at [`Chevrons::speed`] repeats per second.
     ///
     /// Reads as *"direction of travel"*, more explicit at a glance than
     /// [`SegmentAnimations::comet`]'s single dot. Same mesh-building shape as
@@ -1805,12 +1916,19 @@ impl SegmentAnimations {
     /// instead, so the interpolated `uv.y` sweeps across a genuinely 2D
     /// texture and traces out the arrow shape. A zero-length segment is
     /// skipped.
+    ///
+    /// The ribbon is [`Chevrons::width`] screen pixels wide whatever the zoom
+    /// (`zoom` is unused, and kept so every steady segment effect has the same
+    /// signature, like [`SegmentAnimations::dash`]): the shape of a block is
+    /// the ratio of that width to the period, and the period is measured in
+    /// that width, so it never gets squashed or stretched when the map is
+    /// zoomed or the line width changes.
     pub fn chevrons(
         &self,
         painter: &Painter,
         a: Pos2,
         b: Pos2,
-        zoom: f32,
+        _zoom: f32,
         time: f32,
         color: Color32,
     ) {
@@ -1820,7 +1938,8 @@ impl SegmentAnimations {
             return;
         }
         let dir = delta / len;
-        let normal = Vec2::new(-dir.y, dir.x) * (self.chevrons.width * zoom * 0.5);
+        let width = self.chevrons.width.unwrap_or(DASH_WIDTH);
+        let normal = Vec2::new(-dir.y, dir.x) * (width * 0.5);
         // `u0 < u1` (below) maps the texture's own +u direction onto the
         // segment's `a -> b` direction, and the arrow tip sits at the
         // texture's higher `u` (see `chevrons_texture`) -- so in any single
@@ -1830,11 +1949,16 @@ impl SegmentAnimations {
         // time) is what would make it crawl towards `a` instead, backwards
         // from the way the arrows point. Negating the time term here is what
         // keeps the two in agreement.
+        let (period, fill) = self.chevrons.layout();
         let phase = (-(time * self.chevrons.speed)).rem_euclid(1.0);
         let u0 = phase;
-        let u1 = phase + len / self.chevrons.period_px;
+        let u1 = phase + len / (period * width);
 
-        let texture = Self::chevrons_texture(painter.ctx());
+        // How far the edges of a block sweep back from its tip, in fractions
+        // of the period per unit of ribbon width: `tip_depth` ribbon widths
+        // over a period of `period` ribbon widths.
+        let leg_slope = 2.0 * self.chevrons.tip_depth / period;
+        let texture = Self::chevrons_texture(painter.ctx(), leg_slope, fill);
         let mut mesh = Mesh::with_texture(texture.id());
         mesh.vertices.extend([
             Vertex {
@@ -1867,39 +1991,30 @@ impl SegmentAnimations {
     /// pattern as [`SegmentAnimations::dash_texture`].
     ///
     /// A genuinely 2D tile, unlike `dash`'s 1x32 strip: for each row `v`
-    /// (0 at one long edge of the ribbon, 1 at the other) the arrow's stroke
-    /// sits at an "ideal" `u` that moves back from a tip near the leading
-    /// edge as `v` moves away from the centreline in either direction --
-    /// tracing the two legs of a `>` shape -- and each texel's alpha falls
-    /// off with its distance from that ideal `u`, smoothstepped for a soft
-    /// stroke. [`TextureWrapMode::Repeat`] tiles it along `u`; `v` never
-    /// leaves `[0, 1]` in the mesh above, so wrapping never triggers on that
-    /// axis.
-    fn chevrons_texture(ctx: &Context) -> TextureHandle {
-        let id = Id::new("egui_map::chevrons_texture");
+    /// (0 at one long edge of the ribbon, 1 at the other) the solid block
+    /// ends at a front edge `u` that moves back from a tip as `v` moves away
+    /// from the centreline in either direction -- tracing the point of a `>`
+    /// -- and starts `fill` of the period behind it, parallel to the front,
+    /// which cuts the matching notch at its back. A texel's alpha is its
+    /// coverage by the block, with a one-texel soft edge.
+    /// [`TextureWrapMode::Repeat`] tiles it along `u`; `v` never leaves
+    /// `[0, 1]` in the mesh above, so wrapping never triggers on that axis.
+    ///
+    /// The shape comes from `leg_slope` (how far the edges sweep back, see
+    /// [`SegmentAnimations::chevrons`]) and [`Chevrons::fill`]; one texture is
+    /// cached per distinct pair, so changing them while the app runs
+    /// registers a new one (a few kilobytes) the first time it is drawn.
+    fn chevrons_texture(ctx: &Context, leg_slope: f32, fill: f32) -> TextureHandle {
+        let id = Id::new((
+            "egui_map::chevrons_texture",
+            leg_slope.to_bits(),
+            fill.to_bits(),
+        ));
         if let Some(handle) = ctx.data(|d| d.get_temp::<TextureHandle>(id)) {
             return handle;
         }
 
-        const WIDTH: usize = 32;
-        const HEIGHT: usize = 16;
-        const TIP_U: f32 = 0.75;
-        const LEG_SLOPE: f32 = 0.5;
-        const STROKE_THICKNESS: f32 = 0.12;
-
-        let mut pixels = Vec::with_capacity(WIDTH * HEIGHT);
-        for j in 0..HEIGHT {
-            let v = j as f32 / (HEIGHT - 1) as f32;
-            let ideal_u = TIP_U - LEG_SLOPE * (v - 0.5).abs();
-            for i in 0..WIDTH {
-                let u = i as f32 / WIDTH as f32;
-                let distance = (u - ideal_u).abs();
-                let alpha = (1.0 - distance / STROKE_THICKNESS).clamp(0.0, 1.0);
-                let alpha = alpha * alpha * (3.0 - 2.0 * alpha); // smoothstep
-                pixels.push(Color32::from_white_alpha((255.0 * alpha).round() as u8));
-            }
-        }
-        let image = ColorImage::new([WIDTH, HEIGHT], pixels);
+        let image = Self::chevrons_image(leg_slope, fill);
         let handle = ctx.load_texture(
             "egui_map::chevrons",
             image,
@@ -1912,6 +2027,48 @@ impl SegmentAnimations {
         );
         ctx.data_mut(|d| d.insert_temp(id, handle.clone()));
         handle
+    }
+
+    /// Texture width, in texels (along the segment).
+    const CHEVRON_TILE_WIDTH: usize = 64;
+    /// Texture height, in texels (across the ribbon).
+    const CHEVRON_TILE_HEIGHT: usize = 32;
+    /// Where the tip of the block sits in the tile, in tile units.
+    const CHEVRON_TIP_U: f32 = 0.9;
+
+    /// The pixels of the tile [`Self::chevrons_texture`] uploads: white with
+    /// an alpha that is `1` inside a block and `0` in the gap (see there for
+    /// how the shape is traced). Finer than `dash`'s strip because the ribbon
+    /// is only a few pixels wide, so the tile needs the rows to keep the
+    /// edges of the point smooth.
+    fn chevrons_image(leg_slope: f32, fill: f32) -> ColorImage {
+        let (width, height) = (Self::CHEVRON_TILE_WIDTH, Self::CHEVRON_TILE_HEIGHT);
+        // Width of the soft edge, in tile units: one texel.
+        let soft = 1.0 / width as f32;
+        let fill = fill.clamp(0.0, 1.0);
+        let margin = (1.0 - fill) * 0.5;
+
+        let mut pixels = Vec::with_capacity(width * height);
+        for j in 0..height {
+            let v = j as f32 / (height - 1) as f32;
+            let front = Self::CHEVRON_TIP_U - leg_slope * (v - 0.5).abs();
+            for i in 0..width {
+                let u = (i as f32 + 0.5) / width as f32;
+                // How far this texel is behind the block's front edge (negative
+                // ahead of it), around the tile (it repeats along `u`), so a
+                // block that spills past an edge continues on the other side
+                // instead of leaving a seam where two tiles meet. The window
+                // is centred on the block, so the gap is split evenly on both
+                // sides of it. Inside the block while it is between `0` and
+                // `fill`; each of the two edges is one texel wide.
+                let behind = (front - u + margin).rem_euclid(1.0) - margin;
+                let alpha = (behind / soft + 0.5)
+                    .min((fill - behind) / soft + 0.5)
+                    .clamp(0.0, 1.0);
+                pixels.push(Color32::from_white_alpha((255.0 * alpha).round() as u8));
+            }
+        }
+        ColorImage::new([width, height], pixels)
     }
 }
 
@@ -2297,7 +2454,11 @@ mod tests {
                 SegmentAnimation::FlashDecay,
                 FLASH_DECAY_DURATION,
             ),
-            ("wipe", SegmentAnimation::Wipe, WIPE_DURATION),
+            (
+                "wipe",
+                SegmentAnimation::Wipe,
+                WIPE_DURATION + WIPE_OUT_DURATION,
+            ),
         ]
     }
 
@@ -2624,6 +2785,44 @@ mod tests {
     }
 
     #[test]
+    fn wipe_draws_in_then_wipes_out_in_the_same_direction() {
+        let wipe = Wipe {
+            width: 2.0,
+            duration: 1.0,
+            out_duration: 2.0,
+        };
+        assert_eq!(wipe.total_duration(), 3.0);
+        // In: the leading edge goes from the first endpoint to the second,
+        // the start stays at the first.
+        assert_eq!(wipe.coloured_span(0.0), Some((0.0, 0.0)));
+        assert_eq!(wipe.coloured_span(0.5), Some((0.0, 0.5)));
+        assert_eq!(wipe.coloured_span(1.0), Some((0.0, 1.0)));
+        // Out: now the trailing edge goes the same way, from the first
+        // endpoint to the second, and the end stays at the second.
+        assert_eq!(wipe.coloured_span(2.0), Some((0.5, 1.0)));
+        let (start, end) = wipe.coloured_span(2.99).unwrap();
+        assert!(start > 0.99 && end == 1.0, "({start}, {end})");
+        // Both edges only ever move forward.
+        let mut last = (0.0, 0.0);
+        for step in 0..300 {
+            let (start, end) = wipe.coloured_span(step as f32 * 0.01).unwrap();
+            assert!(start >= last.0 && end >= last.1, "edge went back at {step}");
+            assert!(start <= end);
+            last = (start, end);
+        }
+        // Over.
+        assert_eq!(wipe.coloured_span(3.0), None);
+        assert_eq!(wipe.coloured_span(30.0), None);
+        // No way out: gone the moment it is complete, as it used to be.
+        let abrupt = Wipe {
+            out_duration: 0.0,
+            ..wipe
+        };
+        assert_eq!(abrupt.coloured_span(0.5), Some((0.0, 0.5)));
+        assert_eq!(abrupt.coloured_span(1.0), None);
+    }
+
+    #[test]
     fn dash_runs_at_any_time_and_skips_zero_length_segments() {
         let painter = headless_painter();
         let animation = SegmentAnimations::default();
@@ -2681,12 +2880,117 @@ mod tests {
         animation.chevrons(&painter, a, a, 1.0, 0.0, Color32::GREEN);
     }
 
+    /// The `leg_slope` the default tunables give `chevrons`.
+    fn default_chevron_slope() -> f32 {
+        2.0 * CHEVRON_TIP_DEPTH / CHEVRON_PERIOD
+    }
+
     #[test]
     fn chevrons_texture_is_registered_once_per_context() {
         let ctx = Context::default();
-        let first = SegmentAnimations::chevrons_texture(&ctx);
-        let second = SegmentAnimations::chevrons_texture(&ctx);
+        let slope = default_chevron_slope();
+        let first = SegmentAnimations::chevrons_texture(&ctx, slope, CHEVRON_FILL);
+        let second = SegmentAnimations::chevrons_texture(&ctx, slope, CHEVRON_FILL);
         assert_eq!(first.id(), second.id());
+    }
+
+    #[test]
+    fn chevrons_texture_follows_its_shape_settings() {
+        let ctx = Context::default();
+        let slope = default_chevron_slope();
+        let default = SegmentAnimations::chevrons_texture(&ctx, slope, CHEVRON_FILL);
+        let square = SegmentAnimations::chevrons_texture(&ctx, 0.0, CHEVRON_FILL);
+        let shorter = SegmentAnimations::chevrons_texture(&ctx, slope, 0.5);
+        assert_ne!(default.id(), square.id());
+        assert_ne!(default.id(), shorter.id());
+        // Out-of-range fills are clamped, not a panic.
+        let _ = SegmentAnimations::chevrons_texture(&ctx, slope, -1.0);
+        let _ = SegmentAnimations::chevrons_texture(&ctx, slope, 5.0);
+    }
+
+    #[test]
+    fn a_chevron_repeat_is_never_shorter_than_the_chevron() {
+        // The chevron spans `fill * period + tip_depth` widths, notch to tip
+        // at the sides of the ribbon; the repeat must hold all of it.
+        let drawn = |c: Chevrons| {
+            let (period, fill) = c.layout();
+            (fill * period + c.tip_depth, period)
+        };
+        let default = Chevrons::default();
+        let (length, period) = drawn(default);
+        assert!(length <= period, "default: {length} in {period}");
+        // And by default the gap between two chevrons is as long as one.
+        assert!(
+            period - length >= length,
+            "default: a gap of {} widths after a chevron of {length}",
+            period - length
+        );
+        // The default period is already long enough: left as it is.
+        assert_eq!(default.layout(), (CHEVRON_PERIOD, CHEVRON_FILL));
+
+        for (period, fill, tip_depth) in [
+            (1.0, 0.75, 0.5),
+            (0.5, 0.9, 1.0),
+            (2.0, 5.0, 0.5),
+            (0.0, 0.75, 0.5),
+            (3.0, 0.75, 0.0),
+        ] {
+            let c = Chevrons::default().with(|c| {
+                c.period = period;
+                c.fill = fill;
+                c.tip_depth = tip_depth;
+            });
+            let (length, period) = drawn(c);
+            assert!(
+                length <= period + 1e-4,
+                "{c:?}: a chevron of {length} widths in a repeat of {period}"
+            );
+            assert!(period.is_finite() && period > 0.0);
+        }
+        // A longer period than needed is respected.
+        let long = Chevrons::default().with(|c| c.period = 8.0);
+        assert_eq!(long.layout().0, 8.0);
+    }
+
+    #[test]
+    fn chevrons_image_is_a_solid_block_with_a_point_and_a_gap() {
+        // A fixed shape (a block of 0.75 of the tile, edges at 45 degrees for a
+        // period of three widths), not the defaults, so the positions below
+        // hold whatever the defaults are tuned to.
+        let image = SegmentAnimations::chevrons_image(1.0 / 3.0, 0.75);
+        let width = SegmentAnimations::CHEVRON_TILE_WIDTH;
+        let height = SegmentAnimations::CHEVRON_TILE_HEIGHT;
+        let alpha =
+            |row: usize, u: f32| image.pixels[row * width + (u * width as f32) as usize].a();
+        let middle = height / 2;
+        let edge = 0;
+
+        // On the centreline the block runs from its notch (about 0.15) to its
+        // tip (about 0.9); the rest of the tile is the gap.
+        assert_eq!(alpha(middle, 0.5), 255, "inside the block");
+        assert_eq!(alpha(middle, 0.88), 255, "just behind the tip");
+        assert_eq!(alpha(middle, 0.95), 0, "in the gap ahead of the tip");
+        assert_eq!(alpha(middle, 0.05), 0, "in the gap behind the notch");
+        // At the edge of the ribbon the front has swept back (the point) and
+        // the back with it (the notch).
+        assert_eq!(alpha(edge, 0.8), 0, "ahead of the front at the edge");
+        assert_eq!(alpha(edge, 0.1), 255, "where the notch is not yet cut");
+        assert_eq!(alpha(middle, 0.1), 0, "the notch at the centreline");
+    }
+
+    #[test]
+    fn chevrons_image_has_no_seam_between_repeats() {
+        // Plain rectangles (no point) filling 0.95 of the period run from
+        // `-0.05` to the front at `0.9`: the block spills past the tile's edge
+        // and must continue on the other side, with the gap only at
+        // `0.9..0.95`.
+        let image = SegmentAnimations::chevrons_image(0.0, 0.95);
+        let width = SegmentAnimations::CHEVRON_TILE_WIDTH;
+        let row = SegmentAnimations::CHEVRON_TILE_HEIGHT / 2;
+        let alpha = |column: usize| image.pixels[row * width + column].a();
+        assert_eq!(alpha(0), 255, "first column, inside the block");
+        assert_eq!(alpha(width - 1), 255, "last column, the block's other side");
+        assert_eq!(alpha((0.92 * width as f32) as usize), 0, "the gap");
     }
 
     #[test]
@@ -2697,16 +3001,16 @@ mod tests {
         assert_eq!(
             a.flash_decay,
             FlashDecay {
-                base_width: 2.0,
-                extra_width: 10.0,
+                base_width: FLASH_BASE_WIDTH,
+                extra_width: FLASH_EXTRA_WIDTH,
                 duration: FLASH_DECAY_DURATION
             }
         );
         assert_eq!(
             a.comet_once,
             CometOnce {
-                dot_radius: 4.0,
-                dot_min: 2.5,
+                dot_radius: COMET_DOT_RADIUS,
+                dot_min: COMET_DOT_MIN,
                 duration: COMET_TRAVEL_DURATION
             }
         );
@@ -2714,14 +3018,15 @@ mod tests {
             a.wipe,
             Wipe {
                 width: 2.5,
-                duration: WIPE_DURATION
+                duration: WIPE_DURATION,
+                out_duration: WIPE_OUT_DURATION
             }
         );
         assert_eq!(
             a.comet,
             Comet {
-                dot_radius: 4.0,
-                dot_min: 2.5,
+                dot_radius: COMET_DOT_RADIUS,
+                dot_min: COMET_DOT_MIN,
                 period: COMET_PERIOD
             }
         );
@@ -2745,9 +3050,12 @@ mod tests {
         assert_eq!(
             a.chevrons,
             Chevrons {
-                period_px: CHEVRON_PERIOD_PX,
+                period: CHEVRON_PERIOD,
                 speed: CHEVRON_SPEED,
-                width: CHEVRON_WIDTH
+                fill: CHEVRON_FILL,
+                tip_depth: CHEVRON_TIP_DEPTH,
+                // Follows the default stroke unless it is set.
+                width: None
             }
         );
     }
@@ -2780,8 +3088,12 @@ mod tests {
             Instant::now(),
             Color32::RED
         ));
-        // It honors the config: a tiny `wipe.duration` is already done.
-        let quick = SegmentAnimations::default().with(|s| s.wipe.duration = 0.001);
+        // It honors the config: a tiny `wipe.duration` and `wipe.out_duration`
+        // are already done.
+        let quick = SegmentAnimations::default().with(|s| {
+            s.wipe.duration = 0.001;
+            s.wipe.out_duration = 0.001;
+        });
         let past = Instant::now() - Duration::from_secs_f32(1.0);
         assert!(!quick.event(SegmentAnimation::Wipe)(
             &painter,
@@ -2800,22 +3112,41 @@ mod tests {
     /// straddle the segment line, so the farthest vertex from the centerline
     /// is half the ribbon.
     fn dash_half_width(animation: SegmentAnimations, zoom: f32) -> f32 {
+        ribbon_half_width(|painter| {
+            animation.dash(
+                painter,
+                Pos2::ZERO,
+                Pos2::new(50.0, 0.0),
+                zoom,
+                0.0,
+                Color32::GREEN,
+            );
+        })
+    }
+
+    /// [`dash_half_width`] for the chevrons.
+    fn chevrons_half_width(animation: SegmentAnimations, zoom: f32) -> f32 {
+        ribbon_half_width(|painter| {
+            animation.chevrons(
+                painter,
+                Pos2::ZERO,
+                Pos2::new(50.0, 0.0),
+                zoom,
+                0.0,
+                Color32::GREEN,
+            );
+        })
+    }
+
+    /// Half the width of the mesh `draw` paints along a horizontal segment.
+    fn ribbon_half_width(draw: impl Fn(&Painter)) -> f32 {
         let ctx = Context::default();
         let mut out = ctx.run_ui(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(100.0, 100.0))),
                 ..Default::default()
             },
-            |ui| {
-                animation.dash(
-                    ui.painter(),
-                    Pos2::ZERO,
-                    Pos2::new(50.0, 0.0),
-                    zoom,
-                    0.0,
-                    Color32::GREEN,
-                );
-            },
+            |ui| draw(ui.painter()),
         );
         let offset = out
             .shapes
@@ -2829,9 +3160,30 @@ mod tests {
                 ),
                 _ => None,
             })
-            .expect("dash must draw a mesh");
+            .expect("the effect must draw a mesh");
         out.textures_delta.clear();
         offset
+    }
+
+    #[test]
+    fn the_chevrons_are_as_tall_as_the_line_and_do_not_depend_on_the_zoom() {
+        for line_width in [1.0, 2.0, 5.0, 10.0] {
+            let animation = SegmentAnimations::default().with_line_width(Some(line_width));
+            for zoom in [0.1, 1.0, 8.0] {
+                assert_eq!(
+                    chevrons_half_width(animation, zoom) * 2.0,
+                    line_width,
+                    "line_width {line_width}, zoom {zoom}"
+                );
+            }
+        }
+        // An explicit width wins, and with no line to follow it is the dash's.
+        let explicit = SegmentAnimations::default().with(|s| s.chevrons.width = Some(7.0));
+        assert_eq!(chevrons_half_width(explicit, 1.0) * 2.0, 7.0);
+        assert_eq!(
+            chevrons_half_width(SegmentAnimations::default(), 1.0) * 2.0,
+            DASH_WIDTH
+        );
     }
 
     #[test]
@@ -2933,20 +3285,29 @@ mod tests {
     }
 
     #[test]
-    fn with_line_width_fills_in_only_a_missing_dash_width() {
+    fn with_line_width_fills_in_only_a_missing_dash_and_chevrons_width() {
         let followed = SegmentAnimations::default().with_line_width(Some(4.0));
         assert_eq!(followed.dash.width, Some(4.0));
+        assert_eq!(followed.chevrons.width, Some(4.0));
         // A width set on purpose wins over the line's.
         let explicit = SegmentAnimations::default()
-            .with(|s| s.dash.width = Some(9.0))
+            .with(|s| {
+                s.dash.width = Some(9.0);
+                s.chevrons.width = Some(6.0);
+            })
             .with_line_width(Some(4.0));
         assert_eq!(explicit.dash.width, Some(9.0));
+        assert_eq!(explicit.chevrons.width, Some(6.0));
         // No default stroke to follow: left to fall back to `DASH_WIDTH`.
         let none = SegmentAnimations::default().with_line_width(None);
         assert_eq!(none.dash.width, None);
+        assert_eq!(none.chevrons.width, None);
         // Nothing else is touched.
         assert_eq!(
-            followed.with(|s| s.dash.width = None),
+            followed.with(|s| {
+                s.dash.width = None;
+                s.chevrons.width = None;
+            }),
             SegmentAnimations::default()
         );
     }
