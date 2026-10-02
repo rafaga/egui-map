@@ -31,6 +31,13 @@ any minor bump may include breaking changes, called out below as such).
 
 ### Changed
 
+- The default look of `comet`, `comet_once` and `chevrons` is lighter, closer
+  to the other segment effects. The comet dot has the radius of the `wipe`
+  stroke (`COMET_DOT_RADIUS`, 2.5 pixels, down from 4, with a floor of
+  `COMET_DOT_MIN`, 1.5). The chevrons are a thinner, softer arrow on a narrower
+  ribbon (`CHEVRON_WIDTH` 6, down from 10; `CHEVRON_PERIOD_PX` 20, down from
+  28; `CHEVRON_SPEED` 0.7, up from 0.5, about the speed of `dash`). All of it
+  is still tunable through `SegmentAnimations`.
 - **Breaking:** `comet_once` takes its direction like every other segment
   effect, with the modifier: `segment.direction(CometDirection::Reverse)
   .comet_once(at)` instead of `segment.comet_once(at, CometDirection::Reverse)`.

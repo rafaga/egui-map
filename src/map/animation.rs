@@ -111,13 +111,22 @@ pub const GLOW_PERIOD: f32 = 2.5;
 /// Length, in **screen pixels**, of one chevron repeat of
 /// [`Animation::chevrons`]. Deliberately not scaled by zoom, same reasoning
 /// as [`DASH_PERIOD_PX`].
-pub const CHEVRON_PERIOD_PX: f32 = 28.0;
+pub const CHEVRON_PERIOD_PX: f32 = 20.0;
 /// How many repeats of the chevron pattern [`Animation::chevrons`] slides
-/// through per second.
-pub const CHEVRON_SPEED: f32 = 0.5;
+/// through per second. With [`CHEVRON_PERIOD_PX`] this is about the speed of
+/// [`DASH_SPEED`]'s marching ants.
+pub const CHEVRON_SPEED: f32 = 0.7;
 /// Width, before the `zoom` multiplier, of the ribbon [`Animation::chevrons`]
-/// paints.
-pub const CHEVRON_WIDTH: f32 = 10.0;
+/// paints. Close to [`GLOW_BAND_THICKNESS`], so the arrows sit on the line
+/// like the other lasting segment effects instead of dwarfing it.
+pub const CHEVRON_WIDTH: f32 = 6.0;
+/// Radius, in screen pixels at `zoom == 1`, of the dot of
+/// [`Animation::comet`] and [`Animation::comet_once`]: the width of the
+/// stroke [`Animation::wipe`] draws (`Wipe::width`), so the dot reads as a
+/// bead on the line rather than a blob over it.
+pub const COMET_DOT_RADIUS: f32 = 2.5;
+/// Floor for [`COMET_DOT_RADIUS`], in screen pixels.
+pub const COMET_DOT_MIN: f32 = 1.5;
 
 /// Shapes smaller than this many screen points across are effectively
 /// invisible; the `*_outline`/circular effects skip tessellating them. Only
@@ -338,8 +347,8 @@ impl CometOnce {
 impl Default for CometOnce {
     fn default() -> Self {
         Self {
-            dot_radius: 4.0,
-            dot_min: 2.5,
+            dot_radius: COMET_DOT_RADIUS,
+            dot_min: COMET_DOT_MIN,
             duration: COMET_TRAVEL_DURATION,
         }
     }
@@ -393,8 +402,8 @@ impl Comet {
 impl Default for Comet {
     fn default() -> Self {
         Self {
-            dot_radius: 4.0,
-            dot_min: 2.5,
+            dot_radius: COMET_DOT_RADIUS,
+            dot_min: COMET_DOT_MIN,
             period: COMET_PERIOD,
         }
     }
@@ -1881,11 +1890,17 @@ impl SegmentAnimations {
             return handle;
         }
 
-        const WIDTH: usize = 32;
-        const HEIGHT: usize = 16;
+        // Finer than `dash`'s strip: the ribbon is only a few pixels wide, so
+        // the tile needs the rows to keep the arrow's legs smooth.
+        const WIDTH: usize = 64;
+        const HEIGHT: usize = 32;
         const TIP_U: f32 = 0.75;
-        const LEG_SLOPE: f32 = 0.5;
-        const STROKE_THICKNESS: f32 = 0.12;
+        // With the default ribbon width and period (6 and 20 screen pixels)
+        // this makes the legs about 45 degrees to the segment.
+        const LEG_SLOPE: f32 = 0.35;
+        // Thin, soft stroke: about 2 pixels at the default period, the
+        // weight of the segment line itself.
+        const STROKE_THICKNESS: f32 = 0.10;
 
         let mut pixels = Vec::with_capacity(WIDTH * HEIGHT);
         for j in 0..HEIGHT {
@@ -2705,8 +2720,8 @@ mod tests {
         assert_eq!(
             a.comet_once,
             CometOnce {
-                dot_radius: 4.0,
-                dot_min: 2.5,
+                dot_radius: COMET_DOT_RADIUS,
+                dot_min: COMET_DOT_MIN,
                 duration: COMET_TRAVEL_DURATION
             }
         );
@@ -2720,8 +2735,8 @@ mod tests {
         assert_eq!(
             a.comet,
             Comet {
-                dot_radius: 4.0,
-                dot_min: 2.5,
+                dot_radius: COMET_DOT_RADIUS,
+                dot_min: COMET_DOT_MIN,
                 period: COMET_PERIOD
             }
         );
