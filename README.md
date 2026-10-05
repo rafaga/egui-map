@@ -1,6 +1,10 @@
+
 # egui-map
 
 An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D map and displays information about it.
+
+<img width="1252" height="838" alt="Screenshot 2026-10-05 113331" src="https://github.com/user-attachments/assets/d3164733-a0e6-4577-b5f0-e12339996531" />
+<img width="812" height="643" alt="Screenshot 2026-10-05 113214" src="https://github.com/user-attachments/assets/f5632da5-6e1e-473c-8889-a98cb430496f" />
 
 ## Features
 
