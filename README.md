@@ -1,6 +1,10 @@
+
 # egui-map
 
 An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D map and displays information about it.
+
+<img width="1252" height="838" alt="Screenshot 2026-10-05 113331" src="https://github.com/user-attachments/assets/d3164733-a0e6-4577-b5f0-e12339996531" />
+<img width="812" height="643" alt="Screenshot 2026-10-05 113214" src="https://github.com/user-attachments/assets/f5632da5-6e1e-473c-8889-a98cb430496f" />
 
 ## Features
 
@@ -11,7 +15,7 @@ An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D
 - Text is sized in **screen pixels** (`MapSettings::node_text_size`, `MapSettings::label_text_size`), so names stay readable at any zoom level instead of shrinking away as you zoom out.
 - Region labels (`RegionLabel`, via `Map::add_region_labels`) for naming an *area* of the map rather than a node: unlike every other text the widget draws, their size scales *with* zoom, they are always painted first (behind everything else) and in a faded color, with the built-in renderer caching laid-out text for performance. Customizable through the `LabelTemplate` trait.
 - Animations attached per node through `map.node(id)`: one-off events that end on their own (`pulse`, `ripple`, `countdown`, `scale_in`, `crosshair`) and lasting state that runs until `clear()` (`halo`, `blink`, `orbit`), each with an optional `color()`. The effects live in `map::animation::Animation` and can be reused from your own `NodeTemplate`.
-- The same idiom for segments through `map.segment(id)`: `flash` / `comet_once(at, direction)` / `wipe` (one-off) and `comet` / `dash` / `glow_band` / `chevrons` (lasting, until `clear()`) -- `comet_once` is a single dot pass with the direction you choose (`CometDirection::Forward`/`Reverse`), `wipe` draws the line in from one endpoint to the other, `dash` is a "marching ants" pattern and `chevrons` a row of sliding arrowheads, both painted as a repeating-texture mesh (two triangles per segment, one shared texture), `glow_band` a soft travelling highlight that fades out past each end instead of repeating, also with an optional `color()`.
+- The same idiom for segments through `map.segment(id)`: `flash` / `comet_once(at, direction)` / `wipe` (one-off) and `comet` / `dash` / `glow_band` / `chevrons` (lasting, until `clear()`) -- `comet_once` is a single dot pass, and every effect but `flash` runs the way you choose with `segment.direction(CometDirection::Forward / Reverse)` before it, `wipe` draws the line in from one endpoint to the other and then wipes it out the same way, `dash` is a "marching ants" pattern and `chevrons` a row of sliding arrowheads, both painted as a repeating-texture mesh (two triangles per segment, one shared texture), `glow_band` a soft travelling highlight that fades out past each end instead of repeating, also with an optional `color()`.
 - Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits, custom segment rendering through `SegmentTemplate`, and custom region-label rendering through `LabelTemplate`.
 - [Fifteen built-in color themes](THEMES.md), each with a light and a dark variant -- `SystemDefault`, matching plain egui's own colors, is the default -- or install your own through the `MapTheme` trait.
 
@@ -182,7 +186,7 @@ impl SegmentTemplate for MySegments {
 map.set_segment_template(std::rc::Rc::new(MySegments));
 ```
 
-`examples/animations.rs` shows the built-in node and segment effects end to end, with no custom template at all. `examples/node_template_animations.rs` shows the opposite pairing: a custom `NodeTemplate` (its own node shape) that still reuses the built-in `Animation::*` functions from its `notification_ui`/`marker_ui` hooks instead of hand-rolling new ones, dispatching directly on the `kind`/`node_id` those hooks receive.
+`examples/animations.rs` is a visual catalog of the built-in node and segment effects, with no custom template at all. `examples/custom_template.rs` is the shortest custom `NodeTemplate`: it paints the node and declares its outline, and the selection, notifications and marker are the defaults drawn along that outline. `examples/node_template_animations.rs` does the same with hexagonal nodes, a glow and a segment with marching ants.
 
 ### Region labels
 
@@ -214,7 +218,7 @@ map.settings.style.region_label_font = FontId::new(30.0, FontFamily::Monospace);
 
 ### Custom themes
 
-The widget ships fifteen named [`Theme`](https://docs.rs/egui-map/latest/egui_map/map/theme/enum.Theme.html) palettes — `SystemDefault`, which carries over egui's own default colors so an unthemed map looks like plain egui, is the default — each with a light and a dark variant; see the `Theme` rustdoc for the full list. Switch between them, or install your own palette, with `Map::set_theme` and the `MapTheme` trait:
+The widget ships fifteen named [`Theme`](https://docs.rs/egui-map/latest/egui_map/map/theme/enum.Theme.html) palettes — `SystemDefault`, which carries over egui's own default colors so an unthemed map looks like plain egui, is the default — each with a light and a dark variant; see the `Theme` rustdoc for the full list. `examples/basic.rs` lists them in a combo box and switches the map live, next to egui's own light/dark/system buttons. Switch between them, or install your own palette, with `Map::set_theme` and the `MapTheme` trait:
 
 ```rust
 use egui_map::map::theme::{ColorMode, MapTheme, Theme, ThemeColors};

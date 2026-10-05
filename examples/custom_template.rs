@@ -1,16 +1,42 @@
-//! Custom rendering example: install a NodeTemplate to draw your own node
-//! shapes and animations, plus a marker and a repeating notification pulse.
+//! Custom rendering example: install a `NodeTemplate` to draw your own node
+//! shape, and let the widget do the rest.
+//!
+//! Only two things are written here: [`NodeTemplate::node_ui`], which paints
+//! the node, and [`NodeTemplate::outline`], which says what shape it has. The
+//! hit area (`Map::hovered_node`), the selection ring, the notification
+//! effects (`pulse`, `ripple`, ...) and the marker are the defaults of
+//! `NodeTemplate`, drawn along that outline -- so they follow the circle drawn
+//! below, at any zoom, without a line of code for each.
+//!
+//! - **A notification that lasts.** `NodeHandle::lasting(duration)` makes an
+//!   event effect repeat every cycle for `duration`, fading out progressively,
+//!   instead of playing once. Beta is notified for a few seconds every so
+//!   often.
+//! - **A marker.** `Map::update_marker` puts the default lasting effect on
+//!   Gamma (it blinks around the node's outline).
+//!
+//! Every hook has a default except `node_ui`: override `selection_ui`,
+//! `notification_ui`, `marker_ui` or `contains` only to draw something else.
+//! `examples/node_template_animations.rs` has a node of another shape, and
+//! `examples/svg_template.rs` hand-writes those hooks.
 //!
 //! Run with: cargo run --example custom_template
 
-use eframe::egui::{self, Align2, Color32, Stroke, Ui, Vec2};
+use eframe::egui::{self, Align2, Ui, Vec2};
 use egui_map::map::Map;
 use egui_map::map::objects::{
-    MapPoint, MarkerContext, NodeContext, NodeTemplate, NotificationContext, SelectionContext,
-    VisibilitySetting,
+    HitContext, MapPoint, NodeContext, NodeOutline, NodeTemplate, VisibilitySetting,
 };
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
+
+/// Radius of a node before the zoom: the circle `node_ui` paints and the one
+/// `outline` declares.
+const NODE_RADIUS: f32 = 8.0;
+
+/// How long Beta's notification lasts each time, and how often it starts.
+const NOTIFY_FOR: Duration = Duration::from_secs(6);
+const NOTIFY_EVERY: Duration = Duration::from_secs(10);
 
 struct CircleNodes;
 
@@ -19,7 +45,7 @@ impl NodeTemplate for CircleNodes {
     /// `ctx.color` -- the node's own color override if it set one, otherwise
     /// the active theme's node color.
     fn node_ui(&self, ui: &mut Ui, ctx: NodeContext) {
-        let radius = 8.0 * ctx.zoom;
+        let radius = NODE_RADIUS * ctx.zoom;
         let painter = ui.painter();
         painter.circle_filled(ctx.position, radius, ctx.color);
         painter.text(
@@ -31,46 +57,14 @@ impl NodeTemplate for CircleNodes {
         );
     }
 
-    /// Highlight ring over the node closest to the mouse pointer, outlined in
-    /// `ctx.color` -- the active theme's selection color.
-    fn selection_ui(&self, ui: &mut Ui, ctx: SelectionContext) {
-        ui.painter().circle_stroke(
-            ctx.position,
-            11.0 * ctx.zoom,
-            Stroke::new(2.0 * ctx.zoom, ctx.color),
-        );
-    }
-
-    /// Animated notification: an expanding ring that fades out over 2 seconds.
-    /// This example draws the same ring for every `ctx.kind`, so it ignores
-    /// it -- see `examples/node_template_animations.rs` for a template that
-    /// dispatches on `kind` to reuse the built-in effects instead.
-    fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
-        let secs = ctx.initial_time.elapsed().as_secs_f32();
-        let alpha = (1.0 - secs / 2.0).clamp(0.0, 1.0);
-        let fading = Color32::from_rgba_unmultiplied(
-            ctx.color.r(),
-            ctx.color.g(),
-            ctx.color.b(),
-            (255.0 * alpha) as u8,
-        );
-        ui.painter().circle_stroke(
-            ctx.position,
-            (8.0 + 30.0 * secs) * ctx.zoom,
-            Stroke::new(3.0 * ctx.zoom, fading),
-        );
-        ui.ctx().request_repaint(); // keep the animation frames coming
-        secs < 2.0 // returning false removes the notification
-    }
-
-    /// Static marker ring drawn over the marked node, same ring regardless
-    /// of `ctx.kind`/`ctx.node_id`.
-    fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext) {
-        ui.painter().circle_stroke(
-            ctx.position,
-            14.0 * ctx.zoom,
-            Stroke::new(2.0 * ctx.zoom, Color32::LIGHT_GREEN),
-        );
+    /// The shape `node_ui` draws, in screen coordinates. Everything else --
+    /// the hit area, the selection ring, the notifications and the marker --
+    /// is derived from it by the default hooks.
+    fn outline(&self, ctx: HitContext) -> NodeOutline {
+        NodeOutline::Circle {
+            center: ctx.position,
+            radius: NODE_RADIUS * ctx.zoom,
+        }
     }
 }
 
@@ -89,22 +83,22 @@ fn main() -> eframe::Result<()> {
     let mut map = Map::new();
     map.add_points(points);
     map.set_node_template(Rc::new(CircleNodes));
-    // Show node names on hover so selection_ui gets called.
+    // Show node names on hover, so the selection ring is drawn too.
     map.settings.node_text_visibility = VisibilitySetting::Hover;
     map.update_marker(0, 3);
 
-    // Re-trigger the notification on node 2 every 3 seconds.
-    let mut last_pulse = Instant::now() - std::time::Duration::from_secs(3);
+    // Start Beta's notification right away, then every `NOTIFY_EVERY`.
+    let mut last_notified = Instant::now() - NOTIFY_EVERY;
 
     eframe::run_ui_native(
         "egui-map: custom template",
         eframe::NativeOptions::default(),
         move |ui, _frame| {
-            if last_pulse.elapsed().as_secs() >= 3 {
+            if last_notified.elapsed() >= NOTIFY_EVERY {
                 if let Some(node) = map.node(2) {
-                    node.pulse(Instant::now());
+                    node.lasting(NOTIFY_FOR).pulse(Instant::now());
                 }
-                last_pulse = Instant::now();
+                last_notified = Instant::now();
             }
             ui.add(&mut map);
         },

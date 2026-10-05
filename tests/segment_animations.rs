@@ -99,9 +99,7 @@ fn flash_stops_painting_once_finished() {
 fn comet_once_paints_something_and_stops_on_its_own() {
     let baseline = render(&mut map_with_one_segment());
     let mut map = map_with_one_segment();
-    map.segment((1, 2))
-        .unwrap()
-        .comet_once(Instant::now(), CometDirection::Forward);
+    map.segment((1, 2)).unwrap().comet_once(Instant::now());
     let shapes = render(&mut map);
     assert!(
         extra(&shapes, &baseline) > 0,
@@ -115,9 +113,7 @@ fn comet_once_stops_painting_once_finished() {
     let baseline = render(&mut map_with_one_segment()).len();
 
     let mut map = map_with_one_segment();
-    map.segment((1, 2))
-        .unwrap()
-        .comet_once(long_ago, CometDirection::Forward);
+    map.segment((1, 2)).unwrap().comet_once(long_ago);
     let _ = render(&mut map); // the frame that notices it is over
     assert_eq!(
         render(&mut map).len(),
@@ -171,7 +167,8 @@ fn comet_once_direction_starts_from_the_chosen_endpoint() {
     forward
         .segment((1, 2))
         .unwrap()
-        .comet_once(Instant::now(), CometDirection::Forward);
+        .direction(CometDirection::Forward)
+        .comet_once(Instant::now());
     let ([a, b], forward_pos) = line_and_circle(&ctx, &mut forward);
 
     let ctx = Context::default();
@@ -179,7 +176,8 @@ fn comet_once_direction_starts_from_the_chosen_endpoint() {
     reverse
         .segment((1, 2))
         .unwrap()
-        .comet_once(Instant::now(), CometDirection::Reverse);
+        .direction(CometDirection::Reverse)
+        .comet_once(Instant::now());
     let (_, reverse_pos) = line_and_circle(&ctx, &mut reverse);
 
     let dist = |p: egui::Pos2, q: egui::Pos2| (p - q).length();

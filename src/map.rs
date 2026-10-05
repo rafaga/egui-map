@@ -352,6 +352,9 @@ struct SegmentNotification {
     animation: SegmentAnimation,
     /// `None` falls back to the active theme's `ThemeColors::alert`.
     color: Option<Color32>,
+    /// Which endpoint the effect runs from. A `Comet` carries its own in
+    /// `animation`, so this is `Forward` for it.
+    direction: CometDirection,
 }
 
 /// Lasting state attached to a segment, drawn until it is cleared.
@@ -360,6 +363,8 @@ struct SegmentState {
     animation: SteadySegmentAnimation,
     /// `None` falls back to the active theme's `ThemeColors::alert`.
     color: Option<Color32>,
+    /// Which endpoint the effect runs from.
+    direction: CometDirection,
 }
 
 /// A borrowed node, obtained from [`Map::node`], that an animation can be
@@ -408,6 +413,11 @@ impl NodeHandle<'_> {
     /// [`NotificationContext::color`](objects::NotificationContext::color)).
     /// Lasting state (`halo`, `blink`, `orbit`) ignores it: it already runs
     /// until cleared.
+    ///
+    /// Two effects follow the time you ask for instead of repeating:
+    /// `countdown` empties its ring once over the whole `duration`, so the
+    /// ring is the time left, and `ripple` keeps a new ring coming with no
+    /// break (see [`Animation::lasting_event`](crate::map::animation::Animation::lasting_event)).
     ///
     /// ```
     /// # use egui_map::map::Map;
@@ -507,13 +517,32 @@ impl NodeHandle<'_> {
 ///
 /// A segment can carry one of each at once; the state is drawn underneath the
 /// event, same as node effects.
+///
+/// Modifiers come first: [`color`](Self::color) and
+/// [`direction`](Self::direction), which says which endpoint the effect
+/// runs from. Every effect honours the direction except [`flash`](Self::flash),
+/// which lights the whole line at once.
 pub struct SegmentHandle<'a> {
     map: &'a mut Map,
     id: (usize, usize),
     color: Option<Color32>,
+    direction: CometDirection,
 }
 
 impl SegmentHandle<'_> {
+    /// Sets which way the effect about to be attached runs:
+    /// [`CometDirection::Forward`] (the default) from the segment's first
+    /// endpoint to its second, [`CometDirection::Reverse`] the other way.
+    ///
+    /// Applies to [`comet_once`](Self::comet_once), [`wipe`](Self::wipe),
+    /// [`comet`](Self::comet), [`dash`](Self::dash),
+    /// [`glow_band`](Self::glow_band) and [`chevrons`](Self::chevrons).
+    /// [`flash`](Self::flash) has no direction.
+    pub fn direction(mut self, direction: CometDirection) -> Self {
+        self.direction = direction;
+        self
+    }
+
     /// Overrides the colour of the effect about to be attached.
     ///
     /// Without this, the effect falls back to the active theme's
@@ -534,6 +563,7 @@ impl SegmentHandle<'_> {
                 started: at,
                 animation: SegmentAnimation::FlashDecay,
                 color: self.color,
+                direction: CometDirection::Forward,
             },
         );
     }
@@ -541,14 +571,15 @@ impl SegmentHandle<'_> {
     /// Single dot pass from one endpoint to the other, then gone. The
     /// event-driven counterpart to [`Self::comet`] — reads as "one thing
     /// moved along this route just now" rather than "traffic keeps flowing
-    /// this way". `direction` picks which endpoint it starts from.
-    pub fn comet_once(self, at: Instant, direction: CometDirection) {
+    /// this way". [`Self::direction`] picks which endpoint it starts from.
+    pub fn comet_once(self, at: Instant) {
         self.map.segment_notifications.insert(
             self.id,
             SegmentNotification {
                 started: at,
-                animation: SegmentAnimation::Comet(direction),
+                animation: SegmentAnimation::Comet,
                 color: self.color,
+                direction: self.direction,
             },
         );
     }
@@ -563,6 +594,7 @@ impl SegmentHandle<'_> {
                 started: at,
                 animation: SegmentAnimation::Wipe,
                 color: self.color,
+                direction: self.direction,
             },
         );
     }
@@ -575,6 +607,7 @@ impl SegmentHandle<'_> {
             SegmentState {
                 animation: SteadySegmentAnimation::Comet,
                 color: self.color,
+                direction: self.direction,
             },
         );
     }
@@ -587,6 +620,7 @@ impl SegmentHandle<'_> {
             SegmentState {
                 animation: SteadySegmentAnimation::Dash,
                 color: self.color,
+                direction: self.direction,
             },
         );
     }
@@ -600,6 +634,7 @@ impl SegmentHandle<'_> {
             SegmentState {
                 animation: SteadySegmentAnimation::GlowBand,
                 color: self.color,
+                direction: self.direction,
             },
         );
     }
@@ -612,6 +647,7 @@ impl SegmentHandle<'_> {
             SegmentState {
                 animation: SteadySegmentAnimation::Chevrons,
                 color: self.color,
+                direction: self.direction,
             },
         );
     }
@@ -1773,21 +1809,28 @@ impl Map {
                 out.nodes_to_remove.push(system_id);
             }
         } else {
-            let effect = self.settings.animation.event(notification.animation);
-            // A lasting notification restarts the effect every
-            // cycle until `until`; a plain one plays it once.
-            let started = if notification.until.is_some() {
-                animation::cycle_start(
+            // A lasting notification repeats the effect until `until`; a
+            // plain one plays it once.
+            let running = if let Some(until) = notification.until {
+                self.settings
+                    .animation
+                    .lasting_event(notification.animation)(
+                    pass.paint,
+                    viewport_point.into(),
+                    self.zoom,
                     notification.started,
-                    pass.now,
-                    self.settings
-                        .animation
-                        .event_duration(notification.animation),
+                    until,
+                    color,
                 )
             } else {
-                notification.started
+                self.settings.animation.event(notification.animation)(
+                    pass.paint,
+                    viewport_point.into(),
+                    self.zoom,
+                    notification.started,
+                    color,
+                )
             };
-            let running = effect(pass.paint, viewport_point.into(), self.zoom, started, color);
             if running || notification.until.is_some() {
                 out.needs_repaint = true;
             } else {
@@ -1901,6 +1944,11 @@ impl Map {
         // per context) would be pure repeated work.
         let theme = self.theme_colors();
 
+        // The segment effects as the effects and the templates get them: the
+        // ones that follow the default stroke (the dash) already resolved to
+        // its width, so they stay as thick as the line at every zoom.
+        let segment_animation = self.settings.segment_animation.with_line_width(line_width);
+
         for segment in segments.locate_in_envelope_intersecting(query) {
             let raw_line = segment.raw_line();
             let pos_a: Pos2 = (raw_line.points[0] * self.zoom - min_point).into();
@@ -1929,7 +1977,7 @@ impl Map {
                         segment,
                         color: segment_color,
                         theme,
-                        animation: self.settings.segment_animation,
+                        animation: segment_animation,
                     },
                 );
             } else if let Some(width) = line_width {
@@ -1957,12 +2005,14 @@ impl Map {
                             color,
                             theme,
                             kind: state.animation,
-                            animation: self.settings.segment_animation,
+                            direction: state.direction,
+                            animation: segment_animation,
                         },
                     );
                 } else {
-                    let effect = self.settings.segment_animation.state(state.animation);
-                    effect(painter, pos_a, pos_b, self.zoom, time, color);
+                    let effect = segment_animation.state(state.animation);
+                    let (from, to) = state.direction.orient(pos_a, pos_b);
+                    effect(painter, from, to, self.zoom, time, color);
                 }
                 // Persistent effects never finish on their own.
                 needs_repaint = true;
@@ -1982,22 +2032,14 @@ impl Map {
                             color,
                             theme,
                             kind: notification.animation,
-                            animation: self.settings.segment_animation,
+                            direction: notification.direction,
+                            animation: segment_animation,
                         },
                     )
                 } else {
-                    let effect = self
-                        .settings
-                        .segment_animation
-                        .event(notification.animation);
-                    effect(
-                        painter,
-                        pos_a,
-                        pos_b,
-                        self.zoom,
-                        notification.started,
-                        color,
-                    )
+                    let effect = segment_animation.event(notification.animation);
+                    let (from, to) = notification.direction.orient(pos_a, pos_b);
+                    effect(painter, from, to, self.zoom, notification.started, color)
                 };
                 if still_playing {
                     needs_repaint = true;
@@ -2201,6 +2243,7 @@ impl Map {
             map: self,
             id,
             color: None,
+            direction: CometDirection::Forward,
         })
     }
 
@@ -3282,12 +3325,8 @@ mod tests {
                 SegmentAnimation::FlashDecay,
             ),
             (
-                Box::new(|s: SegmentHandle, at: Instant| s.comet_once(at, CometDirection::Forward)),
-                SegmentAnimation::Comet(CometDirection::Forward),
-            ),
-            (
-                Box::new(|s: SegmentHandle, at: Instant| s.comet_once(at, CometDirection::Reverse)),
-                SegmentAnimation::Comet(CometDirection::Reverse),
+                Box::new(|s: SegmentHandle, at: Instant| s.comet_once(at)),
+                SegmentAnimation::Comet,
             ),
             (
                 Box::new(|s: SegmentHandle, at: Instant| s.wipe(at)),
@@ -3335,6 +3374,113 @@ mod tests {
             // lasting state must not masquerade as a notification
             assert!(map.segment_notifications.is_empty());
         }
+    }
+
+    #[test]
+    fn segment_effects_are_forward_unless_a_direction_is_set() {
+        let mut map = map_with_segments();
+        let now = Instant::now();
+        map.segment((1, 2)).unwrap().comet_once(now);
+        map.segment((3, 4)).unwrap().dash();
+        assert_eq!(
+            map.segment_notifications.get(&(1, 2)).unwrap().direction,
+            CometDirection::Forward
+        );
+        assert_eq!(
+            map.segment_states.get(&(3, 4)).unwrap().direction,
+            CometDirection::Forward
+        );
+    }
+
+    #[test]
+    fn direction_modifier_reaches_every_directional_segment_effect() {
+        let now = Instant::now();
+        for apply in [
+            Box::new(|s: SegmentHandle| s.comet_once(Instant::now()))
+                as Box<dyn FnOnce(SegmentHandle)>,
+            Box::new(|s: SegmentHandle| s.wipe(Instant::now())),
+        ] {
+            let mut map = map_with_segments();
+            apply(
+                map.segment((1, 2))
+                    .unwrap()
+                    .direction(CometDirection::Reverse),
+            );
+            assert_eq!(
+                map.segment_notifications.get(&(1, 2)).unwrap().direction,
+                CometDirection::Reverse
+            );
+        }
+        for apply in [
+            Box::new(|s: SegmentHandle| s.comet()) as Box<dyn FnOnce(SegmentHandle)>,
+            Box::new(|s: SegmentHandle| s.dash()),
+            Box::new(|s: SegmentHandle| s.glow_band()),
+            Box::new(|s: SegmentHandle| s.chevrons()),
+        ] {
+            let mut map = map_with_segments();
+            apply(
+                map.segment((1, 2))
+                    .unwrap()
+                    .direction(CometDirection::Reverse),
+            );
+            assert_eq!(
+                map.segment_states.get(&(1, 2)).unwrap().direction,
+                CometDirection::Reverse
+            );
+        }
+        // `flash` lights the whole line, so it has no direction to record.
+        let mut map = map_with_segments();
+        map.segment((1, 2))
+            .unwrap()
+            .direction(CometDirection::Reverse)
+            .flash(now);
+        assert_eq!(
+            map.segment_notifications.get(&(1, 2)).unwrap().direction,
+            CometDirection::Forward
+        );
+    }
+
+    #[test]
+    fn a_reversed_lasting_comet_is_drawn_from_the_second_endpoint() {
+        // The lasting `comet` sits on `a` at `t = 0` and moves towards `b`:
+        // draw one frame at time zero for each direction and check which end
+        // the dot is nearest to.
+        let dot_x = |direction: CometDirection| -> f32 {
+            let mut map = map_with_segments();
+            map.segment((1, 2)).unwrap().direction(direction).comet();
+            let ctx = Context::default();
+            let mut out = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(400.0, 300.0))),
+                    time: Some(0.0),
+                    ..RawInput::default()
+                },
+                |ui| {
+                    ui.add(&mut map);
+                },
+            );
+            out.textures_delta.clear();
+            let dot = out
+                .shapes
+                .iter()
+                .find_map(|cs| match &cs.shape {
+                    Shape::Circle(c) => Some(c.center),
+                    _ => None,
+                })
+                .expect("the comet must paint a filled circle");
+            dot.x
+        };
+        // Segment (1, 2) is drawn left to right, so `Forward` starts on the
+        // left of `Reverse`.
+        let (forward, reverse) = (
+            dot_x(CometDirection::Forward),
+            dot_x(CometDirection::Reverse),
+        );
+        assert!(
+            forward < reverse,
+            "Forward must start at the first endpoint ({forward}) and Reverse at the \
+             second ({reverse})"
+        );
     }
 
     #[test]
@@ -3868,7 +4014,12 @@ mod tests {
             }
         }
 
-        let expected = SegmentAnimations::default().with(|s| s.dash.width = 77.0);
+        // Both widths set on purpose, so the map's default stroke does not
+        // fill either of them in.
+        let expected = SegmentAnimations::default().with(|s| {
+            s.dash.width = Some(77.0);
+            s.chevrons.width = Some(55.0);
+        });
         let mut map = Map::new();
         map.add_lines(vec![MapSegment::new((1, 2), [0.0, 0.0], [50.0, 0.0])]);
         map.settings.segment_animation = expected;
@@ -3893,5 +4044,123 @@ mod tests {
         assert_eq!(template.base.borrow().as_ref(), Some(&expected));
         assert_eq!(template.notification.borrow().as_ref(), Some(&expected));
         assert_eq!(template.state.borrow().as_ref(), Some(&expected));
+    }
+
+    #[test]
+    fn the_chevrons_are_painted_with_the_theme_alert_color() {
+        // A lasting segment effect has no `marker` role: with no `color()` it
+        // takes the installed theme's `alert`, and an explicit color wins.
+        use crate::map::theme::ThemeColors;
+        use egui::{Context, RawInput, Shape};
+
+        struct FixedPalette;
+        impl MapTheme for FixedPalette {
+            fn colors(&self, _mode: ColorMode) -> ThemeColors {
+                ThemeColors {
+                    node: Color32::from_rgb(1, 2, 3),
+                    segment: Color32::from_rgb(4, 5, 6),
+                    selected: Color32::from_rgb(7, 8, 9),
+                    alert: Color32::from_rgb(200, 100, 50),
+                    marker: Color32::from_rgb(16, 17, 18),
+                    text: Color32::from_rgb(13, 14, 15),
+                    background: Color32::from_rgb(19, 20, 21),
+                }
+            }
+        }
+
+        // The tint of the first mesh the widget draws with the chevron texture:
+        // the vertex color is the one the effect was given.
+        let chevron_tint = |color: Option<Color32>| -> Color32 {
+            let mut map = Map::new();
+            map.set_theme(Rc::new(FixedPalette));
+            map.add_points(vec![
+                MapPoint::new(1, [0.0, 0.0]),
+                MapPoint::new(2, [50.0, 0.0]),
+            ]);
+            map.add_lines(vec![MapSegment::new((1, 2), [0.0, 0.0], [50.0, 0.0])]);
+            let handle = map.segment((1, 2)).unwrap();
+            match color {
+                Some(color) => handle.color(color).chevrons(),
+                None => handle.chevrons(),
+            }
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(300.0, 300.0));
+            let ctx = Context::default();
+            let mut output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(screen),
+                    ..RawInput::default()
+                },
+                |ui| {
+                    ui.add(&mut map);
+                },
+            );
+            output.textures_delta.clear();
+            output
+                .shapes
+                .iter()
+                .find_map(|cs| match &cs.shape {
+                    Shape::Mesh(mesh) if !mesh.vertices.is_empty() => Some(mesh.vertices[0].color),
+                    _ => None,
+                })
+                .expect("the chevrons must draw a mesh")
+        };
+
+        assert_eq!(chevron_tint(None), Color32::from_rgb(200, 100, 50));
+        let custom = Color32::from_rgb(1, 200, 3);
+        assert_eq!(chevron_tint(Some(custom)), custom);
+    }
+
+    #[test]
+    fn a_dash_without_a_width_follows_the_default_stroke() {
+        // What a `SegmentTemplate` is handed: the dash width resolved to the
+        // default stroke's (`Style::line_width`), or left to fall back when
+        // there is no stroke, or kept when it was set.
+        #[derive(Default)]
+        struct Recorder(std::cell::RefCell<Option<SegmentAnimations>>);
+        impl SegmentTemplate for Recorder {
+            fn segment_ui(&self, _painter: &Painter, ctx: SegmentContext) {
+                *self.0.borrow_mut() = Some(ctx.animation);
+            }
+            fn segment_notification_ui(
+                &self,
+                _painter: &Painter,
+                _ctx: SegmentNotificationContext,
+            ) -> bool {
+                false
+            }
+            fn segment_state_ui(&self, _painter: &Painter, _ctx: SegmentStateContext) {}
+        }
+
+        let dash_width = |line_width: Option<f32>, dash_width: Option<f32>| -> Option<f32> {
+            let mut map = Map::new();
+            map.add_lines(vec![MapSegment::new((1, 2), [0.0, 0.0], [50.0, 0.0])]);
+            map.settings.style.line_width = line_width;
+            map.settings.segment_animation.dash.width = dash_width;
+            let template = Rc::new(Recorder::default());
+            map.set_segment_template(template.clone());
+            let ctx = Context::default();
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(200.0, 200.0));
+            let mut output = ctx.run_ui(
+                RawInput {
+                    screen_rect: Some(screen),
+                    ..RawInput::default()
+                },
+                |ui| {
+                    ui.add(&mut map);
+                },
+            );
+            output.textures_delta.clear();
+            let animation = template.0.borrow().expect("the segment was drawn");
+            animation.dash.width
+        };
+
+        assert_eq!(dash_width(Some(6.0), None), Some(6.0));
+        assert_eq!(dash_width(Some(2.0), None), Some(2.0));
+        assert_eq!(dash_width(None, None), None);
+        assert_eq!(dash_width(Some(6.0), Some(77.0)), Some(77.0));
+        // The settings themselves are not rewritten.
+        let mut map = Map::new();
+        map.settings.style.line_width = Some(6.0);
+        assert_eq!(map.settings.segment_animation.dash.width, None);
     }
 }

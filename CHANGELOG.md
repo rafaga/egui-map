@@ -8,8 +8,164 @@ any minor bump may include breaking changes, called out below as such).
 
 ## [Unreleased]
 
+### Added
+
+- `SegmentHandle::direction(CometDirection)`: a modifier, like `color`, that
+  says which endpoint a segment effect runs from -- `Forward` (the default)
+  from the first endpoint to the second, `Reverse` the other way. It applies
+  to every directional effect: `comet_once`, `wipe`, `comet`, `dash`,
+  `glow_band` and `chevrons`; `flash` lights the whole line at once and has
+  none. Before, reversing a lasting effect meant swapping the endpoints of the
+  segment itself.
+- `Animation::lasting_event` and `Animation::lasting_event_outline` draw a
+  node event effect the way a lasting notification does (repeated, with the
+  `ripple` looping seamlessly and the `countdown` emptying over the whole
+  notification), for a `NodeTemplate` that draws the effect itself; they take
+  the moment the notification starts and the one it ends at.
+  `NotificationContext::effect_start`, which restarts the effect every cycle,
+  keeps working but can do neither.
+- `CometDirection::orient(a, b)` returns the `(from, to)` pair an effect runs
+  along in that direction, for a `SegmentTemplate` that draws the effect
+  itself. `SegmentStateContext` and `SegmentNotificationContext` have a new
+  `direction` field with the direction that was asked for.
+
+### Changed
+
+- The `glow_band` ribbon is `GlowBand::thickness` screen pixels wide whatever
+  the zoom (it was multiplied by it), like the default stroke, the `dash` and
+  the `chevrons`: the lasting segment effects keep their thickness when the
+  map is zoomed. `GLOW_BAND_THICKNESS` (5) is unchanged, so only a zoom other
+  than 1 looks different.
+- `wipe` wipes the line back out once it is drawn, in the same direction it
+  was drawn in: the colour leaves from the first endpoint towards the second,
+  behind the edge that drew it. `Wipe::out_duration` (`WIPE_OUT_DURATION`, 0.9
+  seconds) sets how long that takes, `0.0` brings back the line vanishing as
+  soon as it is complete, and `Wipe::total_duration` / `Wipe::coloured_span`
+  give the whole length and the coloured part of the segment at a given time.
+  The effect now plays for `duration + out_duration` (1.8 seconds by default).
+- `flash` no longer swells past the nodes it joins: its widest point is the
+  diameter of the built-in node (8, was 12), with `FLASH_BASE_WIDTH` 2 and
+  `FLASH_EXTRA_WIDTH` 6 as defaults (`FlashDecay::extra_width` was 10).
+- The comet dot is smaller: it has the radius of the `wipe` stroke
+  (`COMET_DOT_RADIUS`, 2.5 pixels, down from 4, with a floor of
+  `COMET_DOT_MIN`, 1.5) in `comet` and `comet_once`.
+- **Breaking:** the `chevrons` are solid arrow-shaped blocks as tall as the
+  segment line, instead of thin arrow outlines on a ribbon of their own.
+  `Chevrons` is now `period` (in widths of the ribbon, `CHEVRON_PERIOD` 4.5,
+  never shorter than the chevron drawn in it, see `Chevrons::layout`),
+  `speed` (`CHEVRON_SPEED` 2 repeats per second), `fill` (how much of the
+  period a block takes, `CHEVRON_FILL` 0.38, which leaves a gap as long as the
+  chevron), `tip_depth` (how deep the point
+  is as a fraction of the width, `CHEVRON_TIP_DEPTH` 0.5, edges at 45 degrees)
+  and `width`, which like `Dash::width` is `None` to follow the default
+  segment stroke (`SegmentAnimations::with_line_width` fills it in) and falls
+  back to `DASH_WIDTH`. The old `period_px`, `leg_slope` and `stroke` are gone,
+  and `CHEVRON_PERIOD_PX`, `CHEVRON_WIDTH`, `CHEVRON_LEG_SLOPE` and
+  `CHEVRON_STROKE` with them. The ribbon width is in screen pixels, not
+  multiplied by the zoom, and the period follows it, so a block keeps its
+  shape when the map is zoomed or the line gets thicker. They are drawn with
+  the theme's `alert` color, or the `color()` you gave. A texture is cached
+  per distinct pair of shape settings.
+- **Breaking:** `comet_once` takes its direction like every other segment
+  effect, with the modifier: `segment.direction(CometDirection::Reverse)
+  .comet_once(at)` instead of `segment.comet_once(at, CometDirection::Reverse)`.
+  `SegmentAnimation::Comet` no longer carries a `CometDirection`. The `event`
+  and `state` dispatchers of `SegmentAnimations` run from the first point they
+  are given to the second, so a caller applies the direction first with
+  `CometDirection::orient`.
+- **Breaking:** the ribbon of the `dash` segment effect ("marching ants") is
+  as thick as the line it runs over, at every zoom. Its width was
+  `Dash::width * zoom` (3 by default) while the default stroke has a constant
+  `Style::line_width` (2 by default), so the dashes came out thicker than the
+  line and drifted further from it as the map was zoomed.
+  - `Dash::width` is now an `Option<f32>` in **screen pixels**, not scaled by
+    zoom, like `Dash::period_px`. `None`, the default, follows
+    `Style::line_width`; `Some(width)` is used as it is. Code that set
+    `dash.width = 12.0` becomes `dash.width = Some(12.0)`, and means 12 pixels
+    at any zoom instead of `12 * zoom`.
+  - `DASH_WIDTH`, the width used when there is no default stroke to follow
+    (`line_width` of `None`), is now 2 pixels (it was 3, before the zoom
+    multiplier).
+  - `SegmentAnimations::with_line_width` resolves that for you. The map applies
+    it before handing the animations to the segment effects and to a
+    `SegmentTemplate`, so `ctx.animation.dash.width` is already the line's
+    width there; call it yourself only when you draw segment effects on your
+    own.
+  - `Animation::dash` no longer uses its `zoom` argument; it stays so every
+    steady segment effect keeps the same signature.
+- `examples/basic.rs` shows the first things an application reaches for: a
+  combo box with the built-in themes next to egui's light/dark/system
+  buttons (`Map::set_theme`), a tooltip on the node under the pointer
+  (`Map::hovered_node`) and a button that sets and clears a marker
+  (`Map::update_marker`, `Map::remove_marker`, whose return value tells
+  whether there was one). The segment between Alpha and Beta is a dashed line
+  whose pattern slides along it ("marching ants", `Map::segment(..).dash()`).
+- `examples/custom_template.rs` implements only `NodeTemplate::node_ui` and
+  `NodeTemplate::outline`; the hit area, the selection ring, the notification
+  effects and the marker are the defaults, drawn along that outline. It also
+  shows `NodeHandle::lasting`, a notification that repeats and fades out over
+  a few seconds.
+- `examples/node_template_animations.rs` is a six node network (a ring of four
+  and two nodes hanging from opposite sides of it) drawn with a `NodeTemplate`:
+  hexagonal nodes with their name inside, declared with
+  `NodeOutline::Polygon` so the hit area and the selection follow the shape.
+  One node glows (`Animation::glow_outline`, driven by `NodeContext::marker`),
+  a segment has marching ants, and the window has the theme combo box, the
+  tooltip and the marker button of `examples/basic.rs`.
+- `examples/svg_template.rs` simulates a computer network: three routers,
+  four switches and eight computers, drawn as SVG icons by a `NodeTemplate`
+  that implements only `node_ui` and `outline` (a rounded square around the
+  icon). Two combo boxes pick a source and a destination computer; the
+  shortest path between them gets the `dash` segment effect ("marching
+  ants"), sliding from the source to the destination through the switches and
+  routers in between. A hop taken against the way its segment was defined runs
+  `Reverse` (`SegmentHandle::direction`), so the ants always go the way the
+  data goes. The window has the
+  theme combo box and the tooltip of `examples/basic.rs`. The old example
+  indexed a `Vec` with node ids that start at 1, which paired the wrong nodes
+  in the segments.
+- `examples/basic.rs`: removed a paragraph of the header that was repeated.
+- `examples/animations.rs` is a visual catalog of the built-in effects on a
+  grid, so nothing overlaps: the node effects on the left (the lasting ones,
+  including a `ripple` that never breaks, the event ones, and `pulse` with
+  `NodeHandle::lasting`) and the segment
+  effects on the right, one segment each. Two `RegionLabel`s title the
+  blocks, and the window has the theme combo box and the tooltip of
+  `examples/basic.rs`, plus *Forward*/*Reverse* radio buttons that set the
+  direction of every segment effect that has one. The timers are one generic
+  repeater instead of one per kind of effect.
+
 ### Fixed
 
+- The `dash` segment effect ("marching ants") slid from the second endpoint
+  of the segment towards the first, against `comet`, `glow_band` and
+  `chevrons`, which all go from the first to the second. Its pattern is a
+  texture sampled at a growing coordinate, which makes it crawl the other
+  way; `chevrons` already compensated for that, and `dash` now does too. A
+  dashed line that depended on the old sense (reversing the segment's
+  endpoints to make it flow the way the data goes) now runs the other way.
+- `examples/basic.rs` panicked at start-up: it indexed a `Vec` with the node
+  ids (1 to 3), so the third one was out of range and the connections went
+  to the wrong nodes. The nodes are now keyed by id in a `HashMap` like the
+  other examples.
+- The `ripple` effect no longer cuts its last rings off. The three rings are
+  born one after the other, but the effect ended at `Ripple::duration`, so the
+  second and third ones vanished a third and two thirds of the way through
+  their fade. `Ripple::duration` is still how long the effect plays, now from
+  the first ring appearing until the last one has faded out, so each ring
+  lives `3/5` of it (it spreads faster than before for the same `spread`).
+- A `ripple` with `NodeHandle::lasting` repeats with no break. It restarted
+  from a single ring every `duration`, which read as the effect ending and
+  starting over. It now builds up its three rings once and then keeps a new
+  one coming every stagger, until the notification ends.
+- A `countdown` empties its ring over the time it was asked to last. The ring
+  always emptied over `Countdown::duration` (5 s by default), whatever was
+  asked with `NodeHandle::lasting`: a countdown of 60 s started over every
+  5 s. A lasting `countdown` now empties once over the whole notification,
+  so the ring is the time left. A plain `countdown` still follows
+  `Countdown::duration`.
+- The `countdown` ring empties smoothly. It was drawn in steps of a 48th of a
+  turn, which showed as the end of the arc jumping on a slow countdown.
 - Region labels are laid out again when `pixels_per_point` changes (the
   window moved to a screen with another scale): the cached galleys were
   reused at the old scale, drawn blurry and made epaint warn on every frame.

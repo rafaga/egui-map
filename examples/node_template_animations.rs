@@ -1,386 +1,218 @@
-//! Custom `NodeTemplate` that draws its own diamond-shaped nodes, but reuses
-//! the crate's built-in `Animation::*` functions for its effects instead of
-//! hand-rolling new ones -- contrast with `examples/custom_template.rs`,
-//! which hand-rolls a single effect of its own from scratch.
+//! A small network drawn with a custom `NodeTemplate`: hexagonal nodes with
+//! their name inside, a glowing node and a segment with "marching ants".
 //!
-//! As of egui-map 0.5.0, [`NodeTemplate::notification_ui`] and
-//! [`NodeTemplate::marker_ui`] are told which built-in animation was
-//! requested -- `kind`, a
-//! [`NodeAnimation`](egui_map::map::objects::NodeAnimation) or
-//! [`SteadyAnimation`](egui_map::map::objects::SteadyAnimation) respectively
-//! -- and which node it belongs to (`node_id`), so a template can dispatch
-//! straight to the matching `Animation::*` function instead of
-//! reimplementing the lookup itself:
+//! Six nodes: four form a ring, and the two others hang from one node of the
+//! ring each, on opposite sides of it.
 //!
-//! - `notification_ui`'s `kind` picks between `Pulse`/`Ripple`/
-//!   `CountdownArc`/`ScaleIn`/`Crosshair` -- see the `match` below.
-//! - `marker_ui`'s `kind` picks between `Halo`/`Blink`/`Orbit`. It is still
-//!   the one hook shared by two different things: persistent node state
-//!   (`halo`/`blink`/`orbit`, requested per node through `Map::node`) and
-//!   plain markers registered with `Map::update_marker` (which all share one
-//!   `MapSettings::marker_animation`, so their `kind` is always that one
-//!   setting). `kind` is enough to draw the right effect either way, but the
-//!   hook still cannot tell the two *call sites* apart, and still receives
-//!   no color -- this template picks its own (`MARKER_COLOR`) for both.
+//! - **A hexagon.** [`NodeTemplate::node_ui`] paints it and
+//!   [`NodeTemplate::outline`] declares it as a
+//!   [`NodeOutline::Polygon`], so the hit area (`Map::hovered_node`) and the
+//!   selection ring follow the hexagon, at any zoom.
+//! - **A glow.** `NodeContext::marker` says how present a `Map::update_marker`
+//!   marker is on the node, fading in and out on its own. `node_ui` hands it
+//!   to `Animation::glow_outline` over a larger hexagon, painted behind the
+//!   node. The marker is the glow, so `marker_ui` draws nothing else.
+//! - **Marching ants.** One of the ring's segments is dashed, and its pattern
+//!   slides along it (`Map::segment(..).dash()`). Segments are not templated:
+//!   they use the widget's own rendering.
+//! - **The basics of `examples/basic.rs`.** A combo box with the built-in
+//!   themes next to egui's light/dark/system buttons (`Map::set_theme`), a
+//!   tooltip on the node under the pointer (`Map::hovered_node`) and a button
+//!   that sets and clears the marker.
 //!
-//! (Earlier versions of this example, before 0.5.0, worked around the
-//! missing `kind` by giving each event effect its own exact, dedicated color
-//! when firing it and matching on that -- a real but narrow trick that only
-//! worked because the example controlled every call site's color, and could
-//! not help `marker_ui` at all since it never even received a color. That
-//! workaround is gone now that `kind` is passed directly; the per-effect
-//! colors below are kept only for visual variety, not for dispatch.)
-//!
-//! As of egui-map 0.9.3, `NodeContext` also carries `marker`: how present a
-//! `Map::update_marker` marker is on this node, `0.0..=1.0`, fading in and
-//! out on its own instead of switching on/off instantly. `DiamondNodes`
-//! passes it straight to the new `Animation::glow`, painted behind the
-//! diamond -- a second, independent way to show a marker, layered under
-//! `marker_ui`'s own ring rather than replacing it (see that method's doc
-//! comment for why it still cannot tell a marker call from a persistent
-//! `halo`/`blink`/`orbit` one).
-//!
-//! Segments are not templated here -- they use the widget's default segment
-//! rendering and animation dispatch, same as `examples/animations.rs` (which
-//! already showcases the full segment catalog on its own). This example just
-//! wires the nodes into a small connected network -- a ring plus a few
-//! chords, so most nodes have more than one neighbor -- rather than the
-//! isolated pairs `animations.rs` uses, so the persistent segment effects
-//! (`comet`/`dash`/`glow_band`/`chevrons`, cycled across the edges) read as
-//! a live network instead of a handful of disconnected demo lines.
+//! See `examples/custom_template.rs` for the shortest template, which leaves
+//! the selection and the marker to the defaults.
 //!
 //! Run with: cargo run --example node_template_animations
 
-use eframe::egui::{self, Align2, Color32, Pos2, Rect, Shape, Stroke, Ui, Vec2};
+use eframe::egui::{self, Align2, Pos2, Shape, Stroke, Ui, Vec2};
 use egui_map::map::Map;
 use egui_map::map::objects::{
-    MapPoint, MapSegment, MarkerContext, NodeContext, NodeTemplate, NotificationContext,
-    SelectionContext, VisibilitySetting,
+    HitContext, MapPoint, MapSegment, MarkerContext, NodeContext, NodeOutline, NodeTemplate,
 };
+use egui_map::map::theme::Theme;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
-// -------------------------------------------------------------- demo colors
+/// Every built-in theme, in the order the combo box lists them.
+const THEMES: [Theme; 15] = [
+    Theme::SystemDefault,
+    Theme::SlateOcean,
+    Theme::NebulaViolet,
+    Theme::TerminalGreen,
+    Theme::EmberForge,
+    Theme::SolarAmber,
+    Theme::ArticCyan,
+    Theme::CrimsonSignal,
+    Theme::MidnightIndigo,
+    Theme::CopperRose,
+    Theme::LimeCircuit,
+    Theme::CoralReef,
+    Theme::GraphiteMono,
+    Theme::PlumStatic,
+    Theme::SandstoneTrail,
+];
 
-/// One color per event effect, purely so they read apart on screen -- with
-/// `kind` passed directly to `notification_ui` these no longer double as a
-/// dispatch key (see the module docs above).
-const PULSE_COLOR: Color32 = Color32::from_rgb(80, 160, 255);
-const RIPPLE_COLOR: Color32 = Color32::from_rgb(255, 170, 60);
-const COUNTDOWN_COLOR: Color32 = Color32::from_rgb(170, 110, 255);
-const SCALE_IN_COLOR: Color32 = Color32::from_rgb(90, 210, 140);
-const CROSSHAIR_COLOR: Color32 = Color32::from_rgb(255, 90, 90);
-/// Color [`DiamondNodes::marker_ui`] draws with -- unlike `notification_ui`,
-/// it is not handed a color at all, so the template has to pick one itself.
-const MARKER_COLOR: Color32 = Color32::from_rgb(120, 220, 255);
+/// Distance from the center of a hexagon to its corners, before the zoom.
+const HEX_RADIUS: f32 = 26.0;
+/// How much larger than the node the glowing hexagon behind it is.
+const GLOW_SCALE: f32 = 1.45;
 
-// -------------------------------------------------------------- NodeTemplate
+/// Id of the marker the button below toggles, and the node it points to.
+const MARKER: usize = 0;
+const MARKED_NODE: usize = 5;
 
-struct DiamondNodes;
+/// The corners of a flat-topped hexagon, in screen coordinates.
+fn hexagon(center: Pos2, radius: f32) -> Vec<Pos2> {
+    (0..6)
+        .map(|corner| {
+            let angle = std::f32::consts::FRAC_PI_3 * corner as f32;
+            center + Vec2::angled(angle) * radius
+        })
+        .collect()
+}
 
-impl NodeTemplate for DiamondNodes {
-    /// Custom node shape: a diamond with the node name above it, outlined in
-    /// `ctx.color` -- the node's own color override if it set one, otherwise
-    /// the active theme's node color -- over a fixed dark body.
+struct HexNodes;
+
+impl NodeTemplate for HexNodes {
+    /// A hexagon with the node name inside, outlined in `ctx.color` -- the
+    /// node's own color override if it set one, otherwise the active theme's
+    /// node color -- over the theme's background.
     ///
-    /// As of egui-map 0.9.3, also paints a soft glow behind the diamond
-    /// while a `Map::update_marker` marker points here (`MarkerA`/`MarkerB`
-    /// below), using `ctx.marker` -- `0.0..=1.0`, fading in and out on its
-    /// own as the marker is set/cleared -- as the effect's strength. Unlike
-    /// `marker_ui`, which still draws its own ring for the same markers (see
-    /// its doc comment below), this layer is painted *before* the diamond,
-    /// so it never covers the name label.
+    /// While a marker points here, a larger hexagon glows behind it, with
+    /// `ctx.marker` -- `0.0..=1.0`, fading in and out as the marker is set or
+    /// cleared -- as the strength of the effect.
     fn node_ui(&self, ui: &mut Ui, ctx: NodeContext) {
-        let size = 9.0 * ctx.zoom;
-        let position = ctx.position;
+        let radius = HEX_RADIUS * ctx.zoom;
         if ctx.marker > 0.0 {
-            let time = ui.input(|i| i.time) as f32;
-            let glow_rect = Rect::from_center_size(position, Vec2::splat(3.4 * size));
-            ctx.animation.glow(
-                ui.painter(),
-                glow_rect,
-                egui::CornerRadius::same((0.5 * size) as u8),
-                time,
-                ctx.theme.marker.gamma_multiply(0.6),
-                ctx.marker,
-            );
+            let time = ui.input(|input| input.time) as f32;
+            let outline = NodeOutline::Polygon(hexagon(ctx.position, radius * GLOW_SCALE));
+            ctx.animation
+                .glow_outline(ui.painter(), &outline, time, ctx.theme.marker, ctx.marker);
             ui.ctx().request_repaint();
         }
-        let diamond = vec![
-            Pos2::new(position.x, position.y - size),
-            Pos2::new(position.x + size, position.y),
-            Pos2::new(position.x, position.y + size),
-            Pos2::new(position.x - size, position.y),
-        ];
         let painter = ui.painter();
         painter.add(Shape::convex_polygon(
-            diamond,
-            Color32::from_rgb(60, 70, 90),
-            Stroke::new(1.5 * ctx.zoom, ctx.color),
+            hexagon(ctx.position, radius),
+            ctx.theme.background,
+            Stroke::new(2.0 * ctx.zoom, ctx.color),
         ));
         painter.text(
-            position + Vec2::new(0.0, -size - 3.0 * ctx.zoom),
-            Align2::CENTER_BOTTOM,
+            ctx.position,
+            Align2::CENTER_CENTER,
             ctx.point.get_name(),
             egui::FontId::proportional(11.0 * ctx.zoom),
             ctx.theme.text,
         );
     }
 
-    /// Highlight ring over the node closest to the mouse pointer, outlined in
-    /// `ctx.color` -- the active theme's selection color.
-    fn selection_ui(&self, ui: &mut Ui, ctx: SelectionContext) {
-        ui.painter().circle_stroke(
-            ctx.position,
-            14.0 * ctx.zoom,
-            Stroke::new(2.0 * ctx.zoom, ctx.color),
-        );
+    /// The hexagon `node_ui` draws, border included. The hit area and the
+    /// selection ring are derived from it by the default hooks.
+    fn outline(&self, ctx: HitContext) -> NodeOutline {
+        NodeOutline::Polygon(hexagon(ctx.position, HEX_RADIUS * ctx.zoom))
     }
 
-    /// Reuses one of the five built-in event effects, picked directly from
-    /// `ctx.kind` -- no more color-matching, see the module docs above.
-    fn notification_ui(&self, ui: &mut Ui, ctx: NotificationContext) -> bool {
-        let NotificationContext {
-            position,
-            zoom,
-            initial_time,
-            color,
-            kind,
-            animation,
-            ..
-        } = ctx;
-        let painter = ui.painter();
-        let still_playing = animation.event(kind)(painter, position, zoom, initial_time, color);
-        ui.ctx().request_repaint();
-        still_playing
-    }
-
-    /// Reuses the matching built-in persistent effect, picked directly from
-    /// `ctx.kind` -- `Halo`/`Blink`/`Orbit` now render as themselves instead
-    /// of every node with lasting state or a marker collapsing onto the same
-    /// `Animation::halo` call (see the module docs above). `marker_ui` still
-    /// gets no color, so this template still picks its own.
-    fn marker_ui(&self, ui: &mut Ui, ctx: MarkerContext) {
-        let time = ui.input(|i| i.time) as f32;
-        let effect = ctx.animation.state(ctx.kind);
-        effect(ui.painter(), ctx.position, ctx.zoom, time, MARKER_COLOR);
-        ui.ctx().request_repaint();
-    }
-}
-
-// ---------------------------------------------------------------- node fire
-
-fn fire_pulse(map: &mut Map, id: usize, at: Instant) {
-    if let Some(node) = map.node(id) {
-        node.color(PULSE_COLOR).pulse(at);
-    }
-}
-fn fire_ripple(map: &mut Map, id: usize, at: Instant) {
-    if let Some(node) = map.node(id) {
-        node.color(RIPPLE_COLOR).ripple(at);
-    }
-}
-fn fire_countdown(map: &mut Map, id: usize, at: Instant) {
-    if let Some(node) = map.node(id) {
-        node.color(COUNTDOWN_COLOR).countdown(at);
-    }
-}
-fn fire_scale_in(map: &mut Map, id: usize, at: Instant) {
-    if let Some(node) = map.node(id) {
-        node.color(SCALE_IN_COLOR).scale_in(at);
-    }
-}
-fn fire_crosshair(map: &mut Map, id: usize, at: Instant) {
-    if let Some(node) = map.node(id) {
-        node.color(CROSSHAIR_COLOR).crosshair(at);
-    }
-}
-
-// ------------------------------------------------------------- repeaters
-
-/// Re-fires the same node event effect on a timer of its own -- same
-/// struct as `examples/animations.rs` uses.
-struct NodeRepeater {
-    node_id: usize,
-    period: Duration,
-    last_fired: Instant,
-    fire: fn(&mut Map, usize, Instant),
-}
-
-impl NodeRepeater {
-    fn new(
-        node_id: usize,
-        period: Duration,
-        first_delay: Duration,
-        fire: fn(&mut Map, usize, Instant),
-    ) -> Self {
-        Self {
-            node_id,
-            period,
-            last_fired: Instant::now() - period + first_delay,
-            fire,
-        }
-    }
-
-    fn tick(&mut self, map: &mut Map, now: Instant) {
-        if now.duration_since(self.last_fired) < self.period {
-            return;
-        }
-        (self.fire)(map, self.node_id, now);
-        self.last_fired = now;
-    }
+    /// The glow in `node_ui` is the marker, so there is no ring on top of it.
+    fn marker_ui(&self, _ui: &mut Ui, _ctx: MarkerContext) {}
 }
 
 fn main() -> eframe::Result<()> {
-    // 1. Nodes, arranged in a ring so the network reads clearly on screen.
+    // 1. The nodes, keyed by id: the ring (1 to 4) and the two nodes hanging
+    //    from it (5 and 6), one on each side. `names` is kept apart for the
+    //    tooltip.
     let mut points: HashMap<usize, MapPoint> = HashMap::new();
+    let mut names: HashMap<usize, &str> = HashMap::new();
     for (id, name, x, y) in [
-        (1, "Pulse", 200.0, 0.0),
-        (2, "Ripple", 173.2, 100.0),
-        (3, "Countdown", 100.0, 173.2),
-        (4, "ScaleIn", 0.0, 200.0),
-        (5, "Crosshair", -100.0, 173.2),
-        (6, "Halo", -173.2, 100.0),
-        (7, "Blink", -200.0, 0.0),
-        (8, "Orbit", -173.2, -100.0),
-        (9, "MarkerA", -100.0, -173.2),
-        (10, "MarkerB", 0.0, -200.0),
-        (11, "Hub1", 100.0, -173.2),
-        (12, "Hub2", 173.2, -100.0),
+        (1, "Alpha", 0.0, -100.0),
+        (2, "Beta", 100.0, 0.0),
+        (3, "Gamma", 0.0, 100.0),
+        (4, "Delta", -100.0, 0.0),
+        (5, "Echo", -250.0, 0.0),
+        (6, "Foxtrot", 250.0, 0.0),
     ] {
         let mut point = MapPoint::new(id, [x, y]);
         point.set_name(name.to_string());
         points.insert(id, point);
+        names.insert(id, name);
     }
 
-    // 2. Edges: the full ring, plus three chords across it -- most nodes end
-    // up with two or three neighbors instead of the isolated demo pairs
-    // `animations.rs` uses.
-    for (line_id, endpoints) in [
-        ((1, 2), [1, 2]),
-        ((2, 3), [2, 3]),
-        ((3, 4), [3, 4]),
-        ((4, 5), [4, 5]),
-        ((5, 6), [5, 6]),
-        ((6, 7), [6, 7]),
-        ((7, 8), [7, 8]),
-        ((8, 9), [8, 9]),
-        ((9, 10), [9, 10]),
-        ((10, 11), [10, 11]),
-        ((11, 12), [11, 12]),
-        ((12, 1), [12, 1]),
-        ((1, 7), [1, 7]),
-        ((3, 9), [3, 9]),
-        ((5, 11), [5, 11]),
-    ] {
-        for id in endpoints {
-            points.get_mut(&id).unwrap().connections.push(line_id);
+    // 2. Register each connection id on BOTH endpoint nodes, and build the
+    //    line geometry keyed by the same id: the ring, then the two spurs.
+    let mut segments = Vec::new();
+    for line_id in [(1, 2), (2, 3), (3, 4), (4, 1), (4, 5), (2, 6)] {
+        for endpoint in [line_id.0, line_id.1] {
+            points
+                .get_mut(&endpoint)
+                .expect("the endpoint is one of the nodes above")
+                .connections
+                .push(line_id);
         }
+        let (from, to) = (points[&line_id.0].coords, points[&line_id.1].coords);
+        segments.push(MapSegment::new(line_id, from, to));
     }
 
+    // 3. Load the nodes, then the lines, and install the template.
     let mut map = Map::new();
     map.add_hashmap_points(points);
-    map.add_lines(vec![
-        MapSegment::new((1, 2), [200.0, 0.0], [173.2, 100.0]),
-        MapSegment::new((2, 3), [173.2, 100.0], [100.0, 173.2]),
-        MapSegment::new((3, 4), [100.0, 173.2], [0.0, 200.0]),
-        MapSegment::new((4, 5), [0.0, 200.0], [-100.0, 173.2]),
-        MapSegment::new((5, 6), [-100.0, 173.2], [-173.2, 100.0]),
-        MapSegment::new((6, 7), [-173.2, 100.0], [-200.0, 0.0]),
-        MapSegment::new((7, 8), [-200.0, 0.0], [-173.2, -100.0]),
-        MapSegment::new((8, 9), [-173.2, -100.0], [-100.0, -173.2]),
-        MapSegment::new((9, 10), [-100.0, -173.2], [0.0, -200.0]),
-        MapSegment::new((10, 11), [0.0, -200.0], [100.0, -173.2]),
-        MapSegment::new((11, 12), [100.0, -173.2], [173.2, -100.0]),
-        MapSegment::new((12, 1), [173.2, -100.0], [200.0, 0.0]),
-        MapSegment::new((1, 7), [200.0, 0.0], [-200.0, 0.0]),
-        MapSegment::new((3, 9), [100.0, 173.2], [-100.0, -173.2]),
-        MapSegment::new((5, 11), [-100.0, 173.2], [100.0, -173.2]),
-    ]);
+    map.add_lines(segments);
+    map.set_node_template(Rc::new(HexNodes));
 
-    // 3. Segments are not templated, so they keep the widget's own default
-    // rendering and effect dispatch -- cycle the four persistent segment
-    // effects across the edges so the network looks alive.
-    for (id, effect) in [
-        ((1, 2), 0),
-        ((2, 3), 1),
-        ((3, 4), 2),
-        ((4, 5), 3),
-        ((5, 6), 0),
-        ((6, 7), 1),
-        ((7, 8), 2),
-        ((8, 9), 3),
-        ((9, 10), 0),
-        ((10, 11), 1),
-        ((11, 12), 2),
-        ((12, 1), 3),
-        ((1, 7), 0),
-        ((3, 9), 1),
-        ((5, 11), 2),
-    ] {
-        let segment = map.segment(id).expect("edge is loaded");
-        match effect {
-            0 => segment.comet(),
-            1 => segment.dash(),
-            2 => segment.glow_band(),
-            _ => segment.chevrons(),
-        }
-    }
+    // A lasting segment effect: the pattern of the dashed line keeps sliding
+    // along it ("marching ants").
+    map.segment((1, 2))
+        .expect("Alpha <-> Beta is loaded")
+        .dash();
 
-    // 4. Lasting node state and markers -- `DiamondNodes::marker_ui` now
-    // dispatches on `kind`, so Halo/Blink/Orbit each render as themselves
-    // (see the module docs).
-    map.node(6).expect("Halo is loaded").halo();
-    map.node(7).expect("Blink is loaded").blink();
-    map.node(8).expect("Orbit is loaded").orbit();
-    map.update_marker(0, 9);
-    map.update_marker(1, 10);
+    // The glow starts on: a marker on Echo.
+    map.update_marker(MARKER, MARKED_NODE);
 
-    map.set_node_template(Rc::new(DiamondNodes));
-    // Show node names on hover so selection_ui gets called.
-    map.settings.node_text_visibility = VisibilitySetting::Hover;
-
-    // 5. Event effects: each on its own independent, non-synchronized timer,
-    // each with the dedicated color `DiamondNodes::notification_ui` uses to
-    // pick which built-in effect to reuse.
-    let mut node_repeaters = vec![
-        NodeRepeater::new(1, Duration::from_millis(2200), Duration::ZERO, fire_pulse),
-        NodeRepeater::new(
-            2,
-            Duration::from_millis(2600),
-            Duration::from_millis(400),
-            fire_ripple,
-        ),
-        NodeRepeater::new(
-            3,
-            Duration::from_millis(3000),
-            Duration::from_millis(900),
-            fire_countdown,
-        ),
-        NodeRepeater::new(
-            4,
-            Duration::from_millis(1800),
-            Duration::from_millis(200),
-            fire_scale_in,
-        ),
-        NodeRepeater::new(
-            5,
-            Duration::from_millis(2400),
-            Duration::from_millis(700),
-            fire_crosshair,
-        ),
-    ];
+    let mut theme = Theme::default();
+    let mut marked = true;
 
     eframe::run_ui_native(
-        "egui-map: NodeTemplate reusing the built-in animations",
+        "egui-map: hexagonal nodes",
         eframe::NativeOptions::default(),
         move |ui, _frame| {
-            let now = Instant::now();
-            for repeater in &mut node_repeaters {
-                repeater.tick(&mut map, now);
-            }
-            ui.add(&mut map);
+            egui::Panel::top("controls").show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    egui::ComboBox::from_label("Theme")
+                        .selected_text(format!("{theme:?}"))
+                        .show_ui(ui, |ui| {
+                            for choice in THEMES {
+                                let label = format!("{choice:?}");
+                                if ui.selectable_value(&mut theme, choice, label).changed() {
+                                    map.set_theme(Rc::new(choice));
+                                }
+                            }
+                        });
+                    // Light, dark or the system's: the map resolves its colors
+                    // for whichever mode egui is in.
+                    egui::widgets::global_theme_preference_buttons(ui);
+                    ui.separator();
+                    let label = if marked {
+                        "Clear the glow"
+                    } else {
+                        "Make Echo glow"
+                    };
+                    if ui.button(label).clicked() {
+                        // `remove_marker` returns the node the marker pointed
+                        // to, or `None` when there was none: then set it.
+                        marked = map.remove_marker(MARKER).is_none();
+                        if marked {
+                            map.update_marker(MARKER, MARKED_NODE);
+                        }
+                    }
+                });
+            });
+            egui::CentralPanel::default().show(ui, |ui| {
+                let response = ui.add(&mut map);
+                // The node under the pointer, whatever the node text
+                // visibility is: here, a tooltip with its name.
+                if let Some(id) = map.hovered_node() {
+                    let name = names.get(&id).copied().unwrap_or("unknown");
+                    response.on_hover_text_at_pointer(format!("{name} (node {id})"));
+                }
+            });
         },
     )
 }
