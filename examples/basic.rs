@@ -14,6 +14,8 @@
 //!   line whose pattern slides along it ("marching ants"), started with
 //!   `Map::segment(..).dash()`. See `examples/animations.rs` for the whole
 //!   catalog of node and segment effects.
+//! - **A minimap.** Off by default; the checkbox flips
+//!   `map.settings.minimap.enabled`. Press or drag inside it to move the view.
 //!
 //! Run with: cargo run --example basic
 
@@ -111,6 +113,8 @@ fn main() -> eframe::Result<()> {
                     // Light, dark or the system's: the map resolves its colors
                     // for whichever mode egui is in.
                     egui::widgets::global_theme_preference_buttons(ui);
+                    ui.separator();
+                    ui.checkbox(&mut map.settings.minimap.enabled, "Minimap");
                     ui.separator();
                     let label = if marked {
                         "Clear the marker"

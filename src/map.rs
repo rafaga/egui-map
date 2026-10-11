@@ -56,9 +56,78 @@
 //!
 //! A line is only drawn while the zoom level is above
 //! [`MapSettings::line_visible_zoom`] and its bounding box intersects the
-//! viewport. Segments are culled broad-phase with an R-tree built by
+//! viewport; how it fades in above that zoom is [`MapSettings::line_fade`],
+//! and with [`LineFade::None`](objects::LineFade::None) there is no threshold.
+//! Segments are culled broad-phase with an R-tree built by
 //! [`Map::add_lines`], so long lines crossing the view are drawn even when
 //! both endpoints lie outside of it.
+//!
+//! ## Tutorials
+//!
+//! Two complete programs, with every step numbered, are the quickest way in:
+//!
+//! 1. `examples/tutorial_map.rs`: your first map, with nodes and lines.
+//! 2. `examples/tutorial_node_template.rs`: the same map with the nodes drawn
+//!    by a [`NodeTemplate`] (boxes with the name inside).
+//!
+//! Run them with `cargo run --example tutorial_map` and
+//! `cargo run --example tutorial_node_template`.
+//!
+//! ## Configuring the map
+//!
+//! Everything you can tune is a public field of [`MapSettings`], reached as
+//! `map.settings`. The defaults are a good start; these are the ones people
+//! reach for first.
+//!
+//! ```
+//! use egui_map::map::Map;
+//! use egui_map::map::objects::{LineFade, VisibilitySetting};
+//! use egui_map::map::overlay::Corner;
+//!
+//! let mut map = Map::new();
+//!
+//! // -- Zoom ---------------------------------------------------------------
+//! // The limits of the mouse wheel and the slider. `1.0` is 100%.
+//! map.settings.min_zoom = 0.1;
+//! map.settings.max_zoom = 4.0;
+//!
+//! // -- Lines: when they show and how they fade in -------------------------
+//! // The default: lines are hidden up to a zoom of 0.2 (20%) and fade in
+//! // over the next 0.8, so they are fully opaque from 100%.
+//! map.settings.line_visible_zoom = 0.2;
+//! map.settings.line_fade = LineFade::Zoom { range: LineFade::DEFAULT_RANGE };
+//!
+//! // A shorter ramp: opaque already at 50% (0.2 + 0.3).
+//! map.settings.line_fade = LineFade::Zoom { range: 0.3 };
+//!
+//! // No fade, no threshold: lines are opaque and drawn at every zoom.
+//! map.settings.line_fade = LineFade::None;
+//!
+//! // -- Lines: how thick -----------------------------------------------------
+//! // The width at the standard zoom (100%), in pixels. The line is drawn
+//! // that wide times the zoom: 4 px at 200%, 1 px at 50%. `None` turns the
+//! // built-in line off, for when a `SegmentTemplate` draws them.
+//! map.settings.style.line_width = Some(2.0);
+//!
+//! // -- Names ------------------------------------------------------------------
+//! // `Always` (needs `label_visible_zoom` to be reached), `Hover` or `Hidden`.
+//! map.settings.node_text_visibility = VisibilitySetting::Hover;
+//! map.settings.label_visible_zoom = 0.58;
+//! map.settings.node_text_size = 12.0; // screen pixels, whatever the zoom
+//!
+//! // -- Minimap and zoom slider ------------------------------------------------
+//! // The minimap is off by default; `scale` is the fraction of the map's
+//! // width and height it takes. The slider is on by default. Each one is
+//! // pinned to the corner of its own `anchor`.
+//! map.settings.minimap.enabled = true;
+//! map.settings.minimap.scale = 0.3;
+//! map.settings.minimap.anchor = Corner::BottomRight;
+//! map.settings.slider.anchor = Corner::TopRight;
+//! map.settings.slider.ticks = true;
+//! ```
+//!
+//! The colors are not in the settings: they come from the active theme, see
+//! [`Map::set_theme`] and the [`theme`] module.
 //!
 //! ## Custom node rendering
 //!
@@ -124,8 +193,11 @@ use web_time::Instant;
 use self::objects::{LabelTemplate, NodeTemplate, SegmentTemplate};
 
 pub mod animation;
+pub mod minimap;
 pub mod objects;
 pub mod outline;
+pub mod overlay;
+pub mod slider;
 pub mod theme;
 
 /// How much more opaque a segment effect (`comet`, `dash`, `flash`, ...)
@@ -721,6 +793,10 @@ impl Widget for &mut Map {
                     let new_pos = self.reference.pos - (coords / self.zoom);
                     self.set_pos(new_pos.into());
                 }
+                // The minimap owns the pointer while it is pressed, so it runs
+                // before the view is projected below: the map then follows it
+                // in the same frame.
+                self.handle_minimap_input(ui, resp.rect);
                 // Centre on the rect we actually paint into. Now that the
                 // painter is sized to the frame's content area this is exactly
                 // `map_area.center()`, but deriving it from `resp.rect` keeps
@@ -756,7 +832,11 @@ impl Widget for &mut Map {
 
                 self.paint_markers(ui, &min_point);
 
-                self.paint_sub_components(ui, self.map_area);
+                // Before the sub-components, so the zoom slider stays on top
+                // of it when both end up in the same corner.
+                self.paint_minimap(&paint, resp.rect);
+
+                self.paint_slider(ui, resp.rect);
 
                 self.capture_mouse_events(ui, &resp);
 
@@ -1352,28 +1432,6 @@ impl Map {
             });
     }
 
-    fn paint_sub_components(&mut self, ui_obj: &mut Ui, rect: Rect) {
-        let _span = tracing::info_span!("map_ui_paint_sub_components").entered();
-        let zoom_slider = egui::Slider::new(
-            &mut self.zoom,
-            self.settings.min_zoom..=self.settings.max_zoom,
-        )
-        .show_value(false)
-        .orientation(SliderOrientation::Vertical);
-        let mut pos1 = rect.right_top();
-        let mut pos2 = rect.right_top();
-        pos1.x -= 80.0;
-        pos1.y += 120.0;
-        pos2.x -= 60.0;
-        pos2.y += 240.0;
-
-        let sub_rect = egui::Rect::from_two_pos(pos1, pos2);
-        let ui_builder = egui::UiBuilder::new().clone().max_rect(sub_rect);
-        ui_obj.scope_builder(ui_builder, |ui_obj| {
-            ui_obj.add(zoom_slider);
-        });
-    }
-
     /// Region labels, the deepest layer: painted first so every other element
     /// (connection lines, nodes, free-floating `MapLabel`s) draws over them.
     fn paint_region_labels(&mut self, paint: &Painter, resp: &Response, min_point: &RawPoint) {
@@ -1900,7 +1958,8 @@ impl Map {
         // segment (same reasoning as `paint_map_points`).
         let mut needs_repaint = false;
 
-        if self.zoom <= self.settings.line_visible_zoom {
+        // `LineFade::None` has no threshold: the lines are drawn at any zoom.
+        if self.settings.line_fade.has_threshold() && self.zoom <= self.settings.line_visible_zoom {
             return segments_to_remove;
         }
         let Some(segments) = &self.segments else {
@@ -1908,18 +1967,22 @@ impl Map {
         };
 
         // How far into its own zoom-based fade-in the *default* line stroke
-        // has ramped: `0.0` right at `line_visible_zoom`, linearly up to
-        // `1.0` once the zoom is 0.80 units past it, then staying there.
-        // Segment effects reuse this below (`effect_fade`) so they fade in
-        // step with the line they sit on instead of ignoring the zoom
-        // entirely.
-        let line_fade = ((self.zoom - self.settings.line_visible_zoom) / 0.80).clamp(0.0, 1.0);
+        // has ramped (see `MapSettings::line_fade`): `0.0` right at
+        // `line_visible_zoom`, up to `1.0` once the zoom is far enough past
+        // it -- or `1.0` straight away when the fade is off. Segment effects
+        // reuse this below (`effect_fade`) so they fade in step with the line
+        // they sit on instead of ignoring the zoom entirely.
+        let line_fade = self
+            .settings
+            .line_fade
+            .factor(self.zoom, self.settings.line_visible_zoom);
 
         // `style.line_width == None` only turns off the *default* stroke -- a
         // `SegmentTemplate` or a segment effect installed through
         // `Map::segment` still needs to run, e.g. for a consumer who draws
         // lines entirely on their own and only wants the built-in effects.
-        let line_width = self.settings.style.line_width;
+        // The width at the standard zoom, scaled to the current one.
+        let line_width = self.settings.style.line_width_at(self.zoom);
 
         // Broad-phase: query the segment R-tree with the viewport AABB (in
         // map coordinates), padded by the stroke width -- when there is one
@@ -2527,6 +2590,19 @@ mod tests {
     }
 
     #[test]
+    fn the_zoom_label_is_the_zoom_as_a_percentage() {
+        let mut map = Map::new();
+        assert_eq!(map.zoom_label(), "100%");
+        for (zoom, label) in [(0.1, "10%"), (0.5, "50%"), (1.25, "125%"), (2.0, "200%")] {
+            map.set_zoom(zoom);
+            assert_eq!(map.zoom_label(), label);
+        }
+        // Rounded to a whole percent: it is a glance, not a read-out.
+        map.set_zoom(0.876);
+        assert_eq!(map.zoom_label(), "88%");
+    }
+
+    #[test]
     fn set_zoom_at_exact_limits() {
         let mut map = Map::new();
         map.set_zoom(map.settings.min_zoom);
@@ -2580,6 +2656,9 @@ mod tests {
     /// painted line segments.
     fn render_line_segments(map: &mut Map) -> Vec<[egui::Pos2; 2]> {
         use egui::{Context, RawInput, Shape};
+        // The zoom slider's tick marks are line segments too; these tests
+        // count the map's own.
+        map.settings.slider.ticks = false;
         let ctx = Context::default();
         let input = RawInput {
             screen_rect: Some(egui::Rect::from_min_size(

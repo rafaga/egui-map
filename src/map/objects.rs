@@ -9,7 +9,9 @@
 //! [`super::theme`], via [`MapTheme`](super::theme::MapTheme).
 
 use crate::map::animation::{self, Animation, SegmentAnimations};
+use crate::map::minimap::MinimapSettings;
 pub use crate::map::outline::NodeOutline;
+use crate::map::slider::SliderSettings;
 use crate::map::theme::{Style, ThemeColors};
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Stroke, Ui};
 use rstar::AABB;
@@ -752,7 +754,17 @@ pub struct MapSettings {
     /// Minimum zoom factor.
     pub min_zoom: f32,
     /// Zoom threshold above which connection lines become visible.
+    ///
+    /// Below it the lines are not drawn at all, unless
+    /// [`line_fade`](Self::line_fade) is [`LineFade::None`], which turns the
+    /// threshold off and draws them at every zoom. How they fade in above it
+    /// is also up to `line_fade`.
     pub line_visible_zoom: f32,
+    /// How the lines fade in once the zoom is above
+    /// [`line_visible_zoom`](Self::line_visible_zoom). Defaults to the
+    /// gradual ramp the widget has always used; use [`LineFade::None`] for
+    /// fully opaque lines that are drawn at every zoom.
+    pub line_fade: LineFade,
     /// Zoom threshold above which node names become visible when
     /// [`node_text_visibility`](Self::node_text_visibility) is
     /// [`VisibilitySetting::Always`].
@@ -808,6 +820,12 @@ pub struct MapSettings {
     /// ([`SegmentAnimations`]). Same defaults-preserve-behavior contract as
     /// [`Self::animation`].
     pub segment_animation: SegmentAnimations,
+    /// The minimap overlay. Off by default; see
+    /// [`MinimapSettings::enabled`].
+    pub minimap: MinimapSettings,
+    /// The zoom slider and the zoom read-out under it: where they are pinned
+    /// and whether they are drawn.
+    pub slider: SliderSettings,
 }
 
 impl MapSettings {
@@ -821,6 +839,7 @@ impl MapSettings {
             max_zoom: 0.0,
             min_zoom: 0.0,
             line_visible_zoom: 0.0,
+            line_fade: LineFade::default(),
             label_visible_zoom: 0.0,
             node_text_visibility: VisibilitySetting::Always,
             marker_animation: SteadyAnimation::Blink,
@@ -830,6 +849,8 @@ impl MapSettings {
             style: Style::new(),
             animation: Animation::default(),
             segment_animation: SegmentAnimations::default(),
+            minimap: MinimapSettings::default(),
+            slider: SliderSettings::default(),
         }
     }
 }
@@ -851,6 +872,7 @@ impl Default for MapSettings {
             max_zoom: 2.0,
             min_zoom: 0.1,
             line_visible_zoom: 0.2,
+            line_fade: LineFade::default(),
             label_visible_zoom: 0.58,
             node_text_visibility: VisibilitySetting::Always,
             marker_animation: SteadyAnimation::Blink,
@@ -864,6 +886,8 @@ impl Default for MapSettings {
             },
             animation: Animation::default(),
             segment_animation: SegmentAnimations::default(),
+            minimap: MinimapSettings::default(),
+            slider: SliderSettings::default(),
         }
     }
 }
@@ -1018,6 +1042,63 @@ pub enum VisibilitySetting {
     Hover,
     /// Always show node names, subject to [`MapSettings::label_visible_zoom`].
     Always,
+}
+
+/// How the connection lines fade in as the zoom rises past
+/// [`MapSettings::line_visible_zoom`].
+///
+/// Set through [`MapSettings::line_fade`]. It shapes the opacity of the lines
+/// and is tied to the threshold: with a fade the lines are hidden up to
+/// `line_visible_zoom` and fade in above it, and with [`LineFade::None`] there
+/// is no threshold at all, so they are drawn, opaque, at every zoom. The
+/// built-in segment effects follow it, staying a little more visible than the
+/// line they sit on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[non_exhaustive]
+pub enum LineFade {
+    /// No fade and no threshold: the lines are fully opaque and drawn at every
+    /// zoom, `line_visible_zoom` notwithstanding.
+    None,
+    /// The opacity ramps up linearly from `0.0` at `line_visible_zoom` to
+    /// `1.0` once the zoom is `range` units past it, and stays there. A
+    /// `range` of zero or less has no ramp: the lines appear fully opaque, all
+    /// at once, when `line_visible_zoom` is crossed.
+    Zoom {
+        /// Zoom units over which the lines fade in.
+        range: f32,
+    },
+}
+
+impl LineFade {
+    /// The fade [`MapSettings::default`] uses: a ramp over `0.80` zoom units.
+    pub const DEFAULT_RANGE: f32 = 0.80;
+
+    /// Whether lines are hidden at or below `line_visible_zoom`: every fade
+    /// but [`LineFade::None`].
+    pub fn has_threshold(self) -> bool {
+        !matches!(self, LineFade::None)
+    }
+
+    /// The opacity factor, `0.0..=1.0`, of a line at `zoom` when lines start
+    /// being drawn at `visible_zoom`.
+    pub fn factor(self, zoom: f32, visible_zoom: f32) -> f32 {
+        match self {
+            LineFade::Zoom { range } if range > 0.0 => {
+                ((zoom - visible_zoom) / range).clamp(0.0, 1.0)
+            }
+            LineFade::Zoom { .. } | LineFade::None => 1.0,
+        }
+    }
+}
+
+impl Default for LineFade {
+    /// A [`LineFade::Zoom`] over [`LineFade::DEFAULT_RANGE`], which is how
+    /// lines have always faded in.
+    fn default() -> Self {
+        LineFade::Zoom {
+            range: Self::DEFAULT_RANGE,
+        }
+    }
 }
 
 /// Provides the contents of the widget's right-click context menu.
@@ -2431,6 +2512,42 @@ mod tests {
         assert_eq!(b.pos.components, [0.0, 0.0]);
     }
 
+    // ---------- LineFade ----------
+
+    #[test]
+    fn the_default_line_fade_is_the_original_ramp() {
+        let fade = LineFade::default();
+        assert_eq!(fade, LineFade::Zoom { range: 0.80 });
+        // Not drawn yet right at the threshold, half way up, then opaque.
+        assert_eq!(fade.factor(0.2, 0.2), 0.0);
+        assert!((fade.factor(0.6, 0.2) - 0.5).abs() < 1e-6);
+        assert_eq!(fade.factor(1.0, 0.2), 1.0);
+        assert_eq!(fade.factor(2.0, 0.2), 1.0);
+    }
+
+    #[test]
+    fn no_line_fade_is_opaque_at_any_zoom() {
+        for zoom in [0.21, 0.5, 1.0, 2.0] {
+            assert_eq!(LineFade::None.factor(zoom, 0.2), 1.0, "zoom {zoom}");
+        }
+    }
+
+    #[test]
+    fn the_fade_range_scales_the_ramp() {
+        let slow = LineFade::Zoom { range: 2.0 };
+        assert!((slow.factor(1.2, 0.2) - 0.5).abs() < 1e-6);
+        let quick = LineFade::Zoom { range: 0.1 };
+        assert!((quick.factor(0.25, 0.2) - 0.5).abs() < 1e-6);
+        assert_eq!(quick.factor(0.5, 0.2), 1.0);
+    }
+
+    #[test]
+    fn a_fade_range_of_zero_or_less_is_no_fade() {
+        for range in [0.0, -1.0] {
+            assert_eq!(LineFade::Zoom { range }.factor(0.21, 0.2), 1.0);
+        }
+    }
+
     // ---------- MapSettings ----------
 
     #[test]
@@ -2454,6 +2571,7 @@ mod tests {
         assert_eq!(s.max_zoom, 2.0);
         assert_eq!(s.min_zoom, 0.1);
         assert_eq!(s.line_visible_zoom, 0.2);
+        assert_eq!(s.line_fade, LineFade::Zoom { range: 0.80 });
         assert_eq!(s.label_visible_zoom, 0.58);
         assert_eq!(s.node_text_visibility, VisibilitySetting::Always);
         assert_eq!(s.marker_animation, SteadyAnimation::Blink);

@@ -471,16 +471,19 @@ impl MapTheme for Theme {
 /// instead of living here as a copy that would need to be kept in sync.
 ///
 /// Multiplying or dividing a `Style` by a number scales
-/// [`line_width`](Self::line_width) and [`font`](Self::font)'s size; the
-/// widget uses this to scale the active style with the current zoom factor.
-/// Fields that are `None` are left untouched by those operators, and so is
+/// [`line_width`](Self::line_width) and [`font`](Self::font)'s size. Fields
+/// that are `None` are left untouched by those operators, and so is
 /// [`region_label_font`](Self::region_label_font) -- it has its own,
 /// separate zoom scaling (see that field's own doc), unrelated to this
 /// operator.
 #[derive(Clone, Debug)]
 pub struct Style {
-    /// Width of the connection lines between nodes; their color comes from
-    /// the active [`MapTheme`]'s [`ThemeColors::segment`]. `None` disables
+    /// Width of the connection lines between nodes **at the standard zoom**
+    /// (`1.0`, 100%); their color comes from the active [`MapTheme`]'s
+    /// [`ThemeColors::segment`]. The lines are drawn that wide times the
+    /// current zoom, so they grow and shrink with the map (see
+    /// [`line_width_at`](Self::line_width_at)). `2.0` by default, a quarter of the `8` pixels a node measures at the standard
+    /// zoom. `None` disables
     /// the default stroke -- a
     /// [`SegmentTemplate`](super::objects::SegmentTemplate) or a segment
     /// effect installed through [`Map::segment`](super::Map::segment) still
@@ -521,6 +524,13 @@ impl Default for Style {
 }
 
 impl Style {
+    /// The width, in screen pixels, the connection lines are drawn with at
+    /// `zoom`: [`line_width`](Self::line_width) times the zoom, with no lower
+    /// limit. `None` when there is no default stroke.
+    pub fn line_width_at(&self, zoom: f32) -> Option<f32> {
+        self.line_width.map(|width| width * zoom)
+    }
+
     /// Returns a copy with the stroke widths and font size scaled by `factor`.
     /// Fields that are `None` are left untouched.
     fn scaled(mut self, factor: f32) -> Self {
@@ -600,6 +610,32 @@ impl Div<f64> for Style {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_line_width_is_the_one_at_the_standard_zoom_scaled_by_the_zoom() {
+        let style = Style {
+            line_width: Some(2.0),
+            ..Style::new()
+        };
+        assert_eq!(style.line_width_at(1.0), Some(2.0));
+        assert_eq!(style.line_width_at(2.0), Some(4.0));
+        assert_eq!(style.line_width_at(1.5), Some(3.0));
+    }
+
+    #[test]
+    fn the_line_keeps_shrinking_when_zoomed_out() {
+        let style = Style {
+            line_width: Some(2.0),
+            ..Style::new()
+        };
+        assert_eq!(style.line_width_at(0.5), Some(1.0));
+        assert_eq!(style.line_width_at(0.25), Some(0.5));
+    }
+
+    #[test]
+    fn no_line_width_means_no_default_stroke() {
+        assert_eq!(Style::new().line_width_at(1.0), None);
+    }
+
     use super::*;
 
     const ALL_THEMES: [Theme; 15] = [
