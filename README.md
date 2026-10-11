@@ -28,50 +28,167 @@ Add the dependency:
 egui-map = "0.0"
 ```
 
-Feed the map a set of nodes and add it to your UI:
+The two tutorials below are complete programs that compile and run: `cargo run --example tutorial_map` and `cargo run --example tutorial_node_template`. The code in each step is the code of the example.
+
+### Tutorial 1: your first map
+
+A map is an egui widget. You build it once, keep it between frames and add it to a `Ui` on every frame. Building it takes three steps.
+
+**1. Create the nodes.** A node is a `MapPoint`: an id of your choice (unique) and a position in *map coordinates*, in whatever units you like -- the widget scales them with the zoom. The name is optional.
+
+```rust
+use egui_map::map::objects::MapPoint;
+
+let mut alpha = MapPoint::new(1, [0.0, 0.0]);
+alpha.set_name("Alpha".to_string());
+let mut beta = MapPoint::new(2, [120.0, 40.0]);
+beta.set_name("Beta".to_string());
+let mut points = vec![alpha, beta];
+```
+
+**2. Connect them.** Every line has an id of its own -- by convention the pair of node ids it joins -- and that id has to be listed in the `connections` of **both** of its nodes. The line itself, a `MapSegment`, carries the id and the coordinates of its two ends.
+
+```rust
+use egui_map::map::objects::MapSegment;
+
+let line_id = (1, 2);
+points[0].connections.push(line_id);
+points[1].connections.push(line_id);
+let segments = vec![MapSegment::new(line_id, [0.0, 0.0], [120.0, 40.0])];
+```
+
+**3. Load them and show the map.** Load the nodes first, then the lines.
 
 ```rust
 use egui_map::map::Map;
-use egui_map::map::objects::{MapPoint, RawPoint};
-use std::collections::HashMap;
-
-// Build the node set, keyed by node id.
-let mut points: HashMap<usize, MapPoint> = HashMap::new();
-points.insert(1, MapPoint::new(1, RawPoint::new(0.0, 0.0)));
-points.insert(2, MapPoint::new(2, RawPoint::new(100.0, 50.0)));
 
 let mut map = Map::new();
-map.add_hashmap_points(points);
+map.add_points(points);
+map.add_lines(segments);
 
-// Then, on every frame of your egui update loop:
+// Then, on every frame of your egui update loop, with the same `map`:
 // ui.add(&mut map);
 ```
 
-### Connecting nodes with lines
+Pan with click & drag, zoom with the mouse wheel or the slider. `examples/tutorial_map.rs` is this tutorial with five nodes, four lines and `eframe`.
 
-Lines are wired in three steps: create the nodes, register a unique connection id in the `connections` of **both** endpoints, and load the line geometry keyed by that same id:
+### Configuring the map
+
+Everything you can tune is a public field of `map.settings`. The defaults are a good start; these are the ones people reach for first.
 
 ```rust
-use egui_map::map::objects::{MapPoint, RawLine, RawPoint};
-use std::collections::HashMap;
+use egui_map::map::objects::{LineFade, VisibilitySetting};
+use egui_map::map::overlay::Corner;
 
-let mut points: HashMap<usize, MapPoint> = HashMap::new();
-points.insert(1, MapPoint::new(1, RawPoint::new(0.0, 0.0)));
-points.insert(2, MapPoint::new(2, RawPoint::new(10.0, 10.0)));
+// Zoom: the limits of the mouse wheel and the slider. 1.0 is 100%.
+map.settings.min_zoom = 0.1;
+map.settings.max_zoom = 4.0;
 
-// Register the connection id on both endpoints.
-for id in [1, 2] {
-    points.get_mut(&id).unwrap().connections.push("1-2".to_string());
-}
-map.add_hashmap_points(points);
+// Lines: when they show and how they fade in. By default they are hidden up
+// to a zoom of 0.2 (20%) and fade in over the next 0.8, opaque from 100%.
+map.settings.line_visible_zoom = 0.2;
+map.settings.line_fade = LineFade::Zoom { range: 0.8 };
 
-// Line geometry, keyed by the same connection id.
-let mut lines: HashMap<String, RawLine> = HashMap::new();
-lines.insert("1-2".to_string(), RawLine::new(RawPoint::new(0.0, 0.0), RawPoint::new(10.0, 10.0)));
-map.add_lines(lines);
+// A shorter ramp: opaque already at 50% (0.2 + 0.3).
+map.settings.line_fade = LineFade::Zoom { range: 0.3 };
+
+// No fade and no threshold: lines are opaque and drawn at every zoom.
+map.settings.line_fade = LineFade::None;
+
+// Lines: how thick. The width at the standard zoom (100%), in pixels; the
+// line is drawn that wide times the zoom (4 px at 200%, 1 px at 50%).
+// `None` turns the built-in line off, for a `SegmentTemplate` to draw them.
+map.settings.style.line_width = Some(2.0);
+
+// Names: `Always` (needs `label_visible_zoom`), `Hover` or `Hidden`.
+map.settings.node_text_visibility = VisibilitySetting::Hover;
+map.settings.label_visible_zoom = 0.58;
+map.settings.node_text_size = 12.0; // screen pixels, whatever the zoom
+
+// Minimap (off by default) and zoom slider (on by default), each pinned to
+// the corner of its own `anchor`.
+map.settings.minimap.enabled = true;
+map.settings.minimap.scale = 0.3; // fraction of the map's width and height
+map.settings.minimap.anchor = Corner::BottomRight;
+map.settings.slider.anchor = Corner::TopRight;
+map.settings.slider.ticks = true;
 ```
 
-A line is only drawn while the zoom level is above `MapSettings::line_visible_zoom` and its bounding box intersects the viewport. Segments are culled broad-phase with an R-tree, so long lines crossing the view are drawn even when both endpoints lie outside of it.
+Colors are not in the settings: they come from the active theme (see *Custom themes* below).
+
+A line is only drawn while its bounding box intersects the viewport, and -- unless `line_fade` is `LineFade::None` -- while the zoom is above `line_visible_zoom`. Segments are culled broad-phase with an R-tree, so long lines crossing the view are drawn even when both endpoints lie outside of it.
+
+### Tutorial 2: a map with a `NodeTemplate`
+
+The nodes of tutorial 1 are dots with the name next to them. A `NodeTemplate` lets you draw them yourself -- here, a rounded box with the name inside. The data is loaded exactly as before: a template changes how the nodes look, not how they are built.
+
+**1. Write the template.** It is a type of your own, which can hold the settings your nodes need. The size is what a box measures at the standard zoom; every method multiplies it by the zoom.
+
+```rust
+use egui::{Align2, CornerRadius, FontId, Pos2, Rect, Stroke, StrokeKind, Ui, Vec2};
+use egui_map::map::objects::{HitContext, NodeContext, NodeOutline, NodeTemplate};
+
+struct BoxNodes {
+    size: Vec2,
+    corner_radius: f32,
+}
+
+impl BoxNodes {
+    // The box of a node centred at `position`. `node_ui` paints it and
+    // `outline` declares it, so they cannot disagree.
+    fn rect(&self, position: Pos2, zoom: f32) -> Rect {
+        Rect::from_center_size(position, self.size * zoom)
+    }
+}
+```
+
+**2. Paint the node** in `node_ui`, the only method you have to write. `ctx.position` is the node's centre on the screen, already placed and scaled, and `ctx.zoom` the scale to apply to every size. The colors come from the active theme, so the nodes follow it when it changes: `ctx.color` is the node's own color (or the theme's node color) and `ctx.theme` the whole palette. Once a template is installed the widget no longer writes the names: this is where you draw them.
+
+```rust
+impl NodeTemplate for BoxNodes {
+    fn node_ui(&self, ui: &mut Ui, ctx: NodeContext) {
+        let rect = self.rect(ctx.position, ctx.zoom);
+        let radius = CornerRadius::same((self.corner_radius * ctx.zoom) as u8);
+        let painter = ui.painter();
+        painter.rect_filled(rect, radius, ctx.theme.background);
+        painter.rect_stroke(
+            rect,
+            radius,
+            Stroke::new(1.5 * ctx.zoom, ctx.color),
+            StrokeKind::Inside,
+        );
+        painter.text(
+            rect.center(),
+            Align2::CENTER_CENTER,
+            ctx.point.get_name(),
+            FontId::proportional(11.0 * ctx.zoom),
+            ctx.theme.text,
+        );
+    }
+```
+
+**3. Say what shape the node has**, in `outline`. It is optional but worth three lines: from it the widget derives where the pointer hits the node (so `Map::hovered_node` and clicks work), the selection ring and the shape the notification effects wrap around.
+
+```rust
+    fn outline(&self, ctx: HitContext) -> NodeOutline {
+        NodeOutline::RoundedRect {
+            rect: self.rect(ctx.position, ctx.zoom),
+            corner_radius: self.corner_radius * ctx.zoom,
+        }
+    }
+}
+```
+
+**4. Install it** on the map, behind an `Rc`, and show the map as before.
+
+```rust
+map.set_node_template(std::rc::Rc::new(BoxNodes {
+    size: Vec2::new(72.0, 22.0),
+    corner_radius: 6.0,
+}));
+```
+
+`examples/tutorial_node_template.rs` is this tutorial with the same five nodes as the first one. `examples/custom_template.rs` and `examples/node_template_animations.rs` take it further, with notifications and markers.
 
 ### Custom node rendering and animations
 
