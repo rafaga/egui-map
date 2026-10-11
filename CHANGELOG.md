@@ -10,6 +10,32 @@ any minor bump may include breaking changes, called out below as such).
 
 ### Added
 
+- An optional minimap: a small overview of the whole map pinned to a corner,
+  with the part the main view shows outlined on it. Pressing or dragging
+  inside it recentres the main view, and the main map does not pan underneath
+  it. It is **off** by default; turn it on with
+  `MapSettings::minimap.enabled`. `MinimapSettings` (in the new `map::minimap`
+  module) also sets its `scale` (a fraction of the widget, not a size in
+  pixels), `anchor` (a `Corner`), `margin`,
+  `opacity`, whether the viewport is outlined (`show_viewport`) and the
+  `point_size` of the nodes (one pixel by default, snapped to the pixel grid so
+  a dense map stays sharp). It paints
+  with the active `MapTheme`: `background`, `node`, `segment` and `selected`.
+  The minimap keeps the proportions of the map by default (the panel shrinks
+  to the map's shape inside the box `scale` gives; `keep_aspect_ratio = false`
+  always uses all of it). `MapSettings` gains the public `minimap` field, so code that
+  builds it with a struct literal and no `..Default::default()` needs to add
+  it.
+- `MapSettings::line_fade`, a `LineFade`, says how the connection lines fade in
+  once the zoom is above `line_visible_zoom`: `LineFade::Zoom { range }` ramps
+  the opacity over `range` zoom units (the default, `0.80`, is how lines have
+  always faded) and `LineFade::None` draws them fully opaque. The built-in
+  segment effects follow it. `LineFade::factor` gives the opacity at
+  a zoom. `LineFade::None` also turns the `line_visible_zoom` threshold off: the
+  lines are drawn, opaque, at every zoom (`LineFade::has_threshold` says which
+  fades keep it). `LineFade` is `#[non_exhaustive]`, so a `match` on it needs a `_`
+  arm. `MapSettings` gains the public `line_fade` field: code that builds it
+  with a struct literal and no `..Default::default()` needs to add it.
 - `SegmentHandle::direction(CometDirection)`: a modifier, like `color`, that
   says which endpoint a segment effect runs from -- `Forward` (the default)
   from the first endpoint to the second, `Reverse` the other way. It applies
@@ -29,8 +55,57 @@ any minor bump may include breaking changes, called out below as such).
   itself. `SegmentStateContext` and `SegmentNotificationContext` have a new
   `direction` field with the direction that was asked for.
 
+- The zoom slider now has a read-out under it showing the zoom as a percentage
+  (`100%` at the default zoom, `10%` to `200%` with the default limits), drawn
+  with the theme's `text` color.
+- `MapSettings::slider` (`SliderSettings`, in the new
+  `map::slider` module) pins the zoom slider and its read-out to a
+  `Corner` of the map (`anchor`, top-right by default), sets its `margin` and
+  can hide it (`visible`). It lines up with the minimap: the same corners and
+  default margin, and if both are asked for the same corner the slider stacks
+  on the inner side of the minimap instead of covering it. `Corner`, the four
+  corners of the widget, lives in the new `map::overlay` module and is what
+  the minimap's `anchor` takes too. `MapSettings` gains the public
+  `slider` field: code that builds it with a struct literal and no
+  `..Default::default()` needs to add it.
+- The zoom slider can lie horizontal as well as stand vertical
+  (`slider.orientation`, an `egui::SliderOrientation`, vertical by
+  default) and draws five tick marks, at 0, 25, 50, 75 and 100% of its travel,
+  so the zoom levels can be told apart (`slider.ticks`, on by default).
+  The marks have no labels and sit on the side of the slider that faces the
+  inside of the map, so they follow the anchor and the orientation; they line
+  up with the handle at the minimum and maximum zoom. `Corner::is_left` joins
+  `is_top`. `SliderSettings::WIDTH` is now `BREADTH` and `control_size`
+  is a method taking the slider's thickness.
+- The slider, its marks and its read-out sit in a rounded panel filled with
+  the theme's `background`, the same corner radius as the minimap's. The panel
+  is invisible (`slider.panel_idle_opacity`, `0.0`) until the mouse is over it
+  or the handle is being dragged, and then turns semi opaque
+  (`slider.panel_hover_opacity`, `0.6`) so the slider stands out from the map.
+  The panel also keeps a press on it from panning the map. The control is 12
+  pixels larger on each axis to make room for the panel's padding.
+- Two step-by-step tutorials, as examples that compile and run:
+  `examples/tutorial_map.rs` (a first map, with nodes and lines) and
+  `examples/tutorial_node_template.rs` (the same map with the nodes drawn by a
+  `NodeTemplate`). The README and the `map` module docs have both, plus a
+  "Configuring the map" section with examples of the settings people reach for
+  first: the zoom limits, `line_visible_zoom`, the `line_fade` options, the line
+  width, node names, the minimap and the slider. The README's example of
+  connecting nodes with lines was out of date; it is replaced.
+
 ### Changed
 
+- The default connection line now scales with the zoom. `Style::line_width` is
+  its width at the standard zoom (`1.0`, 100%) and the line is drawn that wide
+  times the zoom, so it is 2 pixels at 100%, 4 at 200% and 0.5 at 25%, with no
+  lower limit; it used to be 2 pixels at every zoom. `Style::line_width_at(zoom)` gives the width a zoom resolves
+  to. The dash that follows the default stroke follows the scaled width too. A
+  `SegmentTemplate` still decides its own widths from `SegmentContext::zoom`.
+  The `Style` docs no longer claim the widget scales a `Style` with the zoom.
+- The zoom slider is no longer placed at a fixed offset from the top-right
+  corner (80 pixels in, 120 down): it is pinned to the corner, `margin` pixels
+  from both edges, and positioned from the area the map paints into, the same
+  one the minimap uses. Set `slider.anchor` to move it.
 - The `glow_band` ribbon is `GlowBand::thickness` screen pixels wide whatever
   the zoom (it was multiplied by it), like the default stroke, the `dash` and
   the `chevrons`: the lasting segment effects keep their thickness when the
