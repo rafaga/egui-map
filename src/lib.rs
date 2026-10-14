@@ -12,6 +12,8 @@
 //!   current viewport are painted each frame.
 //! - Node names and free-floating text labels with configurable visibility
 //!   rules (see [`map::objects::VisibilitySetting`]).
+//! - Straight and curved connection lines, which can share a map (see
+//!   [`map::objects::MapSegment`]).
 //! - Pulsing notifications and blinking markers attached to nodes.
 //! - Custom node rendering and right-click context menus through the
 //!   [`map::objects::NodeTemplate`] and [`map::objects::ContextMenuManager`]

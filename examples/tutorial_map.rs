@@ -2,9 +2,9 @@
 //!
 //! The smallest complete program that shows a map: five systems joined by
 //! lines, pan with click & drag, zoom with the mouse wheel or the slider. Read
-//! it top to bottom, the steps are numbered. The README has the same tutorial
-//! in prose; `examples/tutorial_node_template.rs` is the next step, drawing
-//! the nodes yourself.
+//! it top to bottom, the steps are numbered. `docs/tutorial-1-first-map.md` has
+//! the same tutorial in prose; `examples/tutorial_node_template.rs` is the
+//! next step, drawing the nodes yourself.
 //!
 //! Run with: cargo run --example tutorial_map
 

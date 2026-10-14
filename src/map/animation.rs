@@ -4,14 +4,14 @@
 //!
 //! - **Event-driven** effects ([`Animation::pulse`], [`Animation::ripple`],
 //!   [`Animation::countdown_arc`], [`Animation::scale_in`],
-//!   [`Animation::crosshair`], [`Animation::flash_decay`],
-//!   [`Animation::comet_once`], [`Animation::wipe`]) are anchored to the
+//!   [`Animation::crosshair`], [`SegmentAnimations::flash_decay`],
+//!   [`SegmentAnimations::comet_once`], [`SegmentAnimations::wipe`]) are anchored to the
 //!   [`Instant`] an event happened and **terminate**: they return `true`
 //!   while still playing and `false` once finished, so the caller can drop
 //!   the entry and stop repainting.
 //! - **Persistent** effects ([`Animation::halo`], [`Animation::blink`],
-//!   [`Animation::orbit`], [`Animation::glow`], [`Animation::comet`],
-//!   [`Animation::dash`], [`Animation::glow_band`], [`Animation::chevrons`])
+//!   [`Animation::orbit`], [`Animation::glow`], [`SegmentAnimations::comet`],
+//!   [`SegmentAnimations::dash`], [`SegmentAnimations::glow_band`], [`SegmentAnimations::chevrons`])
 //!   never end. They take
 //!   the **frame time** in seconds (`ui.input(|i| i.time)`) rather than an
 //!   `Instant`, so every element animated in the same frame shares one clock
@@ -38,9 +38,9 @@
 //! [`Animation::event_outline`]/[`Animation::state_outline`] pick
 //! the variant for a requested kind.
 //!
-//! The segment effects ([`Animation::flash_decay`], [`Animation::comet_once`],
-//! [`Animation::wipe`], [`Animation::comet`], [`Animation::dash`],
-//! [`Animation::glow_band`], [`Animation::chevrons`]) are reached the same way, through
+//! The segment effects ([`SegmentAnimations::flash_decay`], [`SegmentAnimations::comet_once`],
+//! [`SegmentAnimations::wipe`], [`SegmentAnimations::comet`], [`SegmentAnimations::dash`],
+//! [`SegmentAnimations::glow_band`], [`SegmentAnimations::chevrons`]) are reached the same way, through
 //! [`Map::segment`](crate::map::Map::segment); see
 //! [`SegmentHandle`](crate::map::SegmentHandle). A custom
 //! [`SegmentTemplate`](crate::map::objects::SegmentTemplate) calls them from
@@ -49,10 +49,11 @@
 
 use super::objects::{NodeAnimation, SegmentAnimation, SteadyAnimation, SteadySegmentAnimation};
 use super::outline::{NodeOutline, partial_perimeter, point_along};
+use super::path::SegmentPath;
 use egui::{
-    Color32, ColorImage, Context, CornerRadius, Id, Mesh, Painter, Pos2, Rect, Shape, Stroke,
+    Color32, ColorImage, Context, CornerRadius, Id, Painter, Pos2, Rect, Shape, Stroke,
     TextureFilter, TextureHandle, TextureOptions, TextureWrapMode, Vec2,
-    epaint::{CircleShape, PathShape, Vertex},
+    epaint::{CircleShape, PathShape},
     pos2,
 };
 use std::f32::consts::TAU;
@@ -71,12 +72,12 @@ pub const COUNTDOWN_DURATION: f32 = 5.0;
 pub const SCALE_IN_DURATION: f32 = 0.45;
 /// How long [`Animation::crosshair`] takes to converge, in seconds.
 pub const CROSSHAIR_DURATION: f32 = 0.6;
-/// How long [`Animation::flash_decay`] takes to fade back out, in seconds.
+/// How long [`SegmentAnimations::flash_decay`] takes to fade back out, in seconds.
 pub const FLASH_DECAY_DURATION: f32 = 1.0;
-/// Stroke width, before the `zoom` multiplier, [`Animation::flash_decay`]
+/// Stroke width, before the `zoom` multiplier, [`SegmentAnimations::flash_decay`]
 /// settles to as it fades.
 pub const FLASH_BASE_WIDTH: f32 = 2.0;
-/// Width, before the `zoom` multiplier, [`Animation::flash_decay`] adds at its
+/// Width, before the `zoom` multiplier, [`SegmentAnimations::flash_decay`] adds at its
 /// start. With [`FLASH_BASE_WIDTH`] the widest the flash gets is 8, the
 /// diameter of the built-in node (radius `4 * zoom`): it never swells past the
 /// nodes at the ends of the segment.
@@ -84,40 +85,40 @@ pub const FLASH_EXTRA_WIDTH: f32 = 6.0;
 // Checked when compiling: raising either constant past the built-in node's
 // diameter (8) fails the build instead of silently bringing the flash back.
 const _: () = assert!(FLASH_BASE_WIDTH + FLASH_EXTRA_WIDTH <= 8.0);
-/// How long [`Animation::comet`] takes for one end-to-end pass, in seconds.
+/// How long [`SegmentAnimations::comet`] takes for one end-to-end pass, in seconds.
 pub const COMET_PERIOD: f32 = 1.6;
-/// How long a single [`Animation::comet_once`] pass takes to cross the
+/// How long a single [`SegmentAnimations::comet_once`] pass takes to cross the
 /// segment, in seconds.
 pub const COMET_TRAVEL_DURATION: f32 = 1.2;
 /// Length, in **screen pixels**, of one dash-plus-gap repeat of
-/// [`Animation::dash`]. Deliberately not scaled by zoom, same as the dash
+/// [`SegmentAnimations::dash`]. Deliberately not scaled by zoom, same as the dash
 /// speed, so the pattern doesn't stretch as the map is zoomed -- matching how
 /// node/label text is sized in screen space rather than map space.
 pub const DASH_PERIOD_PX: f32 = 24.0;
-/// How many repeats of the dash pattern [`Animation::dash`] slides through
+/// How many repeats of the dash pattern [`SegmentAnimations::dash`] slides through
 /// per second ("marching ants" speed).
 pub const DASH_SPEED: f32 = 0.6;
-/// Width, in **screen pixels**, of the ribbon [`Animation::dash`] paints when
+/// Width, in **screen pixels**, of the ribbon [`SegmentAnimations::dash`] paints when
 /// [`Dash::width`] is `None` and there is no default stroke to follow
 /// ([`Style::line_width`](crate::map::theme::Style::line_width) is `None`).
 /// Not scaled by zoom, like the default stroke it stands in for, and equal to
 /// that stroke's default width.
 pub const DASH_WIDTH: f32 = 2.0;
-/// How long [`Animation::wipe`] takes to draw the line in, in seconds.
+/// How long [`SegmentAnimations::wipe`] takes to draw the line in, in seconds.
 pub const WIPE_DURATION: f32 = 0.9;
-/// How long [`Animation::wipe`] takes to take the line back out once it is
+/// How long [`SegmentAnimations::wipe`] takes to take the line back out once it is
 /// drawn, in seconds: the same as drawing it in, so the way out is the way in
 /// played backwards.
 pub const WIPE_OUT_DURATION: f32 = 0.9;
-/// How long one full traverse-and-loop of [`Animation::glow_band`] takes, in
+/// How long one full traverse-and-loop of [`SegmentAnimations::glow_band`] takes, in
 /// seconds -- the band fades out past one end before it reappears at the
 /// other, so this covers the whole cycle, not just the visible crossing.
 pub const GLOW_BAND_PERIOD: f32 = 2.2;
 /// Length, in **screen pixels**, of the visible glow band
-/// [`Animation::glow_band`] paints. Deliberately not scaled by zoom, same
+/// [`SegmentAnimations::glow_band`] paints. Deliberately not scaled by zoom, same
 /// reasoning as [`DASH_PERIOD_PX`].
 pub const GLOW_BAND_LENGTH_PX: f32 = 40.0;
-/// Width, in **screen pixels**, of the ribbon [`Animation::glow_band`] paints.
+/// Width, in **screen pixels**, of the ribbon [`SegmentAnimations::glow_band`] paints.
 /// Not scaled by zoom, like the default stroke it runs over and the other
 /// lasting segment effects ([`DASH_WIDTH`], [`Chevrons::width`]): the band
 /// keeps the same thickness however far the map is zoomed.
@@ -125,7 +126,7 @@ pub const GLOW_BAND_THICKNESS: f32 = 5.0;
 /// How long one full pulse of [`Animation::glow`] takes (dim, bright, dim),
 /// in seconds.
 pub const GLOW_PERIOD: f32 = 2.5;
-/// Length of one chevron repeat of [`Animation::chevrons`], in widths of the
+/// Length of one chevron repeat of [`SegmentAnimations::chevrons`], in widths of the
 /// ribbon ([`Chevrons::width`], the thickness of the segment line): the blocks
 /// are as tall as the line and their spacing follows from that, so the shape
 /// is the same whatever the line width or the zoom.
@@ -133,22 +134,22 @@ pub const GLOW_PERIOD: f32 = 2.5;
 /// With [`CHEVRON_FILL`] and [`CHEVRON_TIP_DEPTH`] the gap between two
 /// chevrons is as long as a chevron (about 2.2 widths each).
 pub const CHEVRON_PERIOD: f32 = 4.5;
-/// How many repeats of the chevron pattern [`Animation::chevrons`] slides
+/// How many repeats of the chevron pattern [`SegmentAnimations::chevrons`] slides
 /// through per second. With the default line width (2 pixels) that is
 /// 18 pixels per second, a little faster than [`DASH_SPEED`]'s marching ants.
 pub const CHEVRON_SPEED: f32 = 2.0;
-/// How much of the period each [`Animation::chevrons`] block occupies along
+/// How much of the period each [`SegmentAnimations::chevrons`] block occupies along
 /// the segment, see [`Chevrons::fill`]; the rest is the gap to the next one.
 /// Together with [`CHEVRON_TIP_DEPTH`] the whole chevron is a little under
 /// half the period, so the gap is at least as long as the chevron.
 pub const CHEVRON_FILL: f32 = 0.38;
-/// How deep the point of each [`Animation::chevrons`] block is, as a fraction
+/// How deep the point of each [`SegmentAnimations::chevrons`] block is, as a fraction
 /// of the ribbon width, see [`Chevrons::tip_depth`]. A half makes the edges
 /// 45 degrees to the segment.
 pub const CHEVRON_TIP_DEPTH: f32 = 0.5;
 /// Radius, in screen pixels at `zoom == 1`, of the dot of
-/// [`Animation::comet`] and [`Animation::comet_once`]: the width of the
-/// stroke [`Animation::wipe`] draws (`Wipe::width`), so the dot reads as a
+/// [`SegmentAnimations::comet`] and [`SegmentAnimations::comet_once`]: the width of the
+/// stroke [`SegmentAnimations::wipe`] draws (`Wipe::width`), so the dot reads as a
 /// bead on the line rather than a blob over it.
 pub const COMET_DOT_RADIUS: f32 = 2.5;
 /// Floor for [`COMET_DOT_RADIUS`], in screen pixels.
@@ -1539,42 +1540,42 @@ impl SegmentAnimations {
     // -------------------------------------------------------- events/segment
 
     /// The event effect for a segment `kind`, bound to this `SegmentAnimations`'
-    /// tunables. Call it with `(painter, from, to, zoom, initial_time, color)`.
+    /// tunables. Call it with `(painter, path, zoom, initial_time, color)`.
     ///
-    /// The effect runs from `from` towards `to`: to run it in a
-    /// [`CometDirection`](super::objects::CometDirection), get the pair from
-    /// [`CometDirection::orient`](super::objects::CometDirection::orient).
+    /// The effect runs along `path` from its start to its end, following the
+    /// curve when the line is bent: to run it in a
+    /// [`CometDirection`](super::objects::CometDirection), get the path from
+    /// [`CometDirection::orient_path`](super::objects::CometDirection::orient_path).
     pub fn event(
         &self,
         kind: SegmentAnimation,
-    ) -> impl Fn(&Painter, Pos2, Pos2, f32, Instant, Color32) -> bool + 'static {
+    ) -> impl Fn(&Painter, SegmentPath, f32, Instant, Color32) -> bool + 'static {
         let a = *self;
-        move |painter, from, to, zoom, initial_time, color| match kind {
-            SegmentAnimation::FlashDecay => {
-                a.flash_decay(painter, from, to, zoom, initial_time, color)
-            }
-            SegmentAnimation::Comet => a.comet_once(painter, [from, to], zoom, initial_time, color),
-            SegmentAnimation::Wipe => a.wipe(painter, from, to, zoom, initial_time, color),
+        move |painter, path, zoom, initial_time, color| match kind {
+            SegmentAnimation::FlashDecay => a.flash_decay(painter, path, zoom, initial_time, color),
+            SegmentAnimation::Comet => a.comet_once(painter, path, zoom, initial_time, color),
+            SegmentAnimation::Wipe => a.wipe(painter, path, zoom, initial_time, color),
         }
     }
 
     /// The persistent effect for a segment `kind`, bound to this
     /// `SegmentAnimations`' tunables. Call it with
-    /// `(painter, from, to, zoom, time, color)`.
+    /// `(painter, path, zoom, time, color)`.
     ///
-    /// The effect runs from `from` towards `to`: to run it in a
-    /// [`CometDirection`](super::objects::CometDirection), get the pair from
-    /// [`CometDirection::orient`](super::objects::CometDirection::orient).
+    /// The effect runs along `path` from its start to its end, following the
+    /// curve when the line is bent: to run it in a
+    /// [`CometDirection`](super::objects::CometDirection), get the path from
+    /// [`CometDirection::orient_path`](super::objects::CometDirection::orient_path).
     pub fn state(
         &self,
         kind: SteadySegmentAnimation,
-    ) -> impl Fn(&Painter, Pos2, Pos2, f32, f32, Color32) + 'static {
+    ) -> impl Fn(&Painter, SegmentPath, f32, f32, Color32) + 'static {
         let a = *self;
-        move |painter, from, to, zoom, time, color| match kind {
-            SteadySegmentAnimation::Comet => a.comet(painter, from, to, zoom, time, color),
-            SteadySegmentAnimation::Dash => a.dash(painter, from, to, zoom, time, color),
-            SteadySegmentAnimation::GlowBand => a.glow_band(painter, from, to, zoom, time, color),
-            SteadySegmentAnimation::Chevrons => a.chevrons(painter, from, to, zoom, time, color),
+        move |painter, path, zoom, time, color| match kind {
+            SteadySegmentAnimation::Comet => a.comet(painter, path, zoom, time, color),
+            SteadySegmentAnimation::Dash => a.dash(painter, path, zoom, time, color),
+            SteadySegmentAnimation::GlowBand => a.glow_band(painter, path, zoom, time, color),
+            SteadySegmentAnimation::Chevrons => a.chevrons(painter, path, zoom, time, color),
         }
     }
 
@@ -1587,8 +1588,7 @@ impl SegmentAnimations {
     pub fn flash_decay(
         &self,
         painter: &Painter,
-        a: Pos2,
-        b: Pos2,
+        path: SegmentPath,
         zoom: f32,
         initial_time: Instant,
         color: Color32,
@@ -1597,34 +1597,32 @@ impl SegmentAnimations {
         let progress = (secs / self.flash_decay.duration).clamp(0.0, 1.0);
         let width =
             (self.flash_decay.base_width + self.flash_decay.extra_width * (1.0 - progress)) * zoom;
-        painter.line_segment(
-            [a, b],
-            Stroke::new(width, with_alpha(color, 1.0 - progress)),
-        );
+        painter.add(path.stroke_shape(Stroke::new(width, with_alpha(color, 1.0 - progress))));
         secs < self.flash_decay.duration
     }
 
     /// One frame of a single dot pass along the segment, then gone — the
     /// event-driven counterpart to [`SegmentAnimations::comet`].
     ///
-    /// `endpoints` is `[from, to]`, already oriented the way the dot should
-    /// travel: the caller resolves a [`CometDirection`](super::objects::CometDirection)
-    /// into that pair with
-    /// [`CometDirection::orient`](super::objects::CometDirection::orient).
-    /// Plays for
+    /// `path` is already oriented the way the dot should travel: the caller
+    /// resolves a [`CometDirection`](super::objects::CometDirection) into it
+    /// with
+    /// [`CometDirection::orient_path`](super::objects::CometDirection::orient_path).
+    /// The dot follows the path at a constant speed, around the bend when the
+    /// line is curved. Plays for
     /// [`CometOnce::duration`]. Returns `true` while still playing.
     pub fn comet_once(
         &self,
         painter: &Painter,
-        endpoints: [Pos2; 2],
+        path: SegmentPath,
         zoom: f32,
         initial_time: Instant,
         color: Color32,
     ) -> bool {
-        let [from, to] = endpoints;
         let secs = elapsed(initial_time);
         let progress = (secs / self.comet_once.duration).clamp(0.0, 1.0);
-        let pos = from + (to - from) * progress;
+        let polyline = path.polyline();
+        let pos = polyline.point_at_distance(polyline.length() * progress);
         painter.add(Shape::Circle(CircleShape::filled(
             pos,
             (self.comet_once.dot_radius * zoom).max(self.comet_once.dot_min),
@@ -1642,13 +1640,13 @@ impl SegmentAnimations {
     /// `true` while still playing.
     ///
     /// Cheaper than the mesh technique [`SegmentAnimations::dash`] uses: the
-    /// progressively-revealed portion is still just a straight line, so a
-    /// plain `line_segment` from `a` to the interpolated point suffices.
+    /// progressively-revealed portion is just a stroke, a plain
+    /// `line_segment` on a straight line and the stretch of the curve
+    /// between the two edges on a curved one.
     pub fn wipe(
         &self,
         painter: &Painter,
-        a: Pos2,
-        b: Pos2,
+        path: SegmentPath,
         zoom: f32,
         initial_time: Instant,
         color: Color32,
@@ -1656,27 +1654,40 @@ impl SegmentAnimations {
         let Some((start, end)) = self.wipe.coloured_span(elapsed(initial_time)) else {
             return false;
         };
-        // Coloured between two edges that both travel from `a` to `b`: the
-        // leading one draws the line in, the trailing one wipes it out.
-        let delta = b - a;
+        // Coloured between two edges that both travel from the start of the
+        // path to its end: the leading one draws the line in, the trailing
+        // one wipes it out.
         if end > start {
-            painter.line_segment(
-                [a + delta * start, a + delta * end],
+            let polyline = path.polyline();
+            let length = polyline.length();
+            painter.add(polyline.slice_shape(
+                length * start,
+                length * end,
                 Stroke::new(self.wipe.width * zoom, color),
-            );
+            ));
         }
         true
     }
 
     // ----------------------------------------------------- persistent/segment
 
-    /// One frame of a dot travelling from `a` to `b` and looping back.
+    /// One frame of a dot travelling along `path` from its start to its end
+    /// and looping back, at a constant speed whether the line is straight or
+    /// curved.
     ///
     /// Reads as *"this is the direction of flow"*. `time` is the frame time in
     /// seconds; one full pass takes [`Comet::period`].
-    pub fn comet(&self, painter: &Painter, a: Pos2, b: Pos2, zoom: f32, time: f32, color: Color32) {
+    pub fn comet(
+        &self,
+        painter: &Painter,
+        path: SegmentPath,
+        zoom: f32,
+        time: f32,
+        color: Color32,
+    ) {
         let t = (time / self.comet.period).rem_euclid(1.0);
-        let pos = a + (b - a) * t;
+        let polyline = path.polyline();
+        let pos = polyline.point_at_distance(polyline.length() * t);
         painter.add(Shape::Circle(CircleShape::filled(
             pos,
             (self.comet.dot_radius * zoom).max(self.comet.dot_min),
@@ -1699,50 +1710,32 @@ impl SegmentAnimations {
     /// per [`egui::Context`] and reused after that), rather than one shape per
     /// dash -- see the [module docs](self) for why that matters at scale. A
     /// zero-length segment is skipped.
-    pub fn dash(&self, painter: &Painter, a: Pos2, b: Pos2, _zoom: f32, time: f32, color: Color32) {
-        let delta = b - a;
-        let len = delta.length();
-        if len <= f32::EPSILON {
+    pub fn dash(
+        &self,
+        painter: &Painter,
+        path: SegmentPath,
+        _zoom: f32,
+        time: f32,
+        color: Color32,
+    ) {
+        let polyline = path.polyline();
+        if polyline.length() <= f32::EPSILON {
             return;
         }
-        let dir = delta / len;
         let width = self.dash.width.unwrap_or(DASH_WIDTH);
-        let normal = Vec2::new(-dir.y, dir.x) * (width * 0.5);
         // Sampling a fixed screen point at an ever-larger `u` (`phase` growing
         // with time) makes the pattern crawl towards `a`, against `comet`,
         // `glow_band` and `chevrons`, which all go from `a` to `b`: negating
         // the time term makes it slide towards `b` like them (see
         // `chevrons`).
         let phase = (-(time * self.dash.speed)).rem_euclid(1.0);
-        let u0 = phase;
-        let u1 = phase + len / self.dash.period_px;
 
         let texture = Self::dash_texture(painter.ctx());
-        let mut mesh = Mesh::with_texture(texture.id());
-        mesh.vertices.extend([
-            Vertex {
-                pos: a + normal,
-                uv: pos2(u0, 0.5),
-                color,
-            },
-            Vertex {
-                pos: a - normal,
-                uv: pos2(u0, 0.5),
-                color,
-            },
-            Vertex {
-                pos: b + normal,
-                uv: pos2(u1, 0.5),
-                color,
-            },
-            Vertex {
-                pos: b - normal,
-                uv: pos2(u1, 0.5),
-                color,
-            },
-        ]);
-        mesh.indices.extend([0, 1, 2, 2, 1, 3]);
-        painter.add(mesh);
+        painter.add(
+            polyline.ribbon(texture.id(), width * 0.5, color, |distance, _side| {
+                pos2(phase + distance / self.dash.period_px, 0.5)
+            }),
+        );
     }
 
     /// Returns the texture [`SegmentAnimations::dash`] samples, creating and
@@ -1814,19 +1807,16 @@ impl SegmentAnimations {
     pub fn glow_band(
         &self,
         painter: &Painter,
-        a: Pos2,
-        b: Pos2,
+        path: SegmentPath,
         _zoom: f32,
         time: f32,
         color: Color32,
     ) {
-        let delta = b - a;
-        let len = delta.length();
+        let polyline = path.polyline();
+        let len = polyline.length();
         if len <= f32::EPSILON {
             return;
         }
-        let dir = delta / len;
-        let normal = Vec2::new(-dir.y, dir.x) * (self.glow_band.thickness * 0.5);
 
         // Half-width of the visible band, as a fraction of the segment's own
         // length -- capped at 0.5 so the band can never cover more than the
@@ -1841,33 +1831,12 @@ impl SegmentAnimations {
         let texture_u = |frac: f32| 0.5 + (frac - peak) / (2.0 * half_width_frac);
 
         let texture = Self::glow_band_texture(painter.ctx());
-        let mut mesh = Mesh::with_texture(texture.id());
-        let u_a = texture_u(0.0);
-        let u_b = texture_u(1.0);
-        mesh.vertices.extend([
-            Vertex {
-                pos: a + normal,
-                uv: pos2(u_a, 0.5),
-                color,
-            },
-            Vertex {
-                pos: a - normal,
-                uv: pos2(u_a, 0.5),
-                color,
-            },
-            Vertex {
-                pos: b + normal,
-                uv: pos2(u_b, 0.5),
-                color,
-            },
-            Vertex {
-                pos: b - normal,
-                uv: pos2(u_b, 0.5),
-                color,
-            },
-        ]);
-        mesh.indices.extend([0, 1, 2, 2, 1, 3]);
-        painter.add(mesh);
+        painter.add(polyline.ribbon(
+            texture.id(),
+            self.glow_band.thickness * 0.5,
+            color,
+            |distance, _side| pos2(texture_u(distance / len), 0.5),
+        ));
     }
 
     /// Returns the texture [`SegmentAnimations::glow_band`] samples, creating
@@ -1933,20 +1902,16 @@ impl SegmentAnimations {
     pub fn chevrons(
         &self,
         painter: &Painter,
-        a: Pos2,
-        b: Pos2,
+        path: SegmentPath,
         _zoom: f32,
         time: f32,
         color: Color32,
     ) {
-        let delta = b - a;
-        let len = delta.length();
-        if len <= f32::EPSILON {
+        let polyline = path.polyline();
+        if polyline.length() <= f32::EPSILON {
             return;
         }
-        let dir = delta / len;
         let width = self.chevrons.width.unwrap_or(DASH_WIDTH);
-        let normal = Vec2::new(-dir.y, dir.x) * (width * 0.5);
         // `u0 < u1` (below) maps the texture's own +u direction onto the
         // segment's `a -> b` direction, and the arrow tip sits at the
         // texture's higher `u` (see `chevrons_texture`) -- so in any single
@@ -1958,39 +1923,17 @@ impl SegmentAnimations {
         // keeps the two in agreement.
         let (period, fill) = self.chevrons.layout();
         let phase = (-(time * self.chevrons.speed)).rem_euclid(1.0);
-        let u0 = phase;
-        let u1 = phase + len / (period * width);
 
         // How far the edges of a block sweep back from its tip, in fractions
         // of the period per unit of ribbon width: `tip_depth` ribbon widths
         // over a period of `period` ribbon widths.
         let leg_slope = 2.0 * self.chevrons.tip_depth / period;
         let texture = Self::chevrons_texture(painter.ctx(), leg_slope, fill);
-        let mut mesh = Mesh::with_texture(texture.id());
-        mesh.vertices.extend([
-            Vertex {
-                pos: a + normal,
-                uv: pos2(u0, 0.0),
-                color,
-            },
-            Vertex {
-                pos: a - normal,
-                uv: pos2(u0, 1.0),
-                color,
-            },
-            Vertex {
-                pos: b + normal,
-                uv: pos2(u1, 0.0),
-                color,
-            },
-            Vertex {
-                pos: b - normal,
-                uv: pos2(u1, 1.0),
-                color,
-            },
-        ]);
-        mesh.indices.extend([0, 1, 2, 2, 1, 3]);
-        painter.add(mesh);
+        painter.add(
+            polyline.ribbon(texture.id(), width * 0.5, color, |distance, side| {
+                pos2(phase + distance / (period * width), side)
+            }),
+        );
     }
 
     /// Returns the texture [`SegmentAnimations::chevrons`] samples, creating
@@ -2478,13 +2421,25 @@ mod tests {
         for (name, kind, duration) in segment_event_effects() {
             let effect = animation.event(kind);
             assert!(
-                effect(&painter, a, b, 1.0, Instant::now(), Color32::RED),
+                effect(
+                    &painter,
+                    SegmentPath::line(a, b),
+                    1.0,
+                    Instant::now(),
+                    Color32::RED
+                ),
                 "{name} must report it is still running when it just started"
             );
 
             let long_past = Instant::now() - Duration::from_secs_f32(duration + 1.0);
             assert!(
-                !effect(&painter, a, b, 1.0, long_past, Color32::RED),
+                !effect(
+                    &painter,
+                    SegmentPath::line(a, b),
+                    1.0,
+                    long_past,
+                    Color32::RED
+                ),
                 "{name} must report it is finished once its duration has passed"
             );
         }
@@ -2507,7 +2462,7 @@ mod tests {
         let a = Pos2::ZERO;
         let b = Pos2::new(50.0, 0.0);
         for time in [0.0, 0.4, 0.8, 60.0] {
-            animation.comet(&painter, a, b, 1.0, time, Color32::GREEN);
+            animation.comet(&painter, SegmentPath::line(a, b), 1.0, time, Color32::GREEN);
         }
     }
 
@@ -2530,13 +2485,25 @@ mod tests {
         let a = Pos2::ZERO;
         let b = Pos2::new(50.0, 0.0);
         assert!(
-            animation.comet_once(&painter, [a, b], 1.0, Instant::now(), Color32::RED,),
+            animation.comet_once(
+                &painter,
+                SegmentPath::line(a, b),
+                1.0,
+                Instant::now(),
+                Color32::RED,
+            ),
             "comet_once must report it is still running when it just started"
         );
 
         let long_past = Instant::now() - Duration::from_secs_f32(COMET_TRAVEL_DURATION + 1.0);
         assert!(
-            !animation.comet_once(&painter, [a, b], 1.0, long_past, Color32::RED,),
+            !animation.comet_once(
+                &painter,
+                SegmentPath::line(a, b),
+                1.0,
+                long_past,
+                Color32::RED,
+            ),
             "comet_once must report it is finished once its duration has passed"
         );
     }
@@ -2556,7 +2523,7 @@ mod tests {
     fn comet_once_direction_picks_the_starting_endpoint() {
         // The dot must sit on the starting endpoint at the very start --
         // `a` for `Forward`, `b` for `Reverse` -- not partway along the
-        // segment. The direction is resolved by `CometDirection::orient`,
+        // segment. The direction is resolved by `CometDirection::orient_path`,
         // which is what `map.rs` and templates go through before calling the
         // `event` dispatcher, so drive it the same way and read the circle's
         // center back out.
@@ -2571,11 +2538,9 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    let (from, to) = direction.orient(a, b);
                     animation.event(SegmentAnimation::Comet)(
                         ui.painter(),
-                        from,
-                        to,
+                        direction.orient_path(SegmentPath::line(a, b)),
                         1.0,
                         Instant::now(),
                         Color32::RED,
@@ -2836,11 +2801,11 @@ mod tests {
         let a = Pos2::ZERO;
         let b = Pos2::new(50.0, 0.0);
         for time in [0.0, 0.4, 0.8, 60.0] {
-            animation.dash(&painter, a, b, 1.0, time, Color32::GREEN);
+            animation.dash(&painter, SegmentPath::line(a, b), 1.0, time, Color32::GREEN);
         }
         // A degenerate (zero-length) segment must not panic -- the
         // direction/normal math divides by the segment's length.
-        animation.dash(&painter, a, a, 1.0, 0.0, Color32::GREEN);
+        animation.dash(&painter, SegmentPath::line(a, a), 1.0, 0.0, Color32::GREEN);
     }
 
     #[test]
@@ -2860,11 +2825,11 @@ mod tests {
         let a = Pos2::ZERO;
         let b = Pos2::new(50.0, 0.0);
         for time in [0.0, 0.4, 0.8, 60.0] {
-            animation.glow_band(&painter, a, b, 1.0, time, Color32::GREEN);
+            animation.glow_band(&painter, SegmentPath::line(a, b), 1.0, time, Color32::GREEN);
         }
         // A degenerate (zero-length) segment must not panic -- the
         // direction/normal math divides by the segment's length.
-        animation.glow_band(&painter, a, a, 1.0, 0.0, Color32::GREEN);
+        animation.glow_band(&painter, SegmentPath::line(a, a), 1.0, 0.0, Color32::GREEN);
     }
 
     #[test]
@@ -2882,9 +2847,9 @@ mod tests {
         let a = Pos2::ZERO;
         let b = Pos2::new(50.0, 0.0);
         for time in [0.0, 0.4, 0.8, 60.0] {
-            animation.chevrons(&painter, a, b, 1.0, time, Color32::GREEN);
+            animation.chevrons(&painter, SegmentPath::line(a, b), 1.0, time, Color32::GREEN);
         }
-        animation.chevrons(&painter, a, a, 1.0, 0.0, Color32::GREEN);
+        animation.chevrons(&painter, SegmentPath::line(a, a), 1.0, 0.0, Color32::GREEN);
     }
 
     /// The `leg_slope` the default tunables give `chevrons`.
@@ -3089,8 +3054,7 @@ mod tests {
         // `event` selects by kind and reports running state.
         assert!(animation.event(SegmentAnimation::Wipe)(
             &painter,
-            a,
-            b,
+            SegmentPath::line(a, b),
             1.0,
             Instant::now(),
             Color32::RED
@@ -3104,14 +3068,19 @@ mod tests {
         let past = Instant::now() - Duration::from_secs_f32(1.0);
         assert!(!quick.event(SegmentAnimation::Wipe)(
             &painter,
-            a,
-            b,
+            SegmentPath::line(a, b),
             1.0,
             past,
             Color32::RED
         ));
         // `state` selects by kind too.
-        animation.state(SteadySegmentAnimation::Dash)(&painter, a, b, 1.0, 0.0, Color32::GREEN);
+        animation.state(SteadySegmentAnimation::Dash)(
+            &painter,
+            SegmentPath::line(a, b),
+            1.0,
+            0.0,
+            Color32::GREEN,
+        );
     }
 
     /// Half the width of the ribbon `animation` draws for a horizontal
@@ -3122,8 +3091,7 @@ mod tests {
         ribbon_half_width(|painter| {
             animation.dash(
                 painter,
-                Pos2::ZERO,
-                Pos2::new(50.0, 0.0),
+                SegmentPath::line(Pos2::ZERO, Pos2::new(50.0, 0.0)),
                 zoom,
                 0.0,
                 Color32::GREEN,
@@ -3136,8 +3104,7 @@ mod tests {
         ribbon_half_width(|painter| {
             animation.chevrons(
                 painter,
-                Pos2::ZERO,
-                Pos2::new(50.0, 0.0),
+                SegmentPath::line(Pos2::ZERO, Pos2::new(50.0, 0.0)),
                 zoom,
                 0.0,
                 Color32::GREEN,
@@ -3150,8 +3117,7 @@ mod tests {
         ribbon_half_width(|painter| {
             animation.glow_band(
                 painter,
-                Pos2::ZERO,
-                Pos2::new(50.0, 0.0),
+                SegmentPath::line(Pos2::ZERO, Pos2::new(50.0, 0.0)),
                 zoom,
                 0.0,
                 Color32::GREEN,
@@ -3247,8 +3213,7 @@ mod tests {
                 |ui| {
                     animation.state(kind)(
                         ui.painter(),
-                        Pos2::ZERO,
-                        Pos2::new(50.0, 0.0),
+                        SegmentPath::line(Pos2::ZERO, Pos2::new(50.0, 0.0)),
                         1.0,
                         time,
                         Color32::GREEN,
