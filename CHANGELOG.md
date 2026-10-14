@@ -10,6 +10,39 @@ any minor bump may include breaking changes, called out below as such).
 
 ### Added
 
+- Curved connection lines, mixed with straight ones on the same map. Whether
+  a `MapSegment` is straight or a curve is decided when it is built:
+  `MapSegment::straight` (what `MapSegment::new` is) or
+  `MapSegment::curved(id, point1, point2, Option<f32>)`, where `Some` bends it
+  by its own amount and `None` by `MapSettings::default_curvature`. Only the
+  amount of a curve can change afterwards, with
+  `MapSegment::set_curvature(Option<f32>)`, which leaves a straight line as it
+  is and returns `false`. `MapSegment::shape()` is the `LineShape` (`Straight`
+  or `Curved(Option<f32>)`). `MapSettings::default_curvature` (`0.25` by
+  default) applies only to the curves that have no amount of their own; it
+  never touches a straight line. A curve is a quadratic Bézier whose control
+  point is that fraction of the distance between the endpoints away from the
+  middle of the line, clamped to `-1.0..=1.0`; positive bends a line to the
+  right of the way from its first node to its second, negative to the left, so
+  two opposite connections between the same pair of nodes can be told apart.
+  The segment effects (`flash`, `comet`, `comet_once`, `wipe`, `dash`,
+  `glow_band` and `chevrons`) follow the curve, `Map::line_at` measures
+  against it and the minimap draws it. The new `map::path` module has the
+  `SegmentPath` they travel along (`SegmentPath::line`, `SegmentPath::curved`)
+  and the `Polyline` it flattens to. The viewport culling allows for a curve
+  bowing out of the bounding box of its endpoints, and is unchanged while no
+  line is curved. **Breaking:** the built-in segment effects
+  (`SegmentAnimations::flash_decay`, `comet_once`, `wipe`, `comet`, `dash`,
+  `glow_band`, `chevrons`) and the closures `SegmentAnimations::event` and
+  `state` return take a `SegmentPath` where they took the two endpoints
+  (`SegmentPath::line(a, b)` is the straight equivalent), and
+  `CometDirection::orient_path` is the `SegmentPath` counterpart of `orient`.
+  `SegmentContext`, `SegmentNotificationContext` and `SegmentStateContext`
+  gain a `path` field (`pos_a` and `pos_b` are still its ends), `MapSegment`
+  gains a private `shape` field, so it can no longer be built with a struct
+  literal (use `MapSegment::new`, `straight` or `curved`), and `MapSettings`
+  gains the public `default_curvature` one: code that builds it with a struct
+  literal and no `..Default::default()` needs to add it.
 - An optional minimap: a small overview of the whole map pinned to a corner,
   with the part the main view shows outlined on it. Pressing or dragging
   inside it recentres the main view, and the main map does not pan underneath
@@ -209,6 +242,12 @@ any minor bump may include breaking changes, called out below as such).
   `examples/basic.rs`, plus *Forward*/*Reverse* radio buttons that set the
   direction of every segment effect that has one. The timers are one generic
   repeater instead of one per kind of effect.
+- The written text of the two tutorials moved out of the README into their own
+  files, `docs/tutorial-1-first-map.md` and `docs/tutorial-2-node-template.md`.
+  The README now has a "Tutorials" section that only links them; the headers of
+  `examples/tutorial_map.rs` and `examples/tutorial_node_template.rs` and the
+  `map` module docs point to the files. "Configuring the map" and the other
+  guides stay in the README.
 
 ### Fixed
 
@@ -244,6 +283,24 @@ any minor bump may include breaking changes, called out below as such).
 - Region labels are laid out again when `pixels_per_point` changes (the
   window moved to a screen with another scale): the cached galleys were
   reused at the old scale, drawn blurry and made epaint warn on every frame.
+- Documentation that had fallen behind the code:
+  - The README's dependency line said `egui-map = "0.0"`, which Cargo resolves
+    to a `0.0.x` release; it now tells readers to run `cargo add egui-map`,
+    which always picks the latest release and cannot go stale.
+  - The README's `SegmentTemplate` example would not compile: it took the
+    segment effects from `Animation` (they live in `SegmentAnimations`) and
+    drew between `pos_a` and `pos_b`. It now dispatches through
+    `ctx.animation.event(ctx.kind)` / `ctx.animation.state(ctx.kind)` and draws
+    along `ctx.path`. The glow example called `Animation::glow` as an
+    associated function (it is `ctx.animation.glow(..)`), and its rustdoc-only
+    `#` lines showed on GitHub; both are fixed. The region labels pointed at
+    `examples/svg_template.rs`, which has none; it is `examples/animations.rs`.
+  - The rustdoc of `map::animation` and its constants linked to
+    `Animation::flash_decay`, `comet_once`, `wipe`, `comet`, `dash`,
+    `glow_band` and `chevrons`, which are methods of `SegmentAnimations`: 34
+    broken links, so `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps` failed.
+    The docs of `SegmentTemplate`, its contexts and `SegmentAnimation` sent
+    readers to `Animation` for the effects too.
 
 ## [0.9.5] - 2026-09-25
 

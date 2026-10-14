@@ -55,12 +55,41 @@
 //! ```
 //!
 //! A line is only drawn while the zoom level is above
-//! [`MapSettings::line_visible_zoom`] and its bounding box intersects the
-//! viewport; how it fades in above that zoom is [`MapSettings::line_fade`],
-//! and with [`LineFade::None`](objects::LineFade::None) there is no threshold.
+//! [`MapSettings::line_visible_zoom`] and it intersects the viewport (a curve
+//! is allowed to bow out of the box around its two ends); how it fades in
+//! above that zoom is [`MapSettings::line_fade`], and with
+//! [`LineFade::None`](objects::LineFade::None) there is no threshold.
 //! Segments are culled broad-phase with an R-tree built by
 //! [`Map::add_lines`], so long lines crossing the view are drawn even when
 //! both endpoints lie outside of it.
+//!
+//! ## Straight and curved lines
+//!
+//! A [`MapSegment`] is either a straight line or a curve, and which one is
+//! decided when it is built: [`MapSegment::straight`] (what
+//! [`MapSegment::new`] is) or [`MapSegment::curved`]. A map can mix them. A
+//! curve can carry a curvature of its own, or leave it to
+//! [`MapSettings::default_curvature`], which never touches a straight line.
+//! The segment effects, [`Map::line_at`] and the minimap follow the curve.
+//!
+//! ```
+//! use egui_map::map::Map;
+//! use egui_map::map::objects::MapSegment;
+//!
+//! let mut map = Map::new();
+//! // How much the curves that do not say otherwise bow out, as a fraction
+//! // of the distance between their two nodes.
+//! map.settings.default_curvature = 0.25;
+//!
+//! map.add_lines(vec![
+//!     // Straight.
+//!     MapSegment::straight((1, 2), [0.0, 0.0], [100.0, 0.0]),
+//!     // A curve bent by `default_curvature`.
+//!     MapSegment::curved((2, 3), [100.0, 0.0], [200.0, 50.0], None),
+//!     // A curve with a bend of its own; negative bends it the other way.
+//!     MapSegment::curved((3, 1), [200.0, 50.0], [0.0, 0.0], Some(-0.4)),
+//! ]);
+//! ```
 //!
 //! ## Tutorials
 //!
@@ -71,7 +100,9 @@
 //!    by a [`NodeTemplate`] (boxes with the name inside).
 //!
 //! Run them with `cargo run --example tutorial_map` and
-//! `cargo run --example tutorial_node_template`.
+//! `cargo run --example tutorial_node_template`. Each one has a written
+//! walkthrough of its steps in `docs/tutorial-1-first-map.md` and
+//! `docs/tutorial-2-node-template.md`, linked from the README.
 //!
 //! ## Configuring the map
 //!
@@ -108,6 +139,12 @@
 //! // that wide times the zoom: 4 px at 200%, 1 px at 50%. `None` turns the
 //! // built-in line off, for when a `SegmentTemplate` draws them.
 //! map.settings.style.line_width = Some(2.0);
+//!
+//! // -- Curved lines ------------------------------------------------------------
+//! // How much the curved lines that do not carry a curvature of their own bow
+//! // out, as a fraction of the distance between their nodes. Straight lines
+//! // are not affected.
+//! map.settings.default_curvature = 0.25;
 //!
 //! // -- Names ------------------------------------------------------------------
 //! // `Always` (needs `label_visible_zoom` to be reached), `Hover` or `Hidden`.
@@ -171,12 +208,13 @@
 //! you only want to reuse the built-in look.
 
 use crate::map::objects::{
-    CometDirection, ContextMenuManager, HitContext, LabelContext, MapBounds, MapLabel, MapPoint,
-    MapSegment, MapSettings, MarkerContext, NodeAnimation, NodeContext, NotificationContext,
-    RawLine, RawPoint, RegionLabel, SegmentAnimation, SegmentContext, SegmentNotificationContext,
-    SegmentStateContext, SelectionContext, SteadyAnimation, SteadySegmentAnimation, TextSettings,
-    VisibilitySetting,
+    CometDirection, ContextMenuManager, HitContext, LabelContext, LineShape, MapBounds, MapLabel,
+    MapPoint, MapSegment, MapSettings, MarkerContext, NodeAnimation, NodeContext,
+    NotificationContext, RawLine, RawPoint, RegionLabel, SegmentAnimation, SegmentContext,
+    SegmentNotificationContext, SegmentStateContext, SelectionContext, SteadyAnimation,
+    SteadySegmentAnimation, TextSettings, VisibilitySetting,
 };
+use crate::map::path::SegmentPath;
 use crate::map::theme::{ColorMode, MapTheme, Theme, ThemeColors};
 use egui::text::Galley;
 use egui::{widgets::*, *};
@@ -197,6 +235,7 @@ pub mod minimap;
 pub mod objects;
 pub mod outline;
 pub mod overlay;
+pub mod path;
 pub mod slider;
 pub mod theme;
 
@@ -311,6 +350,9 @@ pub struct Map {
     /// [`Map::segment`] can check whether an id exists in O(1) instead of
     /// scanning it.
     segment_ids: HashSet<(usize, usize)>,
+    /// How far the lines can bow out of the bounding boxes the R-tree
+    /// indexes them by, see [`SegmentReach`].
+    segment_reach: SegmentReach,
     min_size: (Option<f32>, Option<f32>),
     max_size: (Option<f32>, Option<f32>),
     /// Behavior and appearance configuration (zoom limits, visibility
@@ -884,6 +926,58 @@ struct NodePassOutput {
     needs_repaint: bool,
 }
 
+/// How far a curved line can reach beyond the bounding box of its endpoints,
+/// which is what the segment R-tree indexes the lines by.
+///
+/// A curve never leaves the hull of its endpoints and its control point, and
+/// the control point sits `curvature * chord` from the line between the
+/// endpoints, so that is the most a line can bow out. Straight lines reach
+/// nothing, so a map without curves queries the tree exactly as it always
+/// did, whatever [`MapSettings::default_curvature`] says.
+///
+/// Kept as two numbers gathered once when the lines are loaded, because the
+/// default curvature is a public field that can change at any time without
+/// the tree knowing: the furthest any segment with a curvature of its *own*
+/// reaches, and the longest chord among the curves that use the *default*
+/// one. [`SegmentReach::at`] combines them with the default in force.
+#[derive(Clone, Copy, Debug, Default)]
+struct SegmentReach {
+    /// The longest distance between the two endpoints of any curve that has
+    /// no curvature of its own, in map units.
+    longest_default_chord: f32,
+    /// The furthest any curve with a curvature of its own reaches, in map
+    /// units.
+    own: f32,
+}
+
+impl SegmentReach {
+    /// The reach of `segments`.
+    fn of(segments: &[MapSegment]) -> Self {
+        let mut reach = Self::default();
+        for segment in segments {
+            let chord = segment.raw_line().distance();
+            match segment.shape {
+                LineShape::Straight => {}
+                LineShape::Curved(None) => {
+                    reach.longest_default_chord = reach.longest_default_chord.max(chord);
+                }
+                LineShape::Curved(Some(curvature)) => {
+                    let curvature = curvature.abs().min(SegmentPath::MAX_CURVATURE);
+                    reach.own = reach.own.max(curvature * chord);
+                }
+            }
+        }
+        reach
+    }
+
+    /// The furthest, in map units, any line reaches out of its bounding box
+    /// when the curves without a curvature of their own use `default`.
+    fn at(&self, default: f32) -> f32 {
+        let default = default.abs().min(SegmentPath::MAX_CURVATURE);
+        self.own.max(default * self.longest_default_chord)
+    }
+}
+
 impl Map {
     /// Creates an empty map widget with default [`MapSettings`].
     ///
@@ -921,6 +1015,7 @@ impl Map {
             hovered_node: None,
             outline_reach: std::cell::Cell::new(0.0),
             segments: None,
+            segment_reach: SegmentReach::default(),
             theme: Rc::new(Theme::default()),
         }
     }
@@ -1199,9 +1294,10 @@ impl Map {
     /// Lines are keyed by a connection id that the endpoint nodes must
     /// reference through [`MapPoint::connections`] — push each line's key into
     /// the `connections` of the nodes it joins. The segments are stored in an
-    /// R-tree keyed by bounding box: a line is drawn while its bounding box
-    /// intersects the viewport and the zoom level is above
-    /// [`MapSettings::line_visible_zoom`].
+    /// R-tree keyed by the bounding box of their endpoints: a line is drawn
+    /// while it intersects the viewport and the zoom level is above
+    /// [`MapSettings::line_visible_zoom`]. A curved line (see
+    /// [`MapSegment::shape`]) bows out of that box, which the viewport culling allows for.
     ///
     /// See the [module-level example](self#connecting-nodes-with-lines) for
     /// the complete wiring.
@@ -1212,6 +1308,7 @@ impl Map {
         // discard whole regions without touching every segment.
 
         self.segment_ids = segments.iter().map(|s| s.id).collect();
+        self.segment_reach = SegmentReach::of(&segments);
         self.segments = Some(rstar::RTree::bulk_load(segments));
     }
 
@@ -1227,6 +1324,7 @@ impl Map {
         let _span = tracing::info_span!("add_hashmap_lines").entered();
         let segments: Vec<MapSegment> = segments.into_values().collect();
         self.segment_ids = segments.iter().map(|s| s.id).collect();
+        self.segment_reach = SegmentReach::of(&segments);
         self.segments = Some(rstar::RTree::bulk_load(segments));
     }
 
@@ -1984,16 +2082,32 @@ impl Map {
         // The width at the standard zoom, scaled to the current one.
         let line_width = self.settings.style.line_width_at(self.zoom);
 
+        // How much the lines are bent unless a segment says otherwise.
+        let default_curvature = self.settings.default_curvature;
+
         // Broad-phase: query the segment R-tree with the viewport AABB (in
         // map coordinates), padded by the stroke width -- when there is one
-        // -- so lines at the very edge are not clipped prematurely.
+        // -- so lines at the very edge are not clipped prematurely. The tree
+        // indexes a line by the box around its endpoints, and a curved one
+        // bows out of it: the padding also covers how far any of them can.
         let center = self.current.pos / self.zoom;
-        let padding = line_width.unwrap_or(0.0) / self.zoom;
+        let padding =
+            line_width.unwrap_or(0.0) / self.zoom + self.segment_reach.at(default_curvature);
         let half = RawPoint::new(
             self.map_area.width() / 2.0 / self.zoom + padding,
             self.map_area.height() / 2.0 / self.zoom + padding,
         );
         let query = rstar::AABB::from_corners((center - half).into(), (center + half).into());
+        // Narrow-phase, for the curved ones only: the viewport the lines must
+        // actually touch, with just the stroke width around it. A straight
+        // line that came back from the query already does.
+        let view = Rect::from_center_size(
+            Pos2::from(center),
+            Vec2::new(
+                self.map_area.width() / self.zoom + 2.0 * line_width.unwrap_or(0.0) / self.zoom,
+                self.map_area.height() / self.zoom + 2.0 * line_width.unwrap_or(0.0) / self.zoom,
+            ),
+        );
 
         // Segment effects should always read as at least as visible as the
         // line they animate, not fade out in lockstep with it and risk
@@ -2013,9 +2127,17 @@ impl Map {
         let segment_animation = self.settings.segment_animation.with_line_width(line_width);
 
         for segment in segments.locate_in_envelope_intersecting(query) {
+            let curvature = segment.curvature_with(default_curvature);
+            if curvature != 0.0 && !segment.path(default_curvature).bounds().intersects(view) {
+                continue;
+            }
             let raw_line = segment.raw_line();
             let pos_a: Pos2 = (raw_line.points[0] * self.zoom - min_point).into();
             let pos_b: Pos2 = (raw_line.points[1] * self.zoom - min_point).into();
+            // The line between them, bent by the segment's curvature: the
+            // same curve as in map coordinates, scaled by the zoom. What the
+            // default stroke, the effects and the templates draw along.
+            let path = SegmentPath::curved(pos_a, pos_b, curvature);
 
             // The default stroke is painted right away, not batched up and
             // flushed once after the whole loop -- an opaque line painted
@@ -2036,6 +2158,7 @@ impl Map {
                     SegmentContext {
                         pos_a,
                         pos_b,
+                        path,
                         zoom: self.zoom,
                         segment,
                         color: segment_color,
@@ -2044,10 +2167,7 @@ impl Map {
                     },
                 );
             } else if let Some(width) = line_width {
-                painter.add(Shape::line_segment(
-                    [pos_a, pos_b],
-                    Stroke::new(width, segment_color),
-                ));
+                painter.add(path.stroke_shape(Stroke::new(width, segment_color)));
             }
 
             // Persistent segment state is drawn first so a notification --
@@ -2062,6 +2182,7 @@ impl Map {
                         SegmentStateContext {
                             pos_a,
                             pos_b,
+                            path,
                             zoom: self.zoom,
                             segment,
                             time,
@@ -2074,8 +2195,13 @@ impl Map {
                     );
                 } else {
                     let effect = segment_animation.state(state.animation);
-                    let (from, to) = state.direction.orient(pos_a, pos_b);
-                    effect(painter, from, to, self.zoom, time, color);
+                    effect(
+                        painter,
+                        state.direction.orient_path(path),
+                        self.zoom,
+                        time,
+                        color,
+                    );
                 }
                 // Persistent effects never finish on their own.
                 needs_repaint = true;
@@ -2089,6 +2215,7 @@ impl Map {
                         SegmentNotificationContext {
                             pos_a,
                             pos_b,
+                            path,
                             zoom: self.zoom,
                             segment,
                             initial_time: notification.started,
@@ -2101,8 +2228,13 @@ impl Map {
                     )
                 } else {
                     let effect = segment_animation.event(notification.animation);
-                    let (from, to) = notification.direction.orient(pos_a, pos_b);
-                    effect(painter, from, to, self.zoom, notification.started, color)
+                    effect(
+                        painter,
+                        notification.direction.orient_path(path),
+                        self.zoom,
+                        notification.started,
+                        color,
+                    )
                 };
                 if still_playing {
                     needs_repaint = true;
@@ -2315,7 +2447,9 @@ impl Map {
     ///
     /// Broad-phase candidates are taken from the segment R-tree built by
     /// [`Map::add_lines`]; the exact point-to-segment distance is then
-    /// computed against the line geometry and the closest match wins. Returns
+    /// computed against the line geometry -- the curve, for a line bent by
+    /// [`MapSegment::shape`] -- and the
+    /// closest match wins. Returns
     /// `None` when no lines are loaded or every segment is farther than
     /// `tolerance`. A negative `tolerance` behaves like `0.0`.
     ///
@@ -2328,13 +2462,18 @@ impl Map {
         let segments = self.segments.as_ref()?;
         let tolerance = tolerance.max(0.0);
 
+        let default_curvature = self.settings.default_curvature;
         let center = RawPoint::from(point);
-        let padding = RawPoint::new(tolerance, tolerance);
+        // A curved line bows out of the box the tree holds it by.
+        let reach = tolerance + self.segment_reach.at(default_curvature);
+        let padding = RawPoint::new(reach, reach);
         let query = rstar::AABB::from_corners((center - padding).into(), (center + padding).into());
 
         let mut closest: Option<(f32, (usize, usize))> = None;
         for segment in segments.locate_in_envelope_intersecting(query) {
-            let distance = segment.raw_line().distance_to_point(center);
+            let distance = segment
+                .path(default_curvature)
+                .distance_to_point(Pos2::from(point));
             if distance <= tolerance && closest.as_ref().is_none_or(|(best, _)| distance < *best) {
                 closest = Some((distance, segment.id));
             }

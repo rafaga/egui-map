@@ -1,8 +1,8 @@
 [package]
 name = "egui-map"
-version = "0.14.0"
+version = "0.14.1"
 edition = "2024"
-authors = ["Rafael Amador <rafaga@duck.com"]
+authors = ["Rafael Amador <rafaga@duck.com>"]
 description = "Visual component to draw a map on screen."
 readme = "README.md"
 repository = "https://github.com/rafaga/egui-map/"
@@ -48,13 +48,13 @@ profile = ["dep:tracing-subscriber", "dep:tracing-tracy"]
 
 [dependencies]
 egui = { version = "0.36", features = ["bytemuck"]}
-kdtree = { version = "0.8.0" }
+kdtree = { version = "0.8.1" }
 rstar = "0.13.0"
 tracing = "0.1"
 
 # `std::time::Instant::now()` panics on `wasm32-unknown-unknown`; `web-time` is the very same type and reads the browser clock there. Every other target keeps `std::time::Instant`.
 [target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
-web-time = "1"
+web-time = "1.1.0"
 
 # Tracy (a native profiler client that needs a C++ toolchain) is only for the
 # `tracy_profile` example, and cannot run in the browser. The crate's own spans

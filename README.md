@@ -11,11 +11,11 @@ An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D
 - Pan with click & drag, and zoom with the mouse wheel (hold `Ctrl` — or `Cmd` on macOS — to zoom faster) or the built-in slider.
 - Spatial indexing via kd-tree: only the nodes inside the viewport are painted each frame.
 - Node names with configurable visibility rules (always / on hover / hidden).
-- Connection lines between nodes and free-floating text labels.
+- Connection lines between nodes, straight or curved -- each line is one or the other, and they can share a map -- and free-floating text labels.
 - Text is sized in **screen pixels** (`MapSettings::node_text_size`, `MapSettings::label_text_size`), so names stay readable at any zoom level instead of shrinking away as you zoom out.
 - Region labels (`RegionLabel`, via `Map::add_region_labels`) for naming an *area* of the map rather than a node: unlike every other text the widget draws, their size scales *with* zoom, they are always painted first (behind everything else) and in a faded color, with the built-in renderer caching laid-out text for performance. Customizable through the `LabelTemplate` trait.
 - Animations attached per node through `map.node(id)`: one-off events that end on their own (`pulse`, `ripple`, `countdown`, `scale_in`, `crosshair`) and lasting state that runs until `clear()` (`halo`, `blink`, `orbit`), each with an optional `color()`. The effects live in `map::animation::Animation` and can be reused from your own `NodeTemplate`.
-- The same idiom for segments through `map.segment(id)`: `flash` / `comet_once(at, direction)` / `wipe` (one-off) and `comet` / `dash` / `glow_band` / `chevrons` (lasting, until `clear()`) -- `comet_once` is a single dot pass, and every effect but `flash` runs the way you choose with `segment.direction(CometDirection::Forward / Reverse)` before it, `wipe` draws the line in from one endpoint to the other and then wipes it out the same way, `dash` is a "marching ants" pattern and `chevrons` a row of sliding arrowheads, both painted as a repeating-texture mesh (two triangles per segment, one shared texture), `glow_band` a soft travelling highlight that fades out past each end instead of repeating, also with an optional `color()`.
+- The same idiom for segments through `map.segment(id)`: `flash` / `comet_once(at, direction)` / `wipe` (one-off) and `comet` / `dash` / `glow_band` / `chevrons` (lasting, until `clear()`) -- `comet_once` is a single dot pass, and every effect but `flash` runs the way you choose with `segment.direction(CometDirection::Forward / Reverse)` before it, `wipe` draws the line in from one endpoint to the other and then wipes it out the same way, `dash` is a "marching ants" pattern and `chevrons` a row of sliding arrowheads, both painted as a repeating-texture mesh (one shared texture, two triangles on a straight segment), `glow_band` a soft travelling highlight that fades out past each end instead of repeating, also with an optional `color()`. All of them follow a curved line around its bend. The effects live in `map::animation::SegmentAnimations`.
 - Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits, custom segment rendering through `SegmentTemplate`, and custom region-label rendering through `LabelTemplate`.
 - [Fifteen built-in color themes](THEMES.md), each with a light and a dark variant -- `SystemDefault`, matching plain egui's own colors, is the default -- or install your own through the `MapTheme` trait.
 
@@ -23,54 +23,16 @@ An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D
 
 Add the dependency:
 
-```toml
-[dependencies]
-egui-map = "0.0"
+```sh
+cargo add egui-map
 ```
 
-The two tutorials below are complete programs that compile and run: `cargo run --example tutorial_map` and `cargo run --example tutorial_node_template`. The code in each step is the code of the example.
+### Tutorials
 
-### Tutorial 1: your first map
+Two complete programs that compile and run, each with a written walkthrough. The code in each step is the code of the example.
 
-A map is an egui widget. You build it once, keep it between frames and add it to a `Ui` on every frame. Building it takes three steps.
-
-**1. Create the nodes.** A node is a `MapPoint`: an id of your choice (unique) and a position in *map coordinates*, in whatever units you like -- the widget scales them with the zoom. The name is optional.
-
-```rust
-use egui_map::map::objects::MapPoint;
-
-let mut alpha = MapPoint::new(1, [0.0, 0.0]);
-alpha.set_name("Alpha".to_string());
-let mut beta = MapPoint::new(2, [120.0, 40.0]);
-beta.set_name("Beta".to_string());
-let mut points = vec![alpha, beta];
-```
-
-**2. Connect them.** Every line has an id of its own -- by convention the pair of node ids it joins -- and that id has to be listed in the `connections` of **both** of its nodes. The line itself, a `MapSegment`, carries the id and the coordinates of its two ends.
-
-```rust
-use egui_map::map::objects::MapSegment;
-
-let line_id = (1, 2);
-points[0].connections.push(line_id);
-points[1].connections.push(line_id);
-let segments = vec![MapSegment::new(line_id, [0.0, 0.0], [120.0, 40.0])];
-```
-
-**3. Load them and show the map.** Load the nodes first, then the lines.
-
-```rust
-use egui_map::map::Map;
-
-let mut map = Map::new();
-map.add_points(points);
-map.add_lines(segments);
-
-// Then, on every frame of your egui update loop, with the same `map`:
-// ui.add(&mut map);
-```
-
-Pan with click & drag, zoom with the mouse wheel or the slider. `examples/tutorial_map.rs` is this tutorial with five nodes, four lines and `eframe`.
+1. [Tutorial 1: your first map](docs/tutorial-1-first-map.md) -- nodes, lines and a `Map`. Run it with `cargo run --example tutorial_map`.
+2. [Tutorial 2: a map with a `NodeTemplate`](docs/tutorial-2-node-template.md) -- the same map with the nodes drawn by you. Run it with `cargo run --example tutorial_node_template`.
 
 ### Configuring the map
 
@@ -100,6 +62,11 @@ map.settings.line_fade = LineFade::None;
 // `None` turns the built-in line off, for a `SegmentTemplate` to draw them.
 map.settings.style.line_width = Some(2.0);
 
+// Curved lines: how much the ones that do not say bow out, as a fraction of
+// the distance between their nodes (0.25 by default). Straight lines are not
+// affected. See "Straight and curved lines" below.
+map.settings.default_curvature = 0.25;
+
 // Names: `Always` (needs `label_visible_zoom`), `Hover` or `Hidden`.
 map.settings.node_text_visibility = VisibilitySetting::Hover;
 map.settings.label_visible_zoom = 0.58;
@@ -116,79 +83,31 @@ map.settings.slider.ticks = true;
 
 Colors are not in the settings: they come from the active theme (see *Custom themes* below).
 
-A line is only drawn while its bounding box intersects the viewport, and -- unless `line_fade` is `LineFade::None` -- while the zoom is above `line_visible_zoom`. Segments are culled broad-phase with an R-tree, so long lines crossing the view are drawn even when both endpoints lie outside of it.
+A line is only drawn while it intersects the viewport (a curve is allowed to bow out of the box around its two ends) and -- unless `line_fade` is `LineFade::None` -- while the zoom is above `line_visible_zoom`. Segments are culled broad-phase with an R-tree, so long lines crossing the view are drawn even when both endpoints lie outside of it.
 
-### Tutorial 2: a map with a `NodeTemplate`
+### Straight and curved lines
 
-The nodes of tutorial 1 are dots with the name next to them. A `NodeTemplate` lets you draw them yourself -- here, a rounded box with the name inside. The data is loaded exactly as before: a template changes how the nodes look, not how they are built.
-
-**1. Write the template.** It is a type of your own, which can hold the settings your nodes need. The size is what a box measures at the standard zoom; every method multiplies it by the zoom.
+A `MapSegment` is either a straight line or a curve, and which one is decided when it is built. A map can mix them freely.
 
 ```rust
-use egui::{Align2, CornerRadius, FontId, Pos2, Rect, Stroke, StrokeKind, Ui, Vec2};
-use egui_map::map::objects::{HitContext, NodeContext, NodeOutline, NodeTemplate};
+use egui_map::map::objects::MapSegment;
 
-struct BoxNodes {
-    size: Vec2,
-    corner_radius: f32,
-}
+// Straight. `MapSegment::new` is the same as `MapSegment::straight`.
+let straight = MapSegment::straight((1, 2), [0.0, 0.0], [120.0, 40.0]);
 
-impl BoxNodes {
-    // The box of a node centred at `position`. `node_ui` paints it and
-    // `outline` declares it, so they cannot disagree.
-    fn rect(&self, position: Pos2, zoom: f32) -> Rect {
-        Rect::from_center_size(position, self.size * zoom)
-    }
-}
+// A curve bent by `map.settings.default_curvature`.
+let curved = MapSegment::curved((1, 3), [0.0, 0.0], [60.0, -90.0], None);
+
+// A curve with a bend of its own. A negative value bends it the other way.
+let mut deep = MapSegment::curved((1, 4), [0.0, 0.0], [-110.0, -30.0], Some(-0.4));
+
+// The bend of a curve can change later; whether it is straight or curved cannot.
+deep.set_curvature(Some(-0.2));
 ```
 
-**2. Paint the node** in `node_ui`, the only method you have to write. `ctx.position` is the node's centre on the screen, already placed and scaled, and `ctx.zoom` the scale to apply to every size. The colors come from the active theme, so the nodes follow it when it changes: `ctx.color` is the node's own color (or the theme's node color) and `ctx.theme` the whole palette. Once a template is installed the widget no longer writes the names: this is where you draw them.
+The curvature is how far the middle of the curve is pulled aside, as a fraction of the distance between the two nodes: `0.25` is a gentle arc, and the value is limited to `-1.0..=1.0`. A positive value bends the line to the right of the way from the first node to the second, as seen on the screen, and a negative one to the left, so two connections between the same pair of nodes get their own line when their curvatures have opposite signs. `MapSettings::default_curvature` is the bend of every curve that does not carry one; it never touches a straight line.
 
-```rust
-impl NodeTemplate for BoxNodes {
-    fn node_ui(&self, ui: &mut Ui, ctx: NodeContext) {
-        let rect = self.rect(ctx.position, ctx.zoom);
-        let radius = CornerRadius::same((self.corner_radius * ctx.zoom) as u8);
-        let painter = ui.painter();
-        painter.rect_filled(rect, radius, ctx.theme.background);
-        painter.rect_stroke(
-            rect,
-            radius,
-            Stroke::new(1.5 * ctx.zoom, ctx.color),
-            StrokeKind::Inside,
-        );
-        painter.text(
-            rect.center(),
-            Align2::CENTER_CENTER,
-            ctx.point.get_name(),
-            FontId::proportional(11.0 * ctx.zoom),
-            ctx.theme.text,
-        );
-    }
-```
-
-**3. Say what shape the node has**, in `outline`. It is optional but worth three lines: from it the widget derives where the pointer hits the node (so `Map::hovered_node` and clicks work), the selection ring and the shape the notification effects wrap around.
-
-```rust
-    fn outline(&self, ctx: HitContext) -> NodeOutline {
-        NodeOutline::RoundedRect {
-            rect: self.rect(ctx.position, ctx.zoom),
-            corner_radius: self.corner_radius * ctx.zoom,
-        }
-    }
-}
-```
-
-**4. Install it** on the map, behind an `Rc`, and show the map as before.
-
-```rust
-map.set_node_template(std::rc::Rc::new(BoxNodes {
-    size: Vec2::new(72.0, 22.0),
-    corner_radius: 6.0,
-}));
-```
-
-`examples/tutorial_node_template.rs` is this tutorial with the same five nodes as the first one. `examples/custom_template.rs` and `examples/node_template_animations.rs` take it further, with notifications and markers.
+The segment effects follow the curve, `Map::line_at` measures the distance against it and the minimap draws it. A `SegmentTemplate` receives it as `ctx.path`, see below.
 
 ### Custom node rendering and animations
 
@@ -235,17 +154,16 @@ impl NodeTemplate for MyTemplate {
 map.set_node_template(std::rc::Rc::new(MyTemplate));
 ```
 
-`NodeContext` also carries `marker: f32` — how present a `Map::update_marker` marker is on this node, from `0.0` (none) to `1.0` (fully in), fading in and out on its own instead of switching instantly (see `MARKER_FADE_SECS` in the `objects` module). Paired with `Animation::glow` (a tint that breathes in and out over a rounded rectangle, scaled by that strength), it lets a box-shaped `NodeTemplate` paint markers as part of the node itself — between its background and its label — instead of in `marker_ui`, which draws over every node and so over its label too:
+`NodeContext` also carries `marker: f32` — how present a `Map::update_marker` marker is on this node, from `0.0` (none) to `1.0` (fully in), fading in and out on its own instead of switching instantly (see `MARKER_FADE_SECS` in the `objects` module). Paired with `Animation::glow`, reached as `ctx.animation.glow(..)` (a tint that breathes in and out over a rounded rectangle, scaled by that strength), it lets a box-shaped `NodeTemplate` (like the one in [tutorial 2](docs/tutorial-2-node-template.md)) paint markers as part of the node itself — between its background and its label — instead of in `marker_ui`, which draws over every node and so over its label too:
 
 ```rust
-# use egui_map::map::animation::Animation;
-# use egui::{CornerRadius, Rect, Ui, Vec2};
-# use egui_map::map::objects::NodeContext;
-# fn node_ui(ui: &mut Ui, ctx: NodeContext) {
+use egui::{CornerRadius, Rect, Vec2};
+
+// Inside `NodeTemplate::node_ui`, between painting the background of the box and its name:
 if ctx.marker > 0.0 {
     let time = ui.input(|i| i.time) as f32;
     let rect = Rect::from_center_size(ctx.position, Vec2::splat(30.0 * ctx.zoom));
-    Animation::glow(
+    ctx.animation.glow(
         ui.painter(),
         rect,
         CornerRadius::same((10.0 * ctx.zoom) as u8),
@@ -255,20 +173,19 @@ if ctx.marker > 0.0 {
     );
     ui.ctx().request_repaint();
 }
-# }
 ```
 
 See the `NodeTemplate` rustdoc for a complete example with a custom node shape and an animated notification, and `examples/node_template_animations.rs` for this glow paired with the ring `marker_ui` already draws.
 
 ### Custom segment rendering and animations
 
-`SegmentTemplate` is the segment counterpart of `NodeTemplate`. Its methods take a bare `&Painter` rather than `&mut Ui`, since segments are visited in bulk after the R-tree viewport culling — use `painter.ctx()` to reach `request_repaint()`. Like `NodeTemplate`, every method takes a `#[non_exhaustive]` context struct — `SegmentContext`, `SegmentNotificationContext`, `SegmentStateContext` — each carrying the segment's endpoints (`pos_a`/`pos_b`), `zoom`, the `segment` itself (id and coordinates) and a resolved `color`; the two effect contexts also carry `kind`, so you can match it and dispatch straight to the built-in `Animation::*` function instead of reimplementing the effect:
+`SegmentTemplate` is the segment counterpart of `NodeTemplate`. Its methods take a bare `&Painter` rather than `&mut Ui`, since segments are visited in bulk after the R-tree viewport culling — use `painter.ctx()` to reach `request_repaint()`. Like `NodeTemplate`, every method takes a `#[non_exhaustive]` context struct — `SegmentContext`, `SegmentNotificationContext`, `SegmentStateContext` — each carrying the segment's `path` (the line to draw, straight or curved; `pos_a`/`pos_b` are its two ends), `zoom`, the `segment` itself (id and coordinates), the widget's `animation` tuning and a resolved `color`. The two effect contexts also carry `kind` and `direction`: `ctx.animation.event(ctx.kind)` and `ctx.animation.state(ctx.kind)` give you the built-in effect for it, so you can dispatch straight to it instead of reimplementing the effect.
+
+Draw along `ctx.path`, not between `pos_a` and `pos_b`, and a template keeps working for curved segments:
 
 ```rust
-use egui_map::map::animation::Animation;
 use egui_map::map::objects::{
     SegmentContext, SegmentNotificationContext, SegmentStateContext, SegmentTemplate,
-    SteadySegmentAnimation,
 };
 use egui::{Color32, Painter, Stroke};
 
@@ -276,26 +193,25 @@ struct MySegments;
 
 impl SegmentTemplate for MySegments {
     fn segment_ui(&self, painter: &Painter, ctx: SegmentContext) {
-        painter.line_segment([ctx.pos_a, ctx.pos_b], Stroke::new(1.5 * ctx.zoom, Color32::GRAY));
+        // A straight line or the curve of the segment, whichever it is.
+        painter.add(ctx.path.stroke_shape(Stroke::new(1.5 * ctx.zoom, Color32::GRAY)));
     }
 
     fn segment_notification_ui(&self, painter: &Painter, ctx: SegmentNotificationContext) -> bool {
-        // `ctx.kind` is which of flash/comet_once/wipe was requested -- dispatch
-        // on it, or draw a time-driven effect computed from `ctx.initial_time.elapsed()`.
+        // `ctx.kind` is which of flash/comet_once/wipe was requested: reuse the
+        // built-in effect, run the way the segment was asked to (`direction`).
+        let effect = ctx.animation.event(ctx.kind);
+        let path = ctx.direction.orient_path(ctx.path);
+        let still_playing = effect(painter, path, ctx.zoom, ctx.initial_time, ctx.color);
         painter.ctx().request_repaint(); // keep the animation frames coming
-        ctx.initial_time.elapsed().as_secs_f32() < 1.0 // returning false removes the notification
+        still_playing // returning false removes the notification
     }
 
     fn segment_state_ui(&self, painter: &Painter, ctx: SegmentStateContext) {
-        // `ctx.kind` is which persistent effect was requested -- reuse the
-        // matching built-in one instead of reimplementing it:
-        let effect = match ctx.kind {
-            SteadySegmentAnimation::Comet => Animation::comet,
-            SteadySegmentAnimation::Dash => Animation::dash,
-            SteadySegmentAnimation::GlowBand => Animation::glow_band,
-            SteadySegmentAnimation::Chevrons => Animation::chevrons,
-        };
-        effect(painter, ctx.pos_a, ctx.pos_b, ctx.zoom, ctx.time, ctx.color);
+        // `ctx.kind` is which of comet/dash/glow_band/chevrons was requested.
+        let effect = ctx.animation.state(ctx.kind);
+        let path = ctx.direction.orient_path(ctx.path);
+        effect(painter, path, ctx.zoom, ctx.time, ctx.color);
         painter.ctx().request_repaint();
     }
 }
@@ -321,7 +237,7 @@ map.add_region_labels(vec![RegionLabel {
 }]);
 ```
 
-`examples/svg_template.rs` shows one in a small running example.
+`examples/animations.rs` uses two of them as the titles of its grid.
 
 Install a `LabelTemplate` with `Map::set_label_template` to take over the drawing entirely — see its rustdoc for the `LabelContext` fields (`position`, `zoom`, `label`, `size` already scaled by zoom, `color` already faded, and the full theme `ThemeColors` palette).
 

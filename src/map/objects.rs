@@ -11,6 +11,7 @@
 use crate::map::animation::{self, Animation, SegmentAnimations};
 use crate::map::minimap::MinimapSettings;
 pub use crate::map::outline::NodeOutline;
+use crate::map::path::SegmentPath;
 use crate::map::slider::SliderSettings;
 use crate::map::theme::{Style, ThemeColors};
 use egui::{Align2, Color32, FontFamily, FontId, Painter, Pos2, Stroke, Ui};
@@ -544,17 +545,26 @@ impl RegionLabel {
 /// [`rstar::RTree`].
 ///
 /// Mirrors `sde::objects::SdeSegment`'s shape (`id`, `point1`, `point2`) so
-/// callers that already hold `sde` connection data can build one with a
-/// straight field-for-field copy; the only structural difference is `f32`
-/// instead of `f64` for the coordinates, matching `egui`'s own coordinate
-/// type (`egui` — and therefore this widget — doesn't work in `f64`).
+/// callers that already hold `sde` connection data can build one from those
+/// same three values with [`MapSegment::new`]; the only structural difference
+/// is `f32` instead of `f64` for the coordinates, matching `egui`'s own
+/// coordinate type (`egui` — and therefore this widget — doesn't work in
+/// `f64`).
+///
+/// A segment is either straight ([`MapSegment::new`] or
+/// [`MapSegment::straight`]) or a curve ([`MapSegment::curved`]), decided when
+/// it is built (see [`MapSegment::shape`] and [`LineShape`]); the two can share
+/// a map. Only the bend of a curve can change afterwards, with
+/// [`MapSegment::set_curvature`].
 ///
 /// Lines are installed with [`Map::add_hashmap_lines`](super::Map::add_hashmap_lines),
 /// keyed by an id that nodes reference through [`MapPoint::connections`].
 /// The bounding box the R-tree uses for broad-phase viewport culling and
 /// hit-testing is computed on demand from `point1`/`point2` in
 /// [`envelope`](rstar::RTreeObject::envelope) rather than cached on the
-/// struct, same as `SdeSegment`.
+/// struct, same as `SdeSegment`. It is the box around the two end points, also
+/// for a curve: the viewport culling and [`Map::line_at`](super::Map::line_at)
+/// allow for how far a curve bows out of it.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MapSegment {
     /// Identifier shared with the line key (and with the
@@ -575,17 +585,60 @@ pub struct MapSegment {
     /// same `MapSegment` via [`SegmentContext::segment`], with
     /// [`SegmentContext::color`] already carrying the resolved fallback.
     pub color: Option<Color32>,
+    /// Whether this segment's line is straight or a curve, and how much of
+    /// one. Decided when the segment is built -- [`MapSegment::straight`] (what
+    /// [`MapSegment::new`] is) or [`MapSegment::curved`] -- so straight and
+    /// curved lines can share a map; read it with [`MapSegment::shape`].
+    /// Only the amount of a curve can change afterwards, with
+    /// [`MapSegment::set_curvature`].
+    ///
+    /// The curve is what the segment effects travel along, what the hit-test of
+    /// [`Map::line_at`](super::Map::line_at) measures against and what the
+    /// minimap draws.
+    pub(crate) shape: LineShape,
 }
 
 impl MapSegment {
-    /// Creates a segment for `id` between `point1` and `point2`.
+    /// Creates a straight segment for `id` between `point1` and `point2`.
+    ///
+    /// The same as [`MapSegment::straight`].
     pub fn new(id: (usize, usize), point1: [f32; 2], point2: [f32; 2]) -> Self {
+        Self::straight(id, point1, point2)
+    }
+
+    /// Creates a straight segment for `id` between `point1` and `point2`.
+    pub fn straight(id: (usize, usize), point1: [f32; 2], point2: [f32; 2]) -> Self {
         Self {
             id,
             point1,
             point2,
             color: None,
+            shape: LineShape::Straight,
         }
+    }
+
+    /// Creates a curved segment for `id` between `point1` and `point2`.
+    ///
+    /// `Some(curvature)` bends it by that much; `None` bends it by the map's
+    /// [`MapSettings::default_curvature`], the amount of every curve that does
+    /// not have one of its own (see [`LineShape::Curved`] for what the value
+    /// means).
+    pub fn curved(
+        id: (usize, usize),
+        point1: [f32; 2],
+        point2: [f32; 2],
+        curvature: Option<f32>,
+    ) -> Self {
+        Self {
+            shape: LineShape::Curved(curvature),
+            ..Self::straight(id, point1, point2)
+        }
+    }
+
+    /// Whether this segment is straight or a curve, and the curvature of the
+    /// curve if it has one of its own.
+    pub fn shape(&self) -> LineShape {
+        self.shape
     }
 
     /// Sets this segment's persistent color override (see [`Self::color`]).
@@ -593,11 +646,69 @@ impl MapSegment {
         self.color = Some(color);
     }
 
+    /// Changes the curvature of a curved segment: `Some(curvature)` bends it
+    /// by that much, `None` goes back to the map's
+    /// [`MapSettings::default_curvature`].
+    ///
+    /// Whether a segment is straight or curved is decided when it is built, so
+    /// this leaves a straight one as it is and returns `false`; it returns
+    /// `true` when the curvature was changed.
+    pub fn set_curvature(&mut self, curvature: Option<f32>) -> bool {
+        match self.shape {
+            LineShape::Straight => false,
+            LineShape::Curved(_) => {
+                self.shape = LineShape::Curved(curvature);
+                true
+            }
+        }
+    }
+
     /// The segment geometry as a [`RawLine`], for the distance/midpoint math
     /// callers already get from that type.
     pub(crate) fn raw_line(&self) -> RawLine {
         RawLine::new(RawPoint::from(self.point1), RawPoint::from(self.point2))
     }
+
+    /// The curvature this segment is drawn with: `0.0` for a straight one, and
+    /// for a curved one its own value, or `default` (the map's
+    /// [`MapSettings::default_curvature`]) when it has none.
+    pub(crate) fn curvature_with(&self, default: f32) -> f32 {
+        match self.shape {
+            LineShape::Straight => 0.0,
+            LineShape::Curved(curvature) => curvature.unwrap_or(default),
+        }
+    }
+
+    /// The path of this segment in map coordinates, bent by its own curvature
+    /// or by `default` when it is curved without one.
+    pub(crate) fn path(&self, default: f32) -> SegmentPath {
+        SegmentPath::curved(
+            Pos2::from(self.point1),
+            Pos2::from(self.point2),
+            self.curvature_with(default),
+        )
+    }
+}
+
+/// Whether a [`MapSegment`] is drawn as a straight line or as a curve.
+///
+/// A curve is a quadratic Bézier whose control point is `curvature` times the
+/// distance between the endpoints away from the middle of the line, so the
+/// curve bows by half of that. Positive values bend it to the right of the way
+/// from [`MapSegment::point1`] to [`MapSegment::point2`] as seen on the
+/// screen, negative ones to the left, and the value is clamped to
+/// `-1.0..=1.0` (see [`SegmentPath::curved`]). Giving the two opposite
+/// directions of a pair of nodes opposite curvatures draws them as two
+/// separate lines instead of one on top of the other.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum LineShape {
+    /// A straight line between the endpoints. The default.
+    #[default]
+    Straight,
+    /// A curve. `Some(curvature)` bends it by that much; `None` uses the map's
+    /// [`MapSettings::default_curvature`], which only ever applies to the
+    /// segments that are curved like this.
+    Curved(Option<f32>),
 }
 
 impl rstar::RTreeObject for MapSegment {
@@ -765,6 +876,17 @@ pub struct MapSettings {
     /// gradual ramp the widget has always used; use [`LineFade::None`] for
     /// fully opaque lines that are drawn at every zoom.
     pub line_fade: LineFade,
+    /// How much the curved connection lines are bent, for the segments made
+    /// curved without a curvature of their own ([`LineShape::Curved`] with
+    /// `None`, see [`MapSegment::curved`]). The straight lines are never
+    /// affected.
+    ///
+    /// The lines are quadratic Bézier curves whose control point is this many
+    /// times the distance between the endpoints away from the middle of the
+    /// line, so each bows by half of it: the default `0.25` is a gentle arc,
+    /// the limit `1.0` a deep one. See [`LineShape`] for the sign and the
+    /// limits, and [`MapSegment::curved`] to give a segment its own.
+    pub default_curvature: f32,
     /// Zoom threshold above which node names become visible when
     /// [`node_text_visibility`](Self::node_text_visibility) is
     /// [`VisibilitySetting::Always`].
@@ -840,6 +962,7 @@ impl MapSettings {
             min_zoom: 0.0,
             line_visible_zoom: 0.0,
             line_fade: LineFade::default(),
+            default_curvature: 0.0,
             label_visible_zoom: 0.0,
             node_text_visibility: VisibilitySetting::Always,
             marker_animation: SteadyAnimation::Blink,
@@ -873,6 +996,7 @@ impl Default for MapSettings {
             min_zoom: 0.1,
             line_visible_zoom: 0.2,
             line_fade: LineFade::default(),
+            default_curvature: 0.25,
             label_visible_zoom: 0.58,
             node_text_visibility: VisibilitySetting::Always,
             marker_animation: SteadyAnimation::Blink,
@@ -973,6 +1097,20 @@ impl CometDirection {
             Self::Reverse => (b, a),
         }
     }
+
+    /// The path an effect running in this direction travels along, given a
+    /// segment's `path` from its first endpoint to its second:
+    /// the path itself for [`Self::Forward`], the same path walked the other
+    /// way for [`Self::Reverse`].
+    ///
+    /// The curved counterpart of [`orient`](Self::orient): the effects take a
+    /// [`SegmentPath`], which is what follows a curved line.
+    pub fn orient_path(self, path: SegmentPath) -> SegmentPath {
+        match self {
+            Self::Forward => path,
+            Self::Reverse => path.reversed(),
+        }
+    }
 }
 
 /// A built-in effect that plays once and ends, for a segment.
@@ -985,7 +1123,7 @@ impl CometDirection {
 ///
 /// Ignored when a [`SegmentTemplate`] is installed — the template's
 /// `segment_notification_ui` takes over. The effect stays reachable there
-/// through [`Animation`].
+/// through [`SegmentAnimations`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SegmentAnimation {
     /// A brief bright flash on the line that fades back out. The segment
@@ -1687,11 +1825,13 @@ pub struct MarkerContext<'a> {
 /// added without another breaking change, each carrying `pos_a`/`pos_b`
 /// (already scaled by `zoom` and translated to the viewport origin -- same
 /// convention as [`NodeTemplate`]'s `position`, just two points instead of
-/// one), `zoom`, `segment` (its id and endpoint coordinates) and a resolved
-/// `color` so you never have to reach for the active theme or reimplement a
-/// fallback yourself. The two effect contexts also carry `kind` -- match on
+/// one), `path` (the line between them, straight or the curve the segment is
+/// bent into -- draw along it and the template keeps working for curved
+/// segments), `zoom`, `segment` (its id and endpoint coordinates) and a
+/// resolved `color` so you never have to reach for the active theme or
+/// reimplement a fallback yourself. The two effect contexts also carry `kind` -- match on
 /// it to dispatch straight to the matching built-in
-/// [`Animation`] function, exactly like
+/// [`SegmentAnimations`] function, exactly like
 /// [`NotificationContext::kind`]/[`MarkerContext::kind`] already let you do
 /// for nodes.
 ///
@@ -1714,14 +1854,13 @@ pub struct MarkerContext<'a> {
 ///     fn segment_ui(&self, painter: &Painter, ctx: SegmentContext) {
 ///         // A crude dash: short strokes along the segment, spaced in screen
 ///         // pixels so they don't stretch as the map zooms.
-///         let dir = ctx.pos_b - ctx.pos_a;
-///         let len = dir.length();
+///         let polyline = ctx.path.polyline();
+///         let len = polyline.length();
 ///         let step = 10.0 * ctx.zoom;
 ///         let mut travelled = 0.0;
 ///         while travelled < len {
-///             let start = ctx.pos_a + dir * (travelled / len);
-///             let end = ctx.pos_a + dir * ((travelled + step * 0.6).min(len) / len);
-///             painter.line_segment([start, end], Stroke::new(2.0 * ctx.zoom, ctx.theme.segment));
+///             let stroke = Stroke::new(2.0 * ctx.zoom, ctx.theme.segment);
+///             painter.add(polyline.slice_shape(travelled, travelled + step * 0.6, stroke));
 ///             travelled += step;
 ///         }
 ///     }
@@ -1735,7 +1874,7 @@ pub struct MarkerContext<'a> {
 ///             ctx.color.b(),
 ///             (255.0 * alpha) as u8,
 ///         );
-///         painter.line_segment([ctx.pos_a, ctx.pos_b], Stroke::new(5.0 * ctx.zoom, fading));
+///         painter.add(ctx.path.stroke_shape(Stroke::new(5.0 * ctx.zoom, fading)));
 ///         painter.ctx().request_repaint();
 ///         secs < 1.0
 ///     }
@@ -1745,7 +1884,7 @@ pub struct MarkerContext<'a> {
 ///         // dispatch straight to it (bound to the widget's tuning) instead of
 ///         // reimplementing the math.
 ///         let effect = ctx.animation.state(ctx.kind);
-///         effect(painter, ctx.pos_a, ctx.pos_b, ctx.zoom, ctx.time, ctx.color);
+///         effect(painter, ctx.path, ctx.zoom, ctx.time, ctx.color);
 ///         painter.ctx().request_repaint();
 ///     }
 /// }
@@ -1765,7 +1904,7 @@ pub trait SegmentTemplate {
     /// Called every frame for each segment carrying an event-driven effect
     /// (see [`SegmentHandle`](super::SegmentHandle)). `ctx.kind` is which of
     /// `flash`/`comet_once`/`wipe` was requested -- match on it to dispatch
-    /// to the corresponding [`Animation`]
+    /// to the corresponding [`SegmentAnimations`]
     /// function instead of reimplementing every effect by hand. See
     /// [`SegmentNotificationContext`] for the rest of the fields. Should
     /// return `true` while the animation is still playing — remember to call
@@ -1798,6 +1937,13 @@ pub struct SegmentContext<'a> {
     pub pos_a: Pos2,
     /// The second endpoint's screen position, same convention as `pos_a`.
     pub pos_b: Pos2,
+    /// The line between the two endpoints, in screen positions: a straight
+    /// line, or the curve the segment is bent into by its
+    /// [`shape`](MapSegment::shape) and the map's
+    /// [`MapSettings::default_curvature`]. Draw along it (and hand it to the
+    /// built-in effects) to follow a curved line; `pos_a` and `pos_b` are its
+    /// two ends.
+    pub path: SegmentPath,
     /// Multiply every size you draw by this so it scales with the map.
     pub zoom: f32,
     /// The segment being painted -- its id, endpoint coordinates and optional
@@ -1839,6 +1985,13 @@ pub struct SegmentNotificationContext<'a> {
     pub pos_a: Pos2,
     /// The second endpoint's screen position, same convention as `pos_a`.
     pub pos_b: Pos2,
+    /// The line between the two endpoints, in screen positions: a straight
+    /// line, or the curve the segment is bent into by its
+    /// [`shape`](MapSegment::shape) and the map's
+    /// [`MapSettings::default_curvature`]. Draw along it (and hand it to the
+    /// built-in effects) to follow a curved line; `pos_a` and `pos_b` are its
+    /// two ends.
+    pub path: SegmentPath,
     /// Multiply every size you draw by this so it scales with the map.
     pub zoom: f32,
     /// The segment this notification belongs to -- its id and endpoint
@@ -1861,7 +2014,7 @@ pub struct SegmentNotificationContext<'a> {
     pub theme: ThemeColors,
     /// Which built-in event effect was requested (`flash`, `comet_once`,
     /// `wipe`). Match on this to dispatch to the corresponding
-    /// [`Animation`] function instead of
+    /// [`SegmentAnimations`] function instead of
     /// reimplementing the lookup yourself.
     pub kind: SegmentAnimation,
     /// Which way the effect was asked to run
@@ -1887,6 +2040,13 @@ pub struct SegmentStateContext<'a> {
     pub pos_a: Pos2,
     /// The second endpoint's screen position, same convention as `pos_a`.
     pub pos_b: Pos2,
+    /// The line between the two endpoints, in screen positions: a straight
+    /// line, or the curve the segment is bent into by its
+    /// [`shape`](MapSegment::shape) and the map's
+    /// [`MapSettings::default_curvature`]. Draw along it (and hand it to the
+    /// built-in effects) to follow a curved line; `pos_a` and `pos_b` are its
+    /// two ends.
+    pub path: SegmentPath,
     /// Multiply every size you draw by this so it scales with the map.
     pub zoom: f32,
     /// The segment this lasting state belongs to -- its id and endpoint
@@ -1909,7 +2069,7 @@ pub struct SegmentStateContext<'a> {
     pub theme: ThemeColors,
     /// Which built-in persistent effect was requested (`comet`, `dash`,
     /// `glow_band`, `chevrons`). Match on this to dispatch to the
-    /// corresponding [`Animation`]
+    /// corresponding [`SegmentAnimations`]
     /// function instead of reimplementing the lookup yourself.
     pub kind: SteadySegmentAnimation,
     /// Which way the effect was asked to run

@@ -30,6 +30,7 @@
 
 use super::Map;
 use super::overlay::Corner;
+use super::path::SegmentPath;
 use egui::emath::GuiRounding;
 use egui::{
     Color32, CornerRadius, CursorIcon, Painter, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui,
@@ -269,14 +270,19 @@ impl Map {
 
         let mut shapes: Vec<Shape> = Vec::new();
         if let Some(segments) = &self.segments {
+            let default_curvature = self.settings.default_curvature;
             shapes.extend(segments.iter().map(|segment| {
-                Shape::line_segment(
-                    [
-                        transform.to_screen(segment.point1),
-                        transform.to_screen(segment.point2),
-                    ],
-                    Stroke::new(1.0, tint(segment.color.unwrap_or(theme.segment))),
-                )
+                // The minimap's scale is the same on both axes, so the curve
+                // of the map is the same curve here, just smaller.
+                let path = SegmentPath::curved(
+                    transform.to_screen(segment.point1),
+                    transform.to_screen(segment.point2),
+                    segment.curvature_with(default_curvature),
+                );
+                path.stroke_shape(Stroke::new(
+                    1.0,
+                    tint(segment.color.unwrap_or(theme.segment)),
+                ))
             }));
         }
         if let Some(points) = &self.points {

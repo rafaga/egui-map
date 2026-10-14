@@ -3,7 +3,8 @@
 //! The same five systems as `examples/tutorial_map.rs`, but each node is a
 //! rounded box with its name inside instead of a dot with the name beside it.
 //! A `NodeTemplate` is how you draw the nodes yourself. Read it top to
-//! bottom, the steps are numbered; the README has the same tutorial in prose.
+//! bottom, the steps are numbered; `docs/tutorial-2-node-template.md` has the
+//! same tutorial in prose.
 //!
 //! Run with: cargo run --example tutorial_node_template
 
