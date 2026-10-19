@@ -306,7 +306,7 @@ impl Map {
 
         // The panel turns semi opaque while the mouse is over the control, or
         // the slider is being dragged (the pointer may leave it meanwhile).
-        let dragging_id = ui.id().with("map_slider_dragging");
+        let dragging_id = ui.scope_id().with("map_slider_dragging");
         let dragging = ui
             .data(|data| data.get_temp::<bool>(dragging_id))
             .unwrap_or(false);

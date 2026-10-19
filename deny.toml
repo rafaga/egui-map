@@ -31,13 +31,23 @@ ignore = [
   # eframe (winit -> sctk-adwaita), a dev-dependency used by the examples only.
   # Revisit when winit drops it.
   { id = "RUSTSEC-2026-0192", reason = "unmaintained, dev-dependency only (eframe -> winit -> sctk-adwaita), no vulnerability" },
-  # `quick-xml` is used by the `wayland-scanner` proc macro (eframe -> winit ->
-  # smithay-client-toolkit), a dev-dependency used by the examples only. It
-  # parses the Wayland protocol XML that ships with those crates at build time,
-  # never untrusted input. Fixed in quick-xml 0.41; the version picked depends on
-  # how the dependency tree resolves, since `Cargo.lock` is not versioned.
-  { id = "RUSTSEC-2026-0194", reason = "quick-xml quadratic attribute check, build-time proc macro on trusted XML, dev-dependency only" },
-  { id = "RUSTSEC-2026-0195", reason = "quick-xml unbounded namespace allocation, build-time proc macro on trusted XML, dev-dependency only" },
+  # `zvariant`, `zvariant_derive` and `zbus_names` are unmaintained as standalone
+  # crates (merged into `zbus` 6). They are reached through eframe (egui-winit ->
+  # accesskit_winit -> accesskit_unix -> zbus 5), a dev-dependency used by the
+  # examples only. Revisit when accesskit moves to zbus 6.
+  { id = "RUSTSEC-2026-0370", reason = "zvariant unmaintained, dev-dependency only (eframe -> egui-winit -> accesskit_winit -> accesskit_unix), no vulnerability" },
+  { id = "RUSTSEC-2026-0371", reason = "zbus_names unmaintained, dev-dependency only (eframe -> egui-winit -> accesskit_winit -> accesskit_unix), no vulnerability" },
+  { id = "RUSTSEC-2026-0372", reason = "zvariant_derive unmaintained, dev-dependency only (eframe -> egui-winit -> accesskit_winit -> accesskit_unix), no vulnerability" },
+  # `quick-xml` is reached through eframe (egui-winit -> accesskit_winit ->
+  # accesskit_unix -> atspi-common -> zbus_xml) and the `wayland-scanner` proc
+  # macro (winit -> smithay-client-toolkit), a dev-dependency used by the examples
+  # only. It parses D-Bus introspection / Wayland protocol XML shipped with those
+  # crates, never untrusted input. Fixed in quick-xml 0.41; the version picked
+  # depends on how the dependency tree resolves, since `Cargo.lock` is not
+  # versioned (CI resolves 0.38 while a fresh local lock may resolve 0.41, so
+  # `cargo deny` warns "advisory not detected" there).
+  { id = "RUSTSEC-2026-0194", reason = "quick-xml quadratic attribute check, trusted XML, dev-dependency only" },
+  { id = "RUSTSEC-2026-0195", reason = "quick-xml unbounded namespace allocation, trusted XML, dev-dependency only" },
 ]
 
 
