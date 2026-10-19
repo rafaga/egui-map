@@ -1751,7 +1751,7 @@ impl SegmentAnimations {
     /// the dash a soft edge rather than the aliasing a hard step would show
     /// under magnification.
     fn dash_texture(ctx: &Context) -> TextureHandle {
-        let id = Id::new("egui_map::dash_texture");
+        let id = Id::unique("egui_map::dash_texture");
         if let Some(handle) = ctx.data(|d| d.get_temp::<TextureHandle>(id)) {
             return handle;
         }
@@ -1849,7 +1849,7 @@ impl SegmentAnimations {
     /// instead of `Repeat` -- the zero-alpha edges are exactly what makes
     /// sampling past `[0, 1]` fade out instead of wrapping.
     fn glow_band_texture(ctx: &Context) -> TextureHandle {
-        let id = Id::new("egui_map::glow_band_texture");
+        let id = Id::unique("egui_map::glow_band_texture");
         if let Some(handle) = ctx.data(|d| d.get_temp::<TextureHandle>(id)) {
             return handle;
         }
@@ -1955,7 +1955,7 @@ impl SegmentAnimations {
     /// cached per distinct pair, so changing them while the app runs
     /// registers a new one (a few kilobytes) the first time it is drawn.
     fn chevrons_texture(ctx: &Context, leg_slope: f32, fill: f32) -> TextureHandle {
-        let id = Id::new((
+        let id = Id::unique((
             "egui_map::chevrons_texture",
             leg_slope.to_bits(),
             fill.to_bits(),

@@ -1351,6 +1351,7 @@ impl Map {
                                 delta,
                                 modifiers,
                                 phase: _,
+                                source: _,
                             } => {
                                 #[cfg(target_os = "macos")]
                                 let zoom_modifier = if modifiers.mac_cmd {

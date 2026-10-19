@@ -239,7 +239,7 @@ impl Map {
         };
         let response = ui.interact(
             rect,
-            ui.id().with("egui_map_minimap"),
+            ui.scope_id().with("egui_map_minimap"),
             Sense::click_and_drag(),
         );
         let pressed = ui.input(|input| input.pointer.primary_down());
