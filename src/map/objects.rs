@@ -9,6 +9,7 @@
 //! [`super::theme`], via [`MapTheme`](super::theme::MapTheme).
 
 use crate::map::animation::{self, Animation, SegmentAnimations};
+use crate::map::layer::NodeLayers;
 use crate::map::minimap::MinimapSettings;
 pub use crate::map::outline::NodeOutline;
 use crate::map::path::SegmentPath;
@@ -1674,6 +1675,13 @@ pub struct NodeContext<'a> {
     /// template drawing an effect itself (e.g. [`Animation::glow`] above) uses
     /// the same values the built-in path would.
     pub animation: Animation,
+    /// The layers installed in
+    /// [`LayerSlot::OverNodeBody`](super::layer::LayerSlot::OverNodeBody), for
+    /// this node. A template calls [`NodeLayers::paint`] with the node's
+    /// outline where it wants them -- typically between the background and
+    /// the label. Check [`NodeLayers::is_empty`] first to skip the work when
+    /// there is none.
+    pub layers: NodeLayers<'a>,
 }
 
 /// How long [`NodeContext::marker`] takes to fade in or out, in seconds.

@@ -228,9 +228,11 @@ use std::time::Instant;
 #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
 use web_time::Instant;
 
+use self::layer::{LayerContext, LayerEntry, LayerPoint, LayerSlot, LayerTemplate, NodeLayers};
 use self::objects::{LabelTemplate, NodeTemplate, SegmentTemplate};
 
 pub mod animation;
+pub mod layer;
 pub mod minimap;
 pub mod objects;
 pub mod outline;
@@ -362,6 +364,8 @@ pub struct Map {
     node_template: Option<Rc<dyn NodeTemplate>>,
     segment_template: Option<Rc<dyn SegmentTemplate>>,
     label_template: Option<Rc<dyn LabelTemplate>>,
+    /// The installed layers, ordered by `z` (see [`Map::add_layer`]).
+    layers: Vec<LayerEntry>,
     markers: HashMap<usize, usize>,
     /// Fade of [`NodeContext::marker`](objects::NodeContext::marker), keyed
     /// by node id. An entry stays after fading out (at most one per node).
@@ -851,6 +855,9 @@ impl Widget for &mut Map {
 
                 self.paint_region_labels(&paint, &resp, &min_point);
 
+                let time = ui.input(|input| input.time) as f32;
+                self.paint_layers(LayerSlot::BelowLines, &paint, resp.rect, &min_point, time);
+
                 self.paint_free_labels(&paint, &min_point);
 
                 self.drop_stale_notifications();
@@ -861,6 +868,8 @@ impl Widget for &mut Map {
                 for segment in self.paint_map_lines(&paint, &min_point) {
                     self.segment_notifications.remove(&segment);
                 }
+
+                self.paint_layers(LayerSlot::BelowNodes, &paint, resp.rect, &min_point, time);
 
                 self.hovered_node = self.find_hovered_node(&resp, &min_point);
 
@@ -873,6 +882,8 @@ impl Widget for &mut Map {
                 }
 
                 self.paint_markers(ui, &min_point);
+
+                self.paint_layers(LayerSlot::AboveNodes, &paint, resp.rect, &min_point, time);
 
                 // Before the sub-components, so the zoom slider stays on top
                 // of it when both end up in the same corner.
@@ -916,6 +927,8 @@ struct NodePass<'a> {
     time: f32,
     /// The node under the pointer, `0` when there is none.
     nearest_id: usize,
+    /// The layers of `LayerSlot::OverNodeBody`, visible ones.
+    over_body: Vec<Rc<dyn LayerTemplate>>,
 }
 
 /// What a node pass hands back to its caller.
@@ -1010,6 +1023,7 @@ impl Map {
             node_template: None,
             segment_template: None,
             label_template: None,
+            layers: Vec::new(),
             markers: HashMap::new(),
             marker_presence: HashMap::new(),
             hovered_node: None,
@@ -1772,6 +1786,7 @@ impl Map {
             now: Instant::now(),
             time: ui_obj.input(|i| i.time) as f32,
             nearest_id: self.nearest_hovered_node(resp, min_point).unwrap_or(0),
+            over_body: self.layer_templates(LayerSlot::OverNodeBody),
         };
 
         // filling text settings
@@ -2034,6 +2049,14 @@ impl Map {
             theme: pass.theme,
             marker,
             animation: self.settings.animation,
+            layers: NodeLayers::new(
+                &pass.over_body,
+                system,
+                viewport_point.into(),
+                self.zoom,
+                pass.theme,
+                pass.time,
+            ),
         };
         // Learn how far this template's nodes reach, in map
         // units, for `find_hovered_node`'s search radius.
@@ -2498,6 +2521,111 @@ impl Map {
     pub fn set_node_template(&mut self, template: Rc<dyn NodeTemplate>) {
         self.node_template = Some(template);
         self.outline_reach.set(0.0);
+    }
+
+    /// Installs a layer, or replaces the one with the same `id`.
+    ///
+    /// A [`LayerTemplate`] draws something of its own at the place of the
+    /// map's paint order that `slot` says (a heatmap, an ownership overlay...).
+    /// Layers of one slot are painted by ascending `z`; with an equal `z`, in
+    /// the order they were added. The map keeps no data of the layer: it lives
+    /// in the template. See the [`layer`] module.
+    pub fn add_layer(
+        &mut self,
+        id: impl Into<String>,
+        slot: LayerSlot,
+        z: i32,
+        template: Rc<dyn LayerTemplate>,
+    ) {
+        let id = id.into();
+        self.layers.retain(|layer| layer.id != id);
+        // After the layers of the same `z`: stable order of arrival.
+        let index = self.layers.partition_point(|layer| layer.z <= z);
+        self.layers.insert(
+            index,
+            LayerEntry {
+                id,
+                slot,
+                z,
+                visible: true,
+                template,
+            },
+        );
+    }
+
+    /// Removes the layer `id`. Returns whether there was one.
+    pub fn remove_layer(&mut self, id: &str) -> bool {
+        let before = self.layers.len();
+        self.layers.retain(|layer| layer.id != id);
+        self.layers.len() != before
+    }
+
+    /// Shows or hides the layer `id` without removing it. Returns whether
+    /// there is such a layer.
+    pub fn set_layer_visible(&mut self, id: &str, visible: bool) -> bool {
+        match self.layers.iter_mut().find(|layer| layer.id == id) {
+            Some(layer) => {
+                layer.visible = visible;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Whether the layer `id` is shown, or `None` when there is no such layer.
+    pub fn layer_visible(&self, id: &str) -> Option<bool> {
+        self.layers
+            .iter()
+            .find(|layer| layer.id == id)
+            .map(|layer| layer.visible)
+    }
+
+    /// The visible layers of `slot`, in paint order.
+    fn layer_templates(&self, slot: LayerSlot) -> Vec<Rc<dyn LayerTemplate>> {
+        self.layers
+            .iter()
+            .filter(|layer| layer.visible && layer.slot == slot)
+            .map(|layer| Rc::clone(&layer.template))
+            .collect()
+    }
+
+    /// Paints the visible layers of `slot` (not `OverNodeBody`, which the
+    /// node templates paint node by node).
+    fn paint_layers(
+        &self,
+        slot: LayerSlot,
+        paint: &Painter,
+        rect: Rect,
+        min_point: &RawPoint,
+        time: f32,
+    ) {
+        let templates = self.layer_templates(slot);
+        if templates.is_empty() {
+            return;
+        }
+        let _span = tracing::info_span!("paint_layers").entered();
+        let points: Vec<LayerPoint<'_>> = match &self.points {
+            Some(points) => self
+                .visible_points
+                .iter()
+                .filter_map(|id| points.get(&id.cast_unsigned()))
+                .map(|point| LayerPoint {
+                    position: (RawPoint::from(point.coords) * self.zoom - min_point).into(),
+                    point,
+                })
+                .collect(),
+            None => Vec::new(),
+        };
+        let context = LayerContext {
+            rect,
+            zoom: self.zoom,
+            theme: self.theme_colors(),
+            time,
+            points: &points,
+        };
+        for template in templates {
+            template.layer_ui(paint, context);
+        }
     }
 
     /// Replaces the built-in segment rendering with a custom

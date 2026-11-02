@@ -10,6 +10,20 @@ any minor bump may include breaking changes, called out below as such).
 
 ### Added
 
+- Layers: `map::layer::LayerTemplate`, the fourth template of the family, to
+  draw things of the application's own on the map -- a heatmap, an ownership
+  overlay, a range ring -- without the map knowing their data. A layer is
+  installed with `Map::add_layer(id, slot, z, template)` (replacing the one
+  with the same id) and managed with `remove_layer`, `set_layer_visible` and
+  `layer_visible`. `LayerSlot` says where it is painted: `BelowLines`,
+  `BelowNodes`, `OverNodeBody` or `AboveNodes`; within a slot, by ascending
+  `z`. `LayerTemplate::layer_ui(painter, LayerContext)` is called once per
+  frame (with the visible nodes and their screen positions) for the
+  below/above slots; `LayerTemplate::node_ui(painter, LayerNodeContext)` once
+  per node for `OverNodeBody`, which a `NodeTemplate` triggers with the new
+  `NodeContext::layers` (`NodeLayers::paint(painter, outline)`) between the
+  node's background and its label. Both contexts are `#[non_exhaustive]`.
+
 - Curved connection lines, mixed with straight ones on the same map. Whether
   a `MapSegment` is straight or a curve is decided when it is built:
   `MapSegment::straight` (what `MapSegment::new` is) or
