@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/) (pre-1.0:
 any minor bump may include breaking changes, called out below as such).
 
-## [Unreleased]
+## [0.16.0] - 2026-11-01
 
 ### Added
 
@@ -23,6 +23,16 @@ any minor bump may include breaking changes, called out below as such).
   per node for `OverNodeBody`, which a `NodeTemplate` triggers with the new
   `NodeContext::layers` (`NodeLayers::paint(painter, outline)`) between the
   node's background and its label. Both contexts are `#[non_exhaustive]`.
+
+## [0.15.0] - 2026-10-19
+
+### Changed
+
+- **Breaking:** updated `egui`, `eframe` and `egui_extras` to 0.37.
+
+## [0.14.1] - 2026-10-13
+
+### Added
 
 - Curved connection lines, mixed with straight ones on the same map. Whether
   a `MapSegment` is straight or a curve is decided when it is built:
@@ -57,6 +67,41 @@ any minor bump may include breaking changes, called out below as such).
   literal (use `MapSegment::new`, `straight` or `curved`), and `MapSettings`
   gains the public `default_curvature` one: code that builds it with a struct
   literal and no `..Default::default()` needs to add it.
+
+### Changed
+
+- The written text of the two tutorials moved out of the README into their own
+  files, `docs/tutorial-1-first-map.md` and `docs/tutorial-2-node-template.md`.
+  The README now has a "Tutorials" section that only links them; the headers of
+  `examples/tutorial_map.rs` and `examples/tutorial_node_template.rs` and the
+  `map` module docs point to the files. "Configuring the map" and the other
+  guides stay in the README.
+
+### Fixed
+
+- Documentation that had fallen behind the code:
+  - The README's dependency line said `egui-map = "0.0"`, which Cargo resolves
+    to a `0.0.x` release; it now tells readers to run `cargo add egui-map`,
+    which always picks the latest release and cannot go stale.
+  - The README's `SegmentTemplate` example would not compile: it took the
+    segment effects from `Animation` (they live in `SegmentAnimations`) and
+    drew between `pos_a` and `pos_b`. It now dispatches through
+    `ctx.animation.event(ctx.kind)` / `ctx.animation.state(ctx.kind)` and draws
+    along `ctx.path`. The glow example called `Animation::glow` as an
+    associated function (it is `ctx.animation.glow(..)`), and its rustdoc-only
+    `#` lines showed on GitHub; both are fixed. The region labels pointed at
+    `examples/svg_template.rs`, which has none; it is `examples/animations.rs`.
+  - The rustdoc of `map::animation` and its constants linked to
+    `Animation::flash_decay`, `comet_once`, `wipe`, `comet`, `dash`,
+    `glow_band` and `chevrons`, which are methods of `SegmentAnimations`: 34
+    broken links, so `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps` failed.
+    The docs of `SegmentTemplate`, its contexts and `SegmentAnimation` sent
+    readers to `Animation` for the effects too.
+
+## [0.14.0] - 2026-10-11
+
+### Added
+
 - An optional minimap: a small overview of the whole map pinned to a corner,
   with the part the main view shows outlined on it. Pressing or dragging
   inside it recentres the main view, and the main map does not pan underneath
@@ -83,25 +128,6 @@ any minor bump may include breaking changes, called out below as such).
   fades keep it). `LineFade` is `#[non_exhaustive]`, so a `match` on it needs a `_`
   arm. `MapSettings` gains the public `line_fade` field: code that builds it
   with a struct literal and no `..Default::default()` needs to add it.
-- `SegmentHandle::direction(CometDirection)`: a modifier, like `color`, that
-  says which endpoint a segment effect runs from -- `Forward` (the default)
-  from the first endpoint to the second, `Reverse` the other way. It applies
-  to every directional effect: `comet_once`, `wipe`, `comet`, `dash`,
-  `glow_band` and `chevrons`; `flash` lights the whole line at once and has
-  none. Before, reversing a lasting effect meant swapping the endpoints of the
-  segment itself.
-- `Animation::lasting_event` and `Animation::lasting_event_outline` draw a
-  node event effect the way a lasting notification does (repeated, with the
-  `ripple` looping seamlessly and the `countdown` emptying over the whole
-  notification), for a `NodeTemplate` that draws the effect itself; they take
-  the moment the notification starts and the one it ends at.
-  `NotificationContext::effect_start`, which restarts the effect every cycle,
-  keeps working but can do neither.
-- `CometDirection::orient(a, b)` returns the `(from, to)` pair an effect runs
-  along in that direction, for a `SegmentTemplate` that draws the effect
-  itself. `SegmentStateContext` and `SegmentNotificationContext` have a new
-  `direction` field with the direction that was asked for.
-
 - The zoom slider now has a read-out under it showing the zoom as a percentage
   (`100%` at the default zoom, `10%` to `200%` with the default limits), drawn
   with the theme's `text` color.
@@ -153,6 +179,32 @@ any minor bump may include breaking changes, called out below as such).
   corner (80 pixels in, 120 down): it is pinned to the corner, `margin` pixels
   from both edges, and positioned from the area the map paints into, the same
   one the minimap uses. Set `slider.anchor` to move it.
+
+## [0.13.0] - 2026-10-02
+
+### Added
+
+- `SegmentHandle::direction(CometDirection)`: a modifier, like `color`, that
+  says which endpoint a segment effect runs from -- `Forward` (the default)
+  from the first endpoint to the second, `Reverse` the other way. It applies
+  to every directional effect: `comet_once`, `wipe`, `comet`, `dash`,
+  `glow_band` and `chevrons`; `flash` lights the whole line at once and has
+  none. Before, reversing a lasting effect meant swapping the endpoints of the
+  segment itself.
+- `Animation::lasting_event` and `Animation::lasting_event_outline` draw a
+  node event effect the way a lasting notification does (repeated, with the
+  `ripple` looping seamlessly and the `countdown` emptying over the whole
+  notification), for a `NodeTemplate` that draws the effect itself; they take
+  the moment the notification starts and the one it ends at.
+  `NotificationContext::effect_start`, which restarts the effect every cycle,
+  keeps working but can do neither.
+- `CometDirection::orient(a, b)` returns the `(from, to)` pair an effect runs
+  along in that direction, for a `SegmentTemplate` that draws the effect
+  itself. `SegmentStateContext` and `SegmentNotificationContext` have a new
+  `direction` field with the direction that was asked for.
+
+### Changed
+
 - The `glow_band` ribbon is `GlowBand::thickness` screen pixels wide whatever
   the zoom (it was multiplied by it), like the default stroke, the `dash` and
   the `chevrons`: the lasting segment effects keep their thickness when the
@@ -256,12 +308,6 @@ any minor bump may include breaking changes, called out below as such).
   `examples/basic.rs`, plus *Forward*/*Reverse* radio buttons that set the
   direction of every segment effect that has one. The timers are one generic
   repeater instead of one per kind of effect.
-- The written text of the two tutorials moved out of the README into their own
-  files, `docs/tutorial-1-first-map.md` and `docs/tutorial-2-node-template.md`.
-  The README now has a "Tutorials" section that only links them; the headers of
-  `examples/tutorial_map.rs` and `examples/tutorial_node_template.rs` and the
-  `map` module docs point to the files. "Configuring the map" and the other
-  guides stay in the README.
 
 ### Fixed
 
@@ -294,27 +340,53 @@ any minor bump may include breaking changes, called out below as such).
   `Countdown::duration`.
 - The `countdown` ring empties smoothly. It was drawn in steps of a 48th of a
   turn, which showed as the end of the arc jumping on a slow countdown.
+
+## [0.12.0] - 2026-09-29
+
+### Fixed
+
 - Region labels are laid out again when `pixels_per_point` changes (the
   window moved to a screen with another scale): the cached galleys were
   reused at the old scale, drawn blurry and made epaint warn on every frame.
-- Documentation that had fallen behind the code:
-  - The README's dependency line said `egui-map = "0.0"`, which Cargo resolves
-    to a `0.0.x` release; it now tells readers to run `cargo add egui-map`,
-    which always picks the latest release and cannot go stale.
-  - The README's `SegmentTemplate` example would not compile: it took the
-    segment effects from `Animation` (they live in `SegmentAnimations`) and
-    drew between `pos_a` and `pos_b`. It now dispatches through
-    `ctx.animation.event(ctx.kind)` / `ctx.animation.state(ctx.kind)` and draws
-    along `ctx.path`. The glow example called `Animation::glow` as an
-    associated function (it is `ctx.animation.glow(..)`), and its rustdoc-only
-    `#` lines showed on GitHub; both are fixed. The region labels pointed at
-    `examples/svg_template.rs`, which has none; it is `examples/animations.rs`.
-  - The rustdoc of `map::animation` and its constants linked to
-    `Animation::flash_decay`, `comet_once`, `wipe`, `comet`, `dash`,
-    `glow_band` and `chevrons`, which are methods of `SegmentAnimations`: 34
-    broken links, so `RUSTDOCFLAGS="-D warnings" cargo doc --no-deps` failed.
-    The docs of `SegmentTemplate`, its contexts and `SegmentAnimation` sent
-    readers to `Animation` for the effects too.
+
+## [0.11.0] - 2026-09-25
+
+### Added
+
+- `MapSettings::segment_animation` (`SegmentAnimations`), the same per-effect
+  tuning for the built-in segment effects: `FlashDecay`, `CometOnce`, `Wipe`,
+  `Comet`, `Dash`, `GlowBand` and `Chevrons`, each one `Copy + Default` with a
+  `with(|a| ...)` method. `MarkerContext`, `SegmentContext`,
+  `SegmentNotificationContext` and `SegmentStateContext` hand it to the
+  templates as `animation`. **Breaking:** `MapSettings` gains the public
+  `segment_animation` field and those contexts gain `animation`: code that
+  builds them with a struct literal needs to add it.
+
+## [0.10.0] - 2026-09-25
+
+### Added
+
+- `Animation` is now a configuration struct with one `Copy + Default` sub-config
+  per built-in node effect (`Pulse`, `Ripple`, `Countdown`, `ScaleIn`,
+  `Crosshair`, `Halo`, `Blink`, `Orbit` and `Glow`), each one defaulting to the
+  exact values that were hard-coded before and each with a
+  `with(|a| ...)` method to tune it. `MapSettings::animation` holds the active
+  one, and `NodeContext`, `NotificationContext` and `MarkerContext` hand it to
+  the templates as `ctx.animation`, so a template draws an effect with the same
+  tuning the built-in path uses. `NotificationContext::effect_start` reads its
+  cycle length from it.
+
+### Changed
+
+- **Breaking:** the effects are methods of `Animation` now
+  (`animation.pulse(..)`, `animation.pulse_outline(..)`, ...), and the kind
+  dispatchers (`event`, `event_outline`, `state`, `state_outline`) and
+  `event_duration` carry the configuration. The associated functions, the
+  `node_event_outline` / `node_state_outline` function pointers and the
+  `OutlineEventEffect` / `OutlineStateEffect` aliases are gone (use the
+  methods of `ctx.animation`). `MapSettings` gains the public `animation`
+  field: code that builds it with a struct literal and no
+  `..Default::default()` needs to add it.
 
 ## [0.9.5] - 2026-09-25
 
@@ -792,6 +864,18 @@ and gains another mandatory one, and `MapSettings` drops its two-slot style vect
 Earliest tagged release in this repository's history — there is no prior
 tag to diff against, so no entry is derived here.
 
+[0.16.0]: https://github.com/rafaga/egui-map/compare/0.15.0...0.16.0
+[0.15.0]: https://github.com/rafaga/egui-map/compare/0.14.1...0.15.0
+[0.14.1]: https://github.com/rafaga/egui-map/compare/0.14.0...0.14.1
+[0.14.0]: https://github.com/rafaga/egui-map/compare/0.13.0...0.14.0
+[0.13.0]: https://github.com/rafaga/egui-map/compare/0.12.0...0.13.0
+[0.12.0]: https://github.com/rafaga/egui-map/compare/0.11.0...0.12.0
+[0.11.0]: https://github.com/rafaga/egui-map/compare/0.10.0...0.11.0
+[0.10.0]: https://github.com/rafaga/egui-map/compare/0.9.5...0.10.0
+[0.9.5]: https://github.com/rafaga/egui-map/compare/0.9.4...0.9.5
+[0.9.4]: https://github.com/rafaga/egui-map/compare/0.9.3...0.9.4
+[0.9.3]: https://github.com/rafaga/egui-map/compare/0.9.2...0.9.3
+[0.9.2]: https://github.com/rafaga/egui-map/compare/0.9.1...0.9.2
 [0.9.1]: https://github.com/rafaga/egui-map/compare/0.9.0...0.9.1
 [0.9.0]: https://github.com/rafaga/egui-map/compare/0.8.0...0.9.0
 [0.8.0]: https://github.com/rafaga/egui-map/compare/0.7.0...0.8.0
