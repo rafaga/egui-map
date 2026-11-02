@@ -20,6 +20,17 @@ use egui_map::map::Map;
 use egui_map::map::objects::{MapPoint, MapSegment};
 use std::collections::HashMap;
 
+/// How a line of the example is built.
+#[derive(Clone, Copy)]
+enum Shape {
+    /// A straight line.
+    Straight,
+    /// A curve bent by `MapSettings::default_curvature`.
+    Default,
+    /// A curve with a curvature of its own.
+    Own(f32),
+}
+
 /// The example's map.
 struct Network;
 
@@ -41,17 +52,15 @@ impl Network {
             point.set_name(name.to_string());
             points.insert(id, point);
         }
-        // (from, to, curvature): `None` is a straight line, `Some(None)` a
-        // curve with the default curvature, `Some(Some(x))` one of its own.
-        let lines: [((usize, usize), Option<Option<f32>>); 8] = [
-            ((1, 2), None),
-            ((3, 4), Some(None)),
-            ((5, 6), Some(Some(0.5))),
-            ((1, 3), Some(Some(-0.3))),
-            ((2, 4), Some(Some(0.3))),
-            ((7, 8), Some(Some(0.35))),
-            ((8, 7), Some(Some(0.35))),
-            ((4, 8), None),
+        let lines = [
+            ((1, 2), Shape::Straight),
+            ((3, 4), Shape::Default),
+            ((5, 6), Shape::Own(0.5)),
+            ((1, 3), Shape::Own(-0.3)),
+            ((2, 4), Shape::Own(0.3)),
+            ((7, 8), Shape::Own(0.35)),
+            ((8, 7), Shape::Own(0.35)),
+            ((4, 8), Shape::Straight),
         ];
         let mut segments = Vec::new();
         for (line, shape) in lines {
@@ -64,8 +73,9 @@ impl Network {
             }
             let (from, to) = (points[&line.0].coords, points[&line.1].coords);
             segments.push(match shape {
-                None => MapSegment::straight(line, from, to),
-                Some(curvature) => MapSegment::curved(line, from, to, curvature),
+                Shape::Straight => MapSegment::straight(line, from, to),
+                Shape::Default => MapSegment::curved(line, from, to, None),
+                Shape::Own(curvature) => MapSegment::curved(line, from, to, Some(curvature)),
             });
         }
         let mut map = Map::new();
