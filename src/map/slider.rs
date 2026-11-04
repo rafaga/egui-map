@@ -40,7 +40,7 @@ use egui::emath::GuiRounding;
 use egui::style::HandleShape;
 use egui::{
     Align2, CornerRadius, Pos2, Rect, Sense, Slider, SliderOrientation, Stroke, TextStyle, Ui,
-    UiBuilder, Vec2, lerp, pos2, vec2,
+    UiBuilder, Vec2, WidgetInfo, lerp, pos2, vec2,
 };
 
 /// Configuration of the zoom slider; see the [module](self) docs.
@@ -331,12 +331,32 @@ impl Map {
         )
         .show_value(false)
         .orientation(settings.orientation);
+        // The slider gets an id of its own. A widget's id is derived from how
+        // many widgets were added to its `Ui` before it, and the node
+        // templates add their own to this one (an `Image` a node draws, say).
+        // The zoom moves nodes in and out of the view while the slider is
+        // being dragged, so the slider got another id in the middle of the
+        // drag and egui went on dragging the old one: the handle froze until
+        // the mouse button was released. `scope_id` also cuts the ids of what
+        // is inside from the widgets before it, `id_salt` would not.
         let response = ui
-            .scope_builder(UiBuilder::new().max_rect(layout.rail), |ui| {
-                ui.spacing_mut().slider_width = SliderSettings::RAIL_LENGTH;
-                ui.add(slider)
-            })
+            .scope_builder(
+                UiBuilder::new()
+                    .scope_id(ui.scope_id().with("egui_map_zoom_slider"))
+                    .max_rect(layout.rail),
+                |ui| {
+                    ui.spacing_mut().slider_width = SliderSettings::RAIL_LENGTH;
+                    ui.add(slider)
+                },
+            )
             .inner;
+        response.widget_info(|| {
+            WidgetInfo::slider(
+                true,
+                f64::from(self.zoom),
+                &self.settings.accessibility.zoom_slider,
+            )
+        });
         ui.data_mut(|data| data.insert_temp(dragging_id, response.dragged()));
 
         if settings.ticks {

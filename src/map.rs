@@ -231,6 +231,7 @@ use web_time::Instant;
 use self::layer::{LayerContext, LayerEntry, LayerPoint, LayerSlot, LayerTemplate, NodeLayers};
 use self::objects::{LabelTemplate, NodeTemplate, SegmentTemplate};
 
+pub mod accessibility;
 pub mod animation;
 pub mod layer;
 pub mod minimap;
@@ -377,6 +378,9 @@ pub struct Map {
     /// position, in map units: part of `find_hovered_node`'s search radius.
     /// Reset when the template changes.
     outline_reach: std::cell::Cell<f32>,
+    /// The node activated through the keyboard or assistive technology in the
+    /// last frame; see [`Map::activated_node`].
+    activated_node: std::cell::Cell<Option<usize>>,
     /// The active color palette. See [`Map::set_theme`].
     theme: Rc<dyn MapTheme>,
 }
@@ -804,6 +808,7 @@ impl Widget for &mut Map {
         self.reference.dist = reference_dist;
 
         self.assign_visual_style(ui);
+        self.activated_node.set(None);
 
         let canvas = egui::Frame::canvas(ui.style()).inner_margin(Margin::symmetric(3, 5));
 
@@ -831,6 +836,9 @@ impl Widget for &mut Map {
                 // node near the edge was drawn over the frame and past the
                 // widget. Clip the whole content `Ui` the same way.
                 ui.set_clip_rect(paint.clip_rect());
+                resp.widget_info(|| {
+                    WidgetInfo::labeled(Role::Canvas, true, &self.settings.accessibility.map)
+                });
                 let vec = resp.drag_delta();
                 if vec.length() != 0.0 {
                     let _span = tracing::info_span!("calculating_points_in_visible_area").entered();
@@ -929,6 +937,9 @@ struct NodePass<'a> {
     nearest_id: usize,
     /// The layers of `LayerSlot::OverNodeBody`, visible ones.
     over_body: Vec<Rc<dyn LayerTemplate>>,
+    /// Whether the frame feeds an assistive technology, so the nodes are
+    /// exposed to it.
+    accessible: bool,
 }
 
 /// What a node pass hands back to its caller.
@@ -1028,6 +1039,7 @@ impl Map {
             marker_presence: HashMap::new(),
             hovered_node: None,
             outline_reach: std::cell::Cell::new(0.0),
+            activated_node: std::cell::Cell::new(None),
             segments: None,
             segment_reach: SegmentReach::default(),
             theme: Rc::new(Theme::default()),
@@ -1787,6 +1799,7 @@ impl Map {
             time: ui_obj.input(|i| i.time) as f32,
             nearest_id: self.nearest_hovered_node(resp, min_point).unwrap_or(0),
             over_body: self.layer_templates(LayerSlot::OverNodeBody),
+            accessible: resp.ctx.accesskit_node_builder(resp.id, |_| ()).is_some(),
         };
 
         // filling text settings
@@ -1815,6 +1828,9 @@ impl Map {
             self.paint_node_state(ui_obj, &pass, system, viewport_point, &mut out);
             self.paint_node_notification(ui_obj, &pass, system, viewport_point, &mut out);
             self.paint_node_body(ui_obj, &pass, system, viewport_point, &mut out);
+            if pass.accessible {
+                self.expose_node(ui_obj, &pass, system, viewport_point);
+            }
         }
         paint.extend(out.shapes);
         // Any animated node wants a repaint; requesting it once at the end of
@@ -1826,6 +1842,46 @@ impl Map {
         }
 
         Ok(out.nodes_to_remove)
+    }
+
+    /// Exposes a node to assistive technology and the keyboard: a button named
+    /// after the node that Tab reaches, and that Enter, Space or a screen
+    /// reader's click activates (see [`Map::activated_node`]).
+    ///
+    /// It only senses focus, never the pointer, so it takes nothing from the
+    /// map's own dragging and clicking, and the frames that feed no assistive
+    /// technology skip it altogether.
+    fn expose_node(&self, ui: &mut Ui, pass: &NodePass, point: &MapPoint, position: RawPoint) {
+        let reach = match &self.node_template {
+            Some(template) => template.hit_extent(self.zoom),
+            None => objects::default_hit_extent(self.zoom),
+        }
+        .max(objects::default_hit_extent(self.zoom));
+        let center: Pos2 = position.into();
+        let id = ui.scope_id().with(("egui_map_node", point.id));
+        let response = ui.interact(
+            Rect::from_center_size(center, Vec2::splat(reach * 2.0)),
+            id,
+            Sense::focusable_noninteractive(),
+        );
+        response.widget_info(|| {
+            let name = match &point.name {
+                Some(name) if !name.trim().is_empty() => name.clone(),
+                _ => format!("{} {}", self.settings.accessibility.unnamed_node, point.id),
+            };
+            WidgetInfo::labeled(Role::Button, true, name)
+        });
+        let pressed = response.has_focus()
+            && ui.input(|input| input.key_pressed(Key::Enter) || input.key_pressed(Key::Space));
+        let asked =
+            ui.input(|input| input.has_accesskit_action_request(id, accesskit::Action::Click));
+        if pressed || asked {
+            self.activated_node.set(Some(point.id));
+        }
+        if response.has_focus() {
+            pass.paint
+                .circle_stroke(center, reach, Stroke::new(2.0, pass.theme.selected));
+        }
     }
 
     /// The node under the pointer, when node names show on hover.
@@ -2708,6 +2764,31 @@ impl Map {
     /// ```
     pub fn hovered_node(&self) -> Option<usize> {
         self.hovered_node
+    }
+
+    /// The node the user activated in the last frame, through the keyboard
+    /// (Tab to reach it, then Enter or Space) or through assistive technology
+    /// such as a screen reader. `None` when none was.
+    ///
+    /// Nodes are only exposed in the frames where egui feeds an assistive
+    /// technology (AccessKit), so this stays `None` otherwise: a mouse click on
+    /// a node is not reported here, keep using
+    /// [`hovered_node`](Self::hovered_node) with the response of the widget
+    /// for that. Each exposed node is a button named after
+    /// [`MapPoint::name`], or `"Node <id>"` (see
+    /// [`AccessibilityLabels::unnamed_node`](accessibility::AccessibilityLabels::unnamed_node)).
+    ///
+    /// ```no_run
+    /// # use egui_map::map::Map;
+    /// # fn show(ui: &mut egui::Ui, map: &mut Map) {
+    /// ui.add(&mut *map);
+    /// if let Some(id) = map.activated_node() {
+    ///     println!("node {id} activated");
+    /// }
+    /// # }
+    /// ```
+    pub fn activated_node(&self) -> Option<usize> {
+        self.activated_node.get()
     }
 
     /// Finds the node under the pointer. Candidates are every node whose

@@ -6,6 +6,48 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/) (pre-1.0:
 any minor bump may include breaking changes, called out below as such).
 
+## [0.17.0] - 2026-11-04
+
+### Added
+
+- Accessibility: the map now names its controls for screen readers through the
+  AccessKit tree that egui builds. The map itself and the minimap are `Canvas`
+  nodes, and the zoom slider is a `Slider` node that carries the current zoom
+  and can be set, raised and lowered by assistive technology. The zoom slider
+  had no name before, which `egui_kittest` reports as an unnamed input widget.
+  The names are in `MapSettings::accessibility`
+  (`map::accessibility::AccessibilityLabels`, English by default: `Map`,
+  `Zoom`, `Minimap`) so an application can translate them.
+- Accessibility: every node on screen is exposed as a `Button` named after
+  `MapPoint::name` (or `Node <id>`, see `AccessibilityLabels::unnamed_node`).
+  Tab reaches it, and Enter, Space or a screen reader's click activates it;
+  the focused node gets a ring in the theme's `selected` color. The
+  activation is read with the new `Map::activated_node`. The buttons sense
+  focus only, never the pointer, so dragging and hovering over nodes work as
+  before, and they exist only in the frames where egui feeds an assistive
+  technology (AccessKit), so a map without one pays nothing.
+- `tests/accessibility.rs`: tests that read the AccessKit tree with
+  `egui_kittest` (new dev-dependency).
+- Tests for what had none: `tests/interaction.rs` (wheel zoom and its limits,
+  dragging, the context menu) and `tests/effects_api.rs` (the `*_outline`
+  effect helpers, `LineFade::has_threshold`, `CometDirection::orient`,
+  `NotificationContext::effect_start`).
+
+### Fixed
+
+- The zoom slider no longer freezes in the middle of a drag when a node
+  template adds widgets of its own (an `Image` drawn with `ui.put`, say). The
+  slider's id was derived from how many widgets had been added before it, so
+  when the zoom moved a node in or out of the view the slider got a new id and
+  egui went on dragging the old one: the handle stopped following the mouse
+  until the button was released. It now has an id of its own.
+
+### Changed
+
+- **Breaking:** `MapSettings` has a new public field, `accessibility`. Code that
+  builds `MapSettings` with a struct literal must add it (or use
+  `..MapSettings::default()`).
+
 ## [0.16.0] - 2026-11-01
 
 ### Added

@@ -33,8 +33,8 @@ use super::overlay::Corner;
 use super::path::SegmentPath;
 use egui::emath::GuiRounding;
 use egui::{
-    Color32, CornerRadius, CursorIcon, Painter, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui,
-    Vec2, pos2, vec2,
+    Color32, CornerRadius, CursorIcon, Painter, Pos2, Rect, Role, Sense, Shape, Stroke, StrokeKind,
+    Ui, Vec2, WidgetInfo, pos2, vec2,
 };
 
 /// Configuration of the minimap overlay; see the [module](self) docs.
@@ -251,6 +251,9 @@ impl Map {
             let position = position.clamp(rect.min, rect.max);
             self.set_pos(transform.to_world(position));
         }
+        response.widget_info(|| {
+            WidgetInfo::labeled(Role::Canvas, true, &self.settings.accessibility.minimap)
+        });
         response.on_hover_cursor(CursorIcon::PointingHand);
     }
 

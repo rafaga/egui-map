@@ -8,6 +8,7 @@
 //! [`LabelTemplate`]. The color palette a `Style` paints with lives in
 //! [`super::theme`], via [`MapTheme`](super::theme::MapTheme).
 
+use crate::map::accessibility::AccessibilityLabels;
 use crate::map::animation::{self, Animation, SegmentAnimations};
 use crate::map::layer::NodeLayers;
 use crate::map::minimap::MinimapSettings;
@@ -949,6 +950,9 @@ pub struct MapSettings {
     /// The zoom slider and the zoom read-out under it: where they are pinned
     /// and whether they are drawn.
     pub slider: SliderSettings,
+    /// The names the map, its zoom slider and its minimap give to screen
+    /// readers; see [`AccessibilityLabels`].
+    pub accessibility: AccessibilityLabels,
 }
 
 impl MapSettings {
@@ -975,6 +979,7 @@ impl MapSettings {
             segment_animation: SegmentAnimations::default(),
             minimap: MinimapSettings::default(),
             slider: SliderSettings::default(),
+            accessibility: AccessibilityLabels::default(),
         }
     }
 }
@@ -1013,6 +1018,7 @@ impl Default for MapSettings {
             segment_animation: SegmentAnimations::default(),
             minimap: MinimapSettings::default(),
             slider: SliderSettings::default(),
+            accessibility: AccessibilityLabels::default(),
         }
     }
 }
