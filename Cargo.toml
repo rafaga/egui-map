@@ -67,6 +67,8 @@ tracing-tracy = { version = "0.12", optional = true }
 [dev-dependencies]
 eframe = "0.37"
 egui_extras = { version = "0.37", features = ["svg"] }
+# AccessKit-based UI tests (`tests/accessibility.rs`).
+egui_kittest = "0.37"
 
 [[example]]
 name = "tracy_profile"
