@@ -367,7 +367,11 @@ fn the_focus_moves_between_the_nodes_with_tab() {
 
 #[test]
 fn dragging_from_a_node_still_pans_the_map() {
-    let mut harness = harness(named_map());
+    // A map bigger than the viewport: one that fits in it stays centered.
+    let mut map = named_map();
+    map.insert_point(MapPoint::new(4, [-1000.0, 0.0]));
+    map.insert_point(MapPoint::new(5, [1000.0, 0.0]));
+    let mut harness = harness(map);
     harness.run();
     let node = harness
         .get_by_role_and_label(Role::Button, "Jita")

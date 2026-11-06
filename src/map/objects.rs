@@ -567,11 +567,23 @@ impl RegionLabel {
 /// struct, same as `SdeSegment`. It is the box around the two end points, also
 /// for a curve: the viewport culling and [`Map::line_at`](super::Map::line_at)
 /// allow for how far a curve bows out of it.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct MapSegment {
     /// Identifier shared with the line key (and with the
     /// [`MapPoint::connections`] of the endpoint nodes).
     pub id: (usize, usize),
+    /// A text drawn on the line, at its middle: what the line is about (the
+    /// id of a signature, say). `None` (the default) draws nothing.
+    ///
+    /// The built-in stroke draws it with the size and color of the node
+    /// names, over a patch of the map's background so it reads on top of the
+    /// line; a [`SegmentTemplate`] gets it in [`SegmentContext::segment`] and
+    /// draws it as it likes.
+    pub label: Option<String>,
+    /// Whether the built-in stroke draws this line as dashes instead of a
+    /// solid line. Set with [`MapSegment::dashed`]. A template reads it with
+    /// [`MapSegment::is_dashed`].
+    pub(crate) dashed: bool,
     /// One endpoint of the segment, in map coordinates.
     pub point1: [f32; 2],
     /// The other endpoint of the segment, in map coordinates.
@@ -612,11 +624,32 @@ impl MapSegment {
     pub fn straight(id: (usize, usize), point1: [f32; 2], point2: [f32; 2]) -> Self {
         Self {
             id,
+            label: None,
+            dashed: false,
             point1,
             point2,
             color: None,
             shape: LineShape::Straight,
         }
+    }
+
+    /// This segment with `label` written on it (see [`Self::label`]).
+    pub fn with_label(mut self, label: impl Into<String>) -> Self {
+        self.label = Some(label.into());
+        self
+    }
+
+    /// This segment drawn as a dashed line by the built-in stroke, not a
+    /// solid one: a link that is not permanent, say.
+    pub fn dashed(mut self) -> Self {
+        self.dashed = true;
+        self
+    }
+
+    /// Whether the built-in stroke draws this segment as dashes (see
+    /// [`Self::dashed`]).
+    pub fn is_dashed(&self) -> bool {
+        self.dashed
     }
 
     /// Creates a curved segment for `id` between `point1` and `point2`.
@@ -944,6 +977,8 @@ pub struct MapSettings {
     /// ([`SegmentAnimations`]). Same defaults-preserve-behavior contract as
     /// [`Self::animation`].
     pub segment_animation: SegmentAnimations,
+    /// The dashes of the lines marked with [`MapSegment::dashed`].
+    pub segment_dash: DashPattern,
     /// The minimap overlay. Off by default; see
     /// [`MinimapSettings::enabled`].
     pub minimap: MinimapSettings,
@@ -953,6 +988,25 @@ pub struct MapSettings {
     /// The names the map, its zoom slider and its minimap give to screen
     /// readers; see [`AccessibilityLabels`].
     pub accessibility: AccessibilityLabels,
+}
+
+/// The dashes of a line drawn with [`MapSegment::dashed`], in **screen
+/// pixels**: like the width of a line they do not grow with the zoom.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DashPattern {
+    /// Length of each dash.
+    pub dash: f32,
+    /// Length of the gap between two dashes.
+    pub gap: f32,
+}
+
+impl Default for DashPattern {
+    fn default() -> Self {
+        Self {
+            dash: 8.0,
+            gap: 5.0,
+        }
+    }
 }
 
 impl MapSettings {
@@ -977,6 +1031,7 @@ impl MapSettings {
             style: Style::new(),
             animation: Animation::default(),
             segment_animation: SegmentAnimations::default(),
+            segment_dash: DashPattern::default(),
             minimap: MinimapSettings::default(),
             slider: SliderSettings::default(),
             accessibility: AccessibilityLabels::default(),
@@ -1016,6 +1071,7 @@ impl Default for MapSettings {
             },
             animation: Animation::default(),
             segment_animation: SegmentAnimations::default(),
+            segment_dash: DashPattern::default(),
             minimap: MinimapSettings::default(),
             slider: SliderSettings::default(),
             accessibility: AccessibilityLabels::default(),
