@@ -45,11 +45,17 @@ fn pos_of(texts: &[(String, Pos2)], needle: &str) -> Pos2 {
         .1
 }
 
-/// One node at the origin (so the view's reference point is `[0, 0]`) plus two
-/// labels 100 map units apart, drawn at a zoom below `line_visible_zoom`.
+/// One node at the origin and two far away (so the view's reference point is
+/// `[0, 0]`, and the map is bigger than the viewport: the view can't leave a
+/// map, so one that fits in it could not be panned) plus two labels 100 map
+/// units apart, drawn at a zoom below `line_visible_zoom`.
 fn label_map() -> Map {
     let mut map = Map::new();
-    map.add_points(vec![MapPoint::new(1, [0.0, 0.0])]);
+    map.add_points(vec![
+        MapPoint::new(1, [0.0, 0.0]),
+        MapPoint::new(2, [-5000.0, 0.0]),
+        MapPoint::new(3, [5000.0, 0.0]),
+    ]);
     map.add_labels(vec![
         MapLabel {
             text: "L1".to_string(),

@@ -9,12 +9,16 @@ use egui_map::map::objects::{ContextMenuManager, MapPoint};
 use std::cell::Cell;
 use std::rc::Rc;
 
-/// Two nodes, the view on the first one at zoom 1.
+/// Two nodes, the view on the first one at zoom 1. Two more far away make the
+/// map bigger than the viewport: a map that fits in it can't be panned (it
+/// stays centered), and these tests are about panning.
 fn map() -> Map {
     let mut map = Map::new();
     map.add_points(vec![
         MapPoint::new(1, [0.0, 0.0]),
         MapPoint::new(2, [50.0, 0.0]),
+        MapPoint::new(3, [-1000.0, -1000.0]),
+        MapPoint::new(4, [1000.0, 1000.0]),
     ]);
     map.set_pos([0.0, 0.0]);
     map.set_zoom(1.0);

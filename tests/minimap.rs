@@ -274,7 +274,9 @@ fn pressing_off_centre_goes_to_the_matching_map_position() {
     let mut scene = Scene::new(true);
     let (rect, _) = scene.shown_panel();
 
-    let offset = vec2(30.0, -20.0);
+    // Small enough that the place it goes to is inside the map: the view
+    // never leaves it, so a press near a corner would be pulled in.
+    let offset = vec2(30.0, -10.0);
     scene.press_at(rect.center() + offset);
     let scale = Scene::scale(rect);
     let [x, y] = scene.map.get_pos();
@@ -285,12 +287,13 @@ fn pressing_off_centre_goes_to_the_matching_map_position() {
 #[test]
 fn a_press_outside_the_minimap_leaves_the_view_alone() {
     let mut scene = Scene::new(true);
-    scene.map.set_pos([100.0, 100.0]);
+    // A place inside the map: the view can't be anywhere else.
+    scene.map.set_pos([600.0, 400.0]);
     let (rect, area) = scene.shown_panel();
     assert!(!rect.contains(area.center()));
 
     scene.press_at(area.center());
-    assert_eq!(scene.map.get_pos(), [100.0, 100.0]);
+    assert_eq!(scene.map.get_pos(), [600.0, 400.0]);
 }
 
 #[test]
@@ -298,9 +301,9 @@ fn a_disabled_minimap_ignores_the_pointer() {
     let (rect, _) = Scene::new(true).shown_panel();
 
     let mut off = Scene::new(false);
-    off.map.set_pos([100.0, 100.0]);
+    off.map.set_pos([600.0, 400.0]);
     off.press_at(rect.center());
-    assert_eq!(off.map.get_pos(), [100.0, 100.0]);
+    assert_eq!(off.map.get_pos(), [600.0, 400.0]);
 }
 
 #[test]

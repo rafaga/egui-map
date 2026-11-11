@@ -250,6 +250,14 @@ pub mod theme;
 /// lockstep and risking disappearing into it.
 const SEGMENT_EFFECT_ALPHA_BOOST: f32 = 0.2;
 
+/// How close, in screen points, the pointer has to be to a line for its text
+/// to show ([`VisibilitySetting::Hover`] of `segment_label_visibility`).
+const LINE_HOVER_TOLERANCE: f32 = 6.0;
+
+/// The radius of the node the widget draws when no [`NodeTemplate`] is
+/// installed, in map units: it is drawn `4 * zoom` points wide.
+const BUILT_IN_NODE_RADIUS: f32 = 4.0;
+
 /// How far outside the visible rect a [`RegionLabel`]'s *center* point
 /// may still fall and be painted, expressed as a multiple of its current
 /// (zoom-scaled) font size.
@@ -378,6 +386,10 @@ pub struct Map {
     /// position, in map units: part of `find_hovered_node`'s search radius.
     /// Reset when the template changes.
     outline_reach: std::cell::Cell<f32>,
+    /// How far, on each axis, a drawn node's template outline has reached
+    /// from its position, in map units: the room the bounds of the map leave
+    /// around the nodes (see `clamp_view`). Reset when the template changes.
+    outline_extent: std::cell::Cell<[f32; 2]>,
     /// The node activated through the keyboard or assistive technology in the
     /// last frame; see [`Map::activated_node`].
     activated_node: std::cell::Cell<Option<usize>>,
@@ -851,6 +863,9 @@ impl Widget for &mut Map {
                 // before the view is projected below: the map then follows it
                 // in the same frame.
                 self.handle_minimap_input(ui, resp.rect);
+                // However the view got here (a drag, the minimap, a zoom, a
+                // resize, nodes that came or went), it never leaves the map.
+                self.clamp_view();
                 // Centre on the rect we actually paint into. Now that the
                 // painter is sized to the frame's content area this is exactly
                 // `map_area.center()`, but deriving it from `resp.rect` keeps
@@ -873,7 +888,8 @@ impl Widget for &mut Map {
                 let vec_points = &self.visible_points;
                 let hashm = &self.points;
 
-                for segment in self.paint_map_lines(&paint, &min_point) {
+                let label_lines = self.lines_with_label(&resp, &min_point);
+                for segment in self.paint_map_lines(&paint, &min_point, &label_lines) {
                     self.segment_notifications.remove(&segment);
                 }
 
@@ -976,22 +992,27 @@ struct SegmentReach {
 
 impl SegmentReach {
     /// The reach of `segments`.
-    fn of(segments: &[MapSegment]) -> Self {
+    fn of<'a>(segments: impl IntoIterator<Item = &'a MapSegment>) -> Self {
         let mut reach = Self::default();
         for segment in segments {
-            let chord = segment.raw_line().distance();
-            match segment.shape {
-                LineShape::Straight => {}
-                LineShape::Curved(None) => {
-                    reach.longest_default_chord = reach.longest_default_chord.max(chord);
-                }
-                LineShape::Curved(Some(curvature)) => {
-                    let curvature = curvature.abs().min(SegmentPath::MAX_CURVATURE);
-                    reach.own = reach.own.max(curvature * chord);
-                }
-            }
+            reach.include(segment);
         }
         reach
+    }
+
+    /// Takes `segment` into account.
+    fn include(&mut self, segment: &MapSegment) {
+        let chord = segment.raw_line().distance();
+        match segment.shape {
+            LineShape::Straight => {}
+            LineShape::Curved(None) => {
+                self.longest_default_chord = self.longest_default_chord.max(chord);
+            }
+            LineShape::Curved(Some(curvature)) => {
+                let curvature = curvature.abs().min(SegmentPath::MAX_CURVATURE);
+                self.own = self.own.max(curvature * chord);
+            }
+        }
     }
 
     /// The furthest, in map units, any line reaches out of its bounding box
@@ -1039,6 +1060,7 @@ impl Map {
             marker_presence: HashMap::new(),
             hovered_node: None,
             outline_reach: std::cell::Cell::new(0.0),
+            outline_extent: std::cell::Cell::new([0.0, 0.0]),
             activated_node: std::cell::Cell::new(None),
             segments: None,
             segment_reach: SegmentReach::default(),
@@ -1140,6 +1162,13 @@ impl Map {
             let _result = tree.add(entry.coords, entry.get_id());
             hash_map.insert(entry.get_id(), entry);
         }
+        // A map with no nodes has no bounds: they would stay at infinity and
+        // their midpoint is not a number, which the search for the visible
+        // nodes refuses. It is centered on the origin instead.
+        if min.components[0] > max.components[0] {
+            min = RawPoint::new(0.0, 0.0);
+            max = RawPoint::new(0.0, 0.0);
+        }
         // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
         self.reference.min = min;
         self.reference.max = max;
@@ -1209,6 +1238,11 @@ impl Map {
             let _result = tree.add(entry.1.coords, *entry.0);
         }
 
+        // See `add_points`: an empty map is centered on the origin.
+        if min.components[0] > max.components[0] {
+            min = RawPoint::new(0.0, 0.0);
+            max = RawPoint::new(0.0, 0.0);
+        }
         // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
         self.reference.min = min;
         self.reference.max = max;
@@ -1278,6 +1312,13 @@ impl Map {
     }
 
     /// Centers the view on the given map coordinates.
+    ///
+    /// The view can go as far as half of the viewport past the edge of the
+    /// map: the center of the view stays inside the area the nodes take (with
+    /// their size), on any zoom and however small the map is. A position that
+    /// would put it outside is pulled in the next time the map is drawn, so
+    /// [`get_pos`](Self::get_pos) may give the position that was asked for
+    /// until then.
     pub fn set_pos(&mut self, position: [f32; 2]) {
         let _span = tracing::info_span!("set_pos").entered();
         let point = RawPoint::from(position);
@@ -1352,6 +1393,243 @@ impl Map {
         self.segment_ids = segments.iter().map(|s| s.id).collect();
         self.segment_reach = SegmentReach::of(&segments);
         self.segments = Some(rstar::RTree::bulk_load(segments));
+    }
+
+    /// Adds the node `point`, or replaces the one that has its id, without
+    /// touching the rest of the nodes, the lines or where the view is.
+    ///
+    /// Unlike [`add_hashmap_points`](Self::add_hashmap_points) it neither
+    /// replaces the whole node set nor centers the view again, so it is the
+    /// one to use while the map is on screen: a node that appears (or moves)
+    /// does not make the view jump. The bounds of the map follow the nodes:
+    /// they grow to take the new one in.
+    ///
+    /// On a map with no nodes yet it is the same as
+    /// [`add_points`](Self::add_points) with that one node.
+    ///
+    /// ```
+    /// use egui_map::map::Map;
+    /// use egui_map::map::objects::MapPoint;
+    ///
+    /// let mut map = Map::new();
+    /// map.add_points(vec![MapPoint::new(1, [0.0, 0.0]), MapPoint::new(2, [10.0, 10.0])]);
+    /// map.set_pos([2.0, 2.0]);
+    ///
+    /// map.insert_point(MapPoint::new(3, [50.0, 50.0]));
+    /// // The view stays where it was.
+    /// assert_eq!(map.get_pos(), [2.0, 2.0]);
+    /// assert!(map.contains_point(3));
+    /// ```
+    pub fn insert_point(&mut self, point: MapPoint) {
+        let _span = tracing::info_span!("insert_point").entered();
+        let id = point.get_id();
+        let coords = point.coords;
+        let Some(points) = self.points.as_mut() else {
+            self.add_points(vec![point]);
+            return;
+        };
+        match points.insert(id, point) {
+            None => {
+                if let Some(tree) = self.tree.as_mut() {
+                    let _result = tree.add(coords, id);
+                }
+            }
+            Some(previous) if previous.coords == coords => {}
+            // The tree has no way to take a point out: it is built again.
+            Some(_) => self.rebuild_tree(),
+        }
+        self.refresh_bounds();
+    }
+
+    /// Removes the node `id` and returns it, or returns `None` if there is no
+    /// such node. The rest of the nodes and where the view is stay as they
+    /// are.
+    ///
+    /// Everything that hung from the node goes with it: the lines listed in
+    /// its [`MapPoint::connections`] (and the reference to them in the other
+    /// nodes), its markers, its effects and its notifications. The bounds of
+    /// the map follow the nodes: they shrink if it was one of the farthest.
+    ///
+    /// ```
+    /// use egui_map::map::Map;
+    /// use egui_map::map::objects::{MapPoint, MapSegment};
+    ///
+    /// let mut a = MapPoint::new(1, [0.0, 0.0]);
+    /// a.connections.push((1, 2));
+    /// let mut b = MapPoint::new(2, [10.0, 0.0]);
+    /// b.connections.push((1, 2));
+    /// let mut map = Map::new();
+    /// map.add_points(vec![a, b]);
+    /// map.add_lines(vec![MapSegment::new((1, 2), [0.0, 0.0], [10.0, 0.0])]);
+    ///
+    /// assert!(map.remove_point(2).is_some());
+    /// assert!(!map.contains_point(2));
+    /// // The line that joined them is gone too.
+    /// assert!(map.segment((1, 2)).is_none());
+    /// assert!(map.remove_point(2).is_none());
+    /// ```
+    pub fn remove_point(&mut self, id: usize) -> Option<MapPoint> {
+        let _span = tracing::info_span!("remove_point").entered();
+        let point = self.points.as_mut()?.remove(&id)?;
+        for line in &point.connections {
+            self.remove_line(*line);
+        }
+        if let Some(points) = self.points.as_mut() {
+            for other in points.values_mut() {
+                other
+                    .connections
+                    .retain(|line| !point.connections.contains(line));
+            }
+        }
+        self.markers.retain(|_, node| *node != id);
+        self.marker_presence.remove(&id);
+        self.notifications.remove(&id);
+        self.node_states.remove(&id);
+        if self.hovered_node == Some(id) {
+            self.hovered_node = None;
+        }
+        if self.activated_node.get() == Some(id) {
+            self.activated_node.set(None);
+        }
+        self.rebuild_tree();
+        self.refresh_bounds();
+        Some(point)
+    }
+
+    /// Whether the map has a node with this id.
+    pub fn contains_point(&self, id: usize) -> bool {
+        self.points
+            .as_ref()
+            .is_some_and(|points| points.contains_key(&id))
+    }
+
+    /// Adds the line `segment`, or replaces the one that has its id, without
+    /// touching the rest of the lines.
+    ///
+    /// Unlike [`add_lines`](Self::add_lines) it does not replace the whole
+    /// set, so it is the one to use while the map is on screen. The nodes it
+    /// joins do not need to exist yet, but to remove it together with a node
+    /// (see [`remove_point`](Self::remove_point)) list its id in the node's
+    /// [`MapPoint::connections`].
+    ///
+    /// ```
+    /// use egui_map::map::Map;
+    /// use egui_map::map::objects::MapSegment;
+    ///
+    /// let mut map = Map::new();
+    /// map.insert_line(MapSegment::new((1, 2), [0.0, 0.0], [10.0, 0.0]).dashed());
+    /// assert!(map.segment((1, 2)).is_some());
+    /// ```
+    pub fn insert_line(&mut self, segment: MapSegment) {
+        let _span = tracing::info_span!("insert_line").entered();
+        if self.segment_ids.contains(&segment.id) {
+            self.remove_line(segment.id);
+        }
+        self.segment_ids.insert(segment.id);
+        self.segment_reach.include(&segment);
+        self.segments
+            .get_or_insert_with(rstar::RTree::new)
+            .insert(segment);
+    }
+
+    /// Removes the line `id` and returns it, or returns `None` if there is
+    /// no such line. Its effects and notifications go with it.
+    pub fn remove_line(&mut self, id: (usize, usize)) -> Option<MapSegment> {
+        let _span = tracing::info_span!("remove_line").entered();
+        if !self.segment_ids.remove(&id) {
+            return None;
+        }
+        let segments = self.segments.as_mut()?;
+        let found = segments.iter().find(|segment| segment.id == id).cloned()?;
+        let removed = segments.remove(&found);
+        self.segment_reach = SegmentReach::of(segments.iter());
+        self.segment_states.remove(&id);
+        self.segment_notifications.remove(&id);
+        removed
+    }
+
+    /// Builds the kd-tree again from the nodes there are.
+    fn rebuild_tree(&mut self) {
+        let mut tree = KdTree::<f32, usize, [f32; 2]>::new(2);
+        if let Some(points) = &self.points {
+            for (id, point) in points {
+                let _result = tree.add(point.coords, *id);
+            }
+        }
+        self.tree = Some(tree);
+    }
+
+    /// Makes the bounds of the map those of the nodes there are now, and
+    /// refreshes what depends on them. The view stays where it is.
+    fn refresh_bounds(&mut self) {
+        let mut min = RawPoint::new(f32::INFINITY, f32::INFINITY);
+        let mut max = RawPoint::new(f32::NEG_INFINITY, f32::NEG_INFINITY);
+        if let Some(points) = &self.points {
+            for point in points.values() {
+                for axis in 0..min.components.len() {
+                    min.components[axis] = min.components[axis].min(point.coords[axis]);
+                    max.components[axis] = max.components[axis].max(point.coords[axis]);
+                }
+            }
+        }
+        if min.components[0] > max.components[0] {
+            // No nodes left.
+            min = RawPoint::new(0.0, 0.0);
+            max = RawPoint::new(0.0, 0.0);
+        }
+        self.reference.min = min;
+        self.reference.max = max;
+        self.adjust_bounds();
+        self.calculate_visible_points();
+    }
+
+    /// The room the nodes need around their position, on each axis and in map
+    /// units: what the template's outlines reach once they have been drawn,
+    /// or the radius of the built-in circle.
+    fn node_extent(&self) -> [f32; 2] {
+        if self.node_template.is_some() {
+            self.outline_extent.get()
+        } else {
+            [BUILT_IN_NODE_RADIUS; 2]
+        }
+    }
+
+    /// The area the map draws, in map units: the nodes and their size.
+    fn content_area(&self) -> Rect {
+        let [extent_x, extent_y] = self.node_extent();
+        Rect::from_min_max(
+            Pos2::new(
+                self.reference.min.components[0] - extent_x,
+                self.reference.min.components[1] - extent_y,
+            ),
+            Pos2::new(
+                self.reference.max.components[0] + extent_x,
+                self.reference.max.components[1] + extent_y,
+            ),
+        )
+    }
+
+    /// Keeps the view on the map: its center never leaves
+    /// [`content_area`](Self::content_area), so at most half of the viewport
+    /// goes past the edge of the map (on each axis), whatever the zoom and
+    /// however small the map is. The bounds are those of the nodes there are,
+    /// so they grow with the ones that are added and shrink with the ones that
+    /// are removed.
+    fn clamp_view(&mut self) {
+        if self.zoom <= 0.0 || self.map_area.width() <= 0.0 || self.map_area.height() <= 0.0 {
+            return;
+        }
+        let area = self.content_area();
+        let mut position = self.reference.pos;
+        let ranges = [(area.min.x, area.max.x), (area.min.y, area.max.y)];
+        for (axis, (low, high)) in ranges.into_iter().enumerate() {
+            position.components[axis] = position.components[axis].clamp(low, high);
+        }
+        if position.components != self.reference.pos.components {
+            self.reference.pos = position;
+            self.adjust_bounds();
+            self.calculate_visible_points();
+        }
     }
 
     fn adjust_bounds(&mut self) {
@@ -2116,12 +2394,22 @@ impl Map {
         };
         // Learn how far this template's nodes reach, in map
         // units, for `find_hovered_node`'s search radius.
-        let reach = node_template
-            .outline(node_context.hit())
-            .extent_from(node_context.position)
-            / self.zoom;
+        let outline = node_template.outline(node_context.hit());
+        let position = node_context.position;
+        let reach = outline.extent_from(position) / self.zoom;
         if reach > self.outline_reach.get() {
             self.outline_reach.set(reach);
+        }
+        // And on each axis, for the room around the nodes at the bounds.
+        let rect = outline.bounding_rect();
+        let half = [
+            (rect.max.x - position.x).max(position.x - rect.min.x) / self.zoom,
+            (rect.max.y - position.y).max(position.y - rect.min.y) / self.zoom,
+        ];
+        let extent = self.outline_extent.get();
+        if half[0] > extent[0] || half[1] > extent[1] {
+            self.outline_extent
+                .set([extent[0].max(half[0]), extent[1].max(half[1])]);
         }
         node_template.node_ui(ui_obj, node_context);
     }
@@ -2129,7 +2417,54 @@ impl Map {
     /// Draws the connection lines, plus any segment effects, returning the ids
     /// of segment notifications that finished this frame so the caller can
     /// drop them (same pattern as [`Map::paint_map_points`]'s return value).
-    fn paint_map_lines(&self, painter: &Painter, min_point: &RawPoint) -> Vec<(usize, usize)> {
+    /// The lines whose text is written, when
+    /// [`MapSettings::segment_label_visibility`] is
+    /// [`VisibilitySetting::Hover`]: the one under the pointer or, when the
+    /// pointer is over a node that hangs from the map by a single line, that
+    /// line (the node was found the frame before: one frame is not noticed).
+    /// Empty otherwise.
+    fn lines_with_label(&self, resp: &Response, min_point: &RawPoint) -> Vec<(usize, usize)> {
+        let mut lines = Vec::new();
+        if self.settings.segment_label_visibility != VisibilitySetting::Hover
+            || self.segments.is_none()
+            || !resp.hovered()
+        {
+            return lines;
+        }
+        let Some(pointer) = resp.hover_pos() else {
+            return lines;
+        };
+        // A pointer on a node is on every line that ends at it, so the node
+        // decides, not the line: the one it hangs by, if it hangs by one.
+        let Some(node) = self.hovered_node else {
+            let at = (RawPoint::from(pointer) + *min_point) / self.zoom;
+            let tolerance = LINE_HOVER_TOLERANCE / self.zoom;
+            lines.extend(self.line_at(at.into(), tolerance));
+            return lines;
+        };
+        if let (Some(points), Some(segments)) = (&self.points, &self.segments)
+            && let Some(point) = points.get(&node)
+        {
+            let center = RawPoint::from(point.coords);
+            let spread = self.segment_reach.at(self.settings.default_curvature);
+            let reach = RawPoint::new(spread, spread);
+            let query = rstar::AABB::from_corners((center - reach).into(), (center + reach).into());
+            let mut hanging = segments
+                .locate_in_envelope_intersecting(query)
+                .filter(|segment| segment.id.0 == node || segment.id.1 == node);
+            if let (Some(only), None) = (hanging.next(), hanging.next()) {
+                lines.push(only.id);
+            }
+        }
+        lines
+    }
+
+    fn paint_map_lines(
+        &self,
+        painter: &Painter,
+        min_point: &RawPoint,
+        label_lines: &[(usize, usize)],
+    ) -> Vec<(usize, usize)> {
         let _span = tracing::info_span!("paint_map_lines").entered();
         let mut segments_to_remove = Vec::new();
         // One repaint request for the whole pass, not one per animated
@@ -2247,7 +2582,32 @@ impl Map {
                     },
                 );
             } else if let Some(width) = line_width {
-                painter.add(path.stroke_shape(Stroke::new(width, segment_color)));
+                let stroke = Stroke::new(width, segment_color);
+                if segment.is_dashed() {
+                    let dash = self.settings.segment_dash;
+                    painter.extend(Shape::dashed_line(
+                        path.polyline().points(),
+                        stroke,
+                        dash.dash,
+                        dash.gap,
+                    ));
+                } else {
+                    painter.add(path.stroke_shape(stroke));
+                }
+            }
+            // The text of the line, over it, with the default stroke only: a
+            // template reads `segment.label` and draws it as it likes.
+            if self.segment_template.is_none()
+                && line_width.is_some()
+                && let Some(label) = &segment.label
+                && match self.settings.segment_label_visibility {
+                    VisibilitySetting::Always => true,
+                    VisibilitySetting::Hover => label_lines.contains(&segment.id),
+                    VisibilitySetting::Hidden => false,
+                }
+            {
+                let at = path.point_at(segment.label_at);
+                self.paint_segment_label(painter, label, at, line_fade, theme);
             }
 
             // Persistent segment state is drawn first so a notification --
@@ -2327,6 +2687,36 @@ impl Map {
             painter.ctx().request_repaint();
         }
         segments_to_remove
+    }
+
+    /// Writes `label` centered at `at` (screen coordinates), over a patch of
+    /// the background so it reads on top of the line. The size is that of the
+    /// node names ([`MapSettings::node_text_size`]), in screen points or
+    /// following the zoom, as [`MapSettings::segment_label_scaling`] says.
+    fn paint_segment_label(
+        &self,
+        painter: &Painter,
+        label: &str,
+        at: Pos2,
+        fade: f32,
+        theme: ThemeColors,
+    ) {
+        let text_color = scale_alpha(theme.text, fade);
+        let scaling = self.settings.segment_label_scaling;
+        let galley = painter.layout_no_wrap(
+            label.to_string(),
+            FontId::new(
+                scaling.font_size(self.settings.node_text_size, self.zoom),
+                FontFamily::Proportional,
+            ),
+            text_color,
+        );
+        let factor = scaling.factor(self.zoom);
+        let padding = Vec2::new(4.0, 1.0) * factor;
+        let rect = Rect::from_center_size(at, galley.size() + 2.0 * padding);
+        let background = painter.ctx().global_style().visuals.extreme_bg_color;
+        painter.rect_filled(rect, 3.0 * factor, scale_alpha(background, fade));
+        painter.galley(rect.min + padding, galley, text_color);
     }
 
     fn paint_label(&self, paint: &Painter, text_settings: &TextSettings) {
@@ -2577,6 +2967,7 @@ impl Map {
     pub fn set_node_template(&mut self, template: Rc<dyn NodeTemplate>) {
         self.node_template = Some(template);
         self.outline_reach.set(0.0);
+        self.outline_extent.set([0.0, 0.0]);
     }
 
     /// Installs a layer, or replaces the one with the same `id`.
@@ -4146,6 +4537,260 @@ mod tests {
         assert_eq!(map.current.min.components, [-20.0, -40.0]);
         assert_eq!(map.current.pos.components, [10.0, 10.0]);
         assert_eq!(map.current.dist, 50.0);
+    }
+
+    // ---------- nodes and lines while the map is on screen ----------
+
+    fn three_nodes() -> Map {
+        let mut a = MapPoint::new(1, [0.0, 0.0]);
+        a.connections.push((1, 2));
+        let mut b = MapPoint::new(2, [10.0, 0.0]);
+        b.connections.extend([(1, 2), (2, 3)]);
+        let mut c = MapPoint::new(3, [10.0, 10.0]);
+        c.connections.push((2, 3));
+        let mut map = Map::new();
+        map.add_points(vec![a, b, c]);
+        map.add_lines(vec![
+            MapSegment::new((1, 2), [0.0, 0.0], [10.0, 0.0]),
+            MapSegment::new((2, 3), [10.0, 0.0], [10.0, 10.0]),
+        ]);
+        map
+    }
+
+    #[test]
+    fn insert_point_adds_a_node_and_leaves_the_view_where_it_was() {
+        let mut map = three_nodes();
+        map.set_pos([2.0, 3.0]);
+
+        map.insert_point(MapPoint::new(4, [50.0, 40.0]));
+
+        assert!(map.contains_point(4));
+        assert_eq!(map.get_pos(), [2.0, 3.0]);
+        // The index finds it: it is the nearest node to its own position.
+        let tree = map.tree.as_ref().unwrap();
+        let nearest = tree.nearest(&[50.0, 40.0], 1, &squared_euclidean).unwrap();
+        assert_eq!(*nearest[0].1, 4);
+        // The bounds grew to take it in.
+        assert_eq!(map.reference.max.components, [50.0, 40.0]);
+        assert_eq!(map.reference.min.components, [0.0, 0.0]);
+    }
+
+    #[test]
+    fn insert_point_replaces_a_node_and_moves_it_in_the_index() {
+        let mut map = three_nodes();
+
+        map.insert_point(MapPoint::new(3, [200.0, 200.0]));
+
+        assert_eq!(map.points.as_ref().unwrap().len(), 3);
+        let tree = map.tree.as_ref().unwrap();
+        let nearest = tree
+            .nearest(&[200.0, 200.0], 1, &squared_euclidean)
+            .unwrap();
+        assert_eq!(*nearest[0].1, 3);
+        // Nothing is left at the old place.
+        let near_old = tree.nearest(&[10.0, 10.0], 1, &squared_euclidean).unwrap();
+        assert_ne!(*near_old[0].1, 3);
+        assert_eq!(map.reference.max.components, [200.0, 200.0]);
+    }
+
+    #[test]
+    fn insert_point_on_a_map_with_no_nodes_loads_it() {
+        let mut map = Map::new();
+        map.insert_point(MapPoint::new(7, [4.0, 6.0]));
+        assert!(map.contains_point(7));
+        assert_eq!(map.get_pos(), [4.0, 6.0]);
+    }
+
+    #[test]
+    fn remove_point_takes_away_what_hung_from_the_node() {
+        let mut map = three_nodes();
+        map.update_marker(100, 2);
+        map.node(2).unwrap().pulse(Instant::now());
+
+        let removed = map.remove_point(2).unwrap();
+
+        assert_eq!(removed.get_id(), 2);
+        assert!(!map.contains_point(2));
+        // Both lines of the node went with it, and the other nodes forget them.
+        assert!(map.segment((1, 2)).is_none());
+        assert!(map.segment((2, 3)).is_none());
+        assert!(map.segment_ids.is_empty());
+        let points = map.points.as_ref().unwrap();
+        assert!(points[&1].connections.is_empty());
+        assert!(points[&3].connections.is_empty());
+        // And its marker and notifications.
+        assert!(map.markers.is_empty());
+        assert!(map.notifications.is_empty());
+        // It is not in the index anymore.
+        let tree = map.tree.as_ref().unwrap();
+        let nearest = tree.nearest(&[10.0, 0.0], 3, &squared_euclidean).unwrap();
+        assert!(nearest.iter().all(|(_, id)| **id != 2));
+        assert!(map.remove_point(2).is_none());
+    }
+
+    #[test]
+    fn the_bounds_follow_the_nodes_when_they_come_and_go() {
+        let mut map = three_nodes();
+        assert_eq!(map.reference.max.components, [10.0, 10.0]);
+
+        map.insert_point(MapPoint::new(4, [500.0, -100.0]));
+        assert_eq!(map.reference.max.components, [500.0, 10.0]);
+        assert_eq!(map.reference.min.components, [0.0, -100.0]);
+
+        map.remove_point(4);
+        assert_eq!(map.reference.max.components, [10.0, 10.0]);
+        assert_eq!(map.reference.min.components, [0.0, 0.0]);
+
+        // With no node left there is nothing to bound.
+        for id in [1, 2, 3] {
+            map.remove_point(id);
+        }
+        assert_eq!(map.reference.max.components, [0.0, 0.0]);
+        assert_eq!(map.reference.min.components, [0.0, 0.0]);
+    }
+
+    #[test]
+    fn insert_line_and_remove_line_work_on_one_line_at_a_time() {
+        let mut map = three_nodes();
+
+        map.insert_line(MapSegment::new((5, 6), [0.0, 0.0], [20.0, 20.0]).with_label("RRW-782"));
+        assert!(map.segment((5, 6)).is_some());
+        assert!(map.segment((1, 2)).is_some());
+        let found = map.segments.as_ref().unwrap().size();
+        assert_eq!(found, 3);
+
+        // The same id replaces the line.
+        map.insert_line(MapSegment::new((5, 6), [0.0, 0.0], [30.0, 30.0]));
+        assert_eq!(map.segments.as_ref().unwrap().size(), 3);
+        let replaced = map.remove_line((5, 6)).unwrap();
+        assert_eq!(replaced.point2, [30.0, 30.0]);
+        assert_eq!(replaced.label, None);
+
+        assert!(map.remove_line((5, 6)).is_none());
+        assert_eq!(map.segment_ids.len(), 2);
+    }
+
+    #[test]
+    fn remove_line_forgets_the_effects_of_the_line_and_how_far_it_bows() {
+        let mut map = Map::new();
+        map.insert_line(MapSegment::curved(
+            (1, 2),
+            [0.0, 0.0],
+            [100.0, 0.0],
+            Some(0.5),
+        ));
+        assert!(map.segment_reach.at(0.0) > 0.0);
+        map.segment((1, 2)).unwrap().comet();
+        assert!(!map.segment_states.is_empty() || !map.segment_notifications.is_empty());
+
+        map.remove_line((1, 2));
+
+        assert_eq!(map.segment_reach.at(0.0), 0.0);
+        assert!(map.segment_states.is_empty() && map.segment_notifications.is_empty());
+    }
+
+    // ---------- the view stays inside the map ----------
+
+    /// Nodes from `[0, 0]` to `[2000, 1000]`, in a 600 x 400 widget at zoom 1.
+    fn big_map() -> Map {
+        let mut map = Map::new();
+        map.add_points(vec![
+            MapPoint::new(1, [0.0, 0.0]),
+            MapPoint::new(2, [2000.0, 1000.0]),
+        ]);
+        map.map_area = Rect::from_min_size(Pos2::ZERO, Vec2::new(600.0, 400.0));
+        map.set_zoom(1.0);
+        map
+    }
+
+    #[test]
+    fn the_center_of_the_view_never_goes_past_the_edges_of_the_map() {
+        let mut map = big_map();
+        // The built-in node is 4 map units of radius, which the area includes.
+        for (asked, expected) in [
+            ([-500.0, -500.0], [-4.0, -4.0]),
+            ([5000.0, 5000.0], [2004.0, 1004.0]),
+            ([1000.0, 500.0], [1000.0, 500.0]),
+        ] {
+            map.set_pos(asked);
+            map.clamp_view();
+            assert_eq!(map.get_pos(), expected, "asked {asked:?}");
+        }
+    }
+
+    #[test]
+    fn half_of_the_view_can_go_past_the_map_at_any_zoom_and_size() {
+        // The same limits whether the map is bigger than the view or much
+        // smaller (2000 x 1000 units at zoom 0.1 are 200 x 100 points in
+        // 600 x 400): the center of the view is kept on the map.
+        for zoom in [1.0, 0.5, 0.1] {
+            let mut map = big_map();
+            map.set_zoom(zoom);
+            for (asked, expected) in [
+                ([1000.0, 500.0], [1000.0, 500.0]),
+                ([1500.0, 300.0], [1500.0, 300.0]),
+                ([-5000.0, -5000.0], [-4.0, -4.0]),
+                ([9000.0, 9000.0], [2004.0, 1004.0]),
+                ([9000.0, 500.0], [2004.0, 500.0]),
+            ] {
+                map.set_pos(asked);
+                map.clamp_view();
+                assert_eq!(map.get_pos(), expected, "zoom {zoom}, asked {asked:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_limits_grow_with_the_map() {
+        let mut map = big_map();
+        map.set_pos([5000.0, 500.0]);
+        map.clamp_view();
+        assert_eq!(map.get_pos()[0], 2004.0);
+
+        map.insert_point(MapPoint::new(3, [4000.0, 500.0]));
+        map.set_pos([5000.0, 500.0]);
+        map.clamp_view();
+        assert_eq!(map.get_pos()[0], 4004.0);
+
+        // And back to the original ones when the node goes.
+        map.remove_point(3);
+        map.clamp_view();
+        assert_eq!(map.get_pos()[0], 2004.0);
+    }
+
+    #[test]
+    fn the_size_of_the_nodes_is_part_of_the_area() {
+        let mut map = big_map();
+        // Boxes of 90 x 35 around each node.
+        map.outline_extent.set([45.0, 17.5]);
+        map.node_template = Some(Rc::new(NoDraw));
+        map.set_pos([-500.0, -500.0]);
+        map.clamp_view();
+        assert_eq!(map.get_pos(), [-45.0, -17.5]);
+    }
+
+    /// A template that draws nothing, for the tests that only need one to be
+    /// installed.
+    struct NoDraw;
+
+    impl NodeTemplate for NoDraw {
+        fn node_ui(&self, _ui: &mut Ui, _ctx: NodeContext) {}
+    }
+
+    // ---------- segments with a label or dashes ----------
+
+    #[test]
+    fn a_segment_has_no_label_and_is_solid_until_it_is_told() {
+        let segment = MapSegment::new((1, 2), [0.0, 0.0], [1.0, 1.0]);
+        assert_eq!(segment.label, None);
+        assert!(!segment.is_dashed());
+
+        let marked = segment.clone().with_label("A-1 \u{2192} B-2").dashed();
+        assert_eq!(marked.label.as_deref(), Some("A-1 \u{2192} B-2"));
+        assert!(marked.is_dashed());
+        // The rest of it is as it was.
+        assert_eq!(marked.id, segment.id);
+        assert_eq!(marked.point2, segment.point2);
     }
 
     // ---------- theme ----------
