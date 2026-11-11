@@ -572,8 +572,9 @@ pub struct MapSegment {
     /// Identifier shared with the line key (and with the
     /// [`MapPoint::connections`] of the endpoint nodes).
     pub id: (usize, usize),
-    /// A text drawn on the line, at its middle: what the line is about (the
-    /// id of a signature, say). `None` (the default) draws nothing.
+    /// A text drawn on the line, at its middle (or where
+    /// [`MapSegment::with_label_at`] says): what the line is about (the id of
+    /// a signature, say). `None` (the default) draws nothing.
     ///
     /// The built-in stroke draws it with the size and color of the node
     /// names, over a patch of the map's background so it reads on top of the
@@ -584,6 +585,9 @@ pub struct MapSegment {
     /// solid line. Set with [`MapSegment::dashed`]. A template reads it with
     /// [`MapSegment::is_dashed`].
     pub(crate) dashed: bool,
+    /// Where the [`label`](Self::label) goes along the line, from `0.0` at
+    /// `point1` to `1.0` at `point2`. Set with [`MapSegment::with_label_at`].
+    pub(crate) label_at: f32,
     /// One endpoint of the segment, in map coordinates.
     pub point1: [f32; 2],
     /// The other endpoint of the segment, in map coordinates.
@@ -626,6 +630,7 @@ impl MapSegment {
             id,
             label: None,
             dashed: false,
+            label_at: Self::DEFAULT_LABEL_AT,
             point1,
             point2,
             color: None,
@@ -637,6 +642,31 @@ impl MapSegment {
     pub fn with_label(mut self, label: impl Into<String>) -> Self {
         self.label = Some(label.into());
         self
+    }
+
+    /// Where the label goes by default: the middle of the line.
+    pub const DEFAULT_LABEL_AT: f32 = 0.5;
+
+    /// This segment with its label (see [`Self::label`]) `at` the given
+    /// fraction of the line, from `0.0` at `point1` to `1.0` at `point2`; a
+    /// value outside that is taken as the nearest end, and one that is not a
+    /// number as the middle ([`Self::DEFAULT_LABEL_AT`]).
+    ///
+    /// Moving it away from the middle is for a line that has company at one of
+    /// its ends: the lines of a hub all meet at it, so their labels, at their
+    /// middles, crowd one another; at the far end they have room.
+    pub fn with_label_at(mut self, at: f32) -> Self {
+        self.label_at = if at.is_nan() {
+            Self::DEFAULT_LABEL_AT
+        } else {
+            at.clamp(0.0, 1.0)
+        };
+        self
+    }
+
+    /// Where the label goes along the line (see [`Self::with_label_at`]).
+    pub fn label_position(&self) -> f32 {
+        self.label_at
     }
 
     /// This segment drawn as a dashed line by the built-in stroke, not a
@@ -928,6 +958,22 @@ pub struct MapSettings {
     pub label_visible_zoom: f32,
     /// Controls when node names are displayed.
     pub node_text_visibility: VisibilitySetting,
+    /// Controls when the text of a line ([`MapSegment::label`]) is displayed
+    /// by the built-in stroke. [`VisibilitySetting::Always`] (the default)
+    /// writes it on every line, and [`VisibilitySetting::Hover`] only on the
+    /// line under the pointer (within a few points of it) and on the line of
+    /// a node that has no other, when the pointer is over that node: a node
+    /// that hangs from another by one line, such as a marker, shows what its
+    /// line says when it is pointed at. That is the way to have many lines
+    /// meet at a node, as a hub does, without their texts crowding one
+    /// another. [`VisibilitySetting::Hidden`] writes none.
+    pub segment_label_visibility: VisibilitySetting,
+    /// How the size of the text of a line follows the zoom: in screen points
+    /// like the names the map writes ([`TextScaling::Screen`], the default),
+    /// or with the zoom like the nodes ([`TextScaling::Zoom`]), the padding
+    /// of its patch included. The size at zoom 1 is
+    /// [`node_text_size`](Self::node_text_size) either way.
+    pub segment_label_scaling: TextScaling,
     /// Effect drawn on nodes registered with
     /// [`Map::update_marker`](super::Map::update_marker).
     ///
@@ -1024,6 +1070,8 @@ impl MapSettings {
             default_curvature: 0.0,
             label_visible_zoom: 0.0,
             node_text_visibility: VisibilitySetting::Always,
+            segment_label_visibility: VisibilitySetting::Always,
+            segment_label_scaling: TextScaling::Screen,
             marker_animation: SteadyAnimation::Blink,
             node_text_size: 12.0,
             label_text_size: 24.0,
@@ -1060,6 +1108,8 @@ impl Default for MapSettings {
             default_curvature: 0.25,
             label_visible_zoom: 0.58,
             node_text_visibility: VisibilitySetting::Always,
+            segment_label_visibility: VisibilitySetting::Always,
+            segment_label_scaling: TextScaling::Screen,
             marker_animation: SteadyAnimation::Blink,
             node_text_size: 12.0,
             label_text_size: 24.0,
@@ -1234,15 +1284,56 @@ pub enum SteadySegmentAnimation {
     Chevrons,
 }
 
-/// Controls when the name of a node is displayed next to it.
+/// Controls when a text of the map is displayed: the name of a node
+/// ([`MapSettings::node_text_visibility`]) or the text of a line
+/// ([`MapSettings::segment_label_visibility`]).
 #[derive(Clone, Debug, PartialEq)]
 pub enum VisibilitySetting {
-    /// Never show node names.
+    /// Never show it.
     Hidden,
-    /// Only show the name of the node closest to the mouse pointer.
+    /// Only show the one of the node closest to the mouse pointer, or the one
+    /// of the line under it.
     Hover,
-    /// Always show node names, subject to [`MapSettings::label_visible_zoom`].
+    /// Always show it (the names of the nodes subject to
+    /// [`MapSettings::label_visible_zoom`]).
     Always,
+}
+
+/// How the size of a text of the map follows the zoom, set for the text of a
+/// line with [`MapSettings::segment_label_scaling`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextScaling {
+    /// The size is in screen points whatever the zoom, like the names the map
+    /// writes itself ([`MapSettings::node_text_size`]): readable when the map
+    /// is zoomed all the way out, where it takes up more of the view.
+    #[default]
+    Screen,
+    /// The size grows and shrinks with the zoom, like the nodes and like the
+    /// names a [`NodeTemplate`] draws inside them (`size * zoom`, to the
+    /// nearest half point so the font atlas is not filled with one size per
+    /// frame of a zoom gesture): a text keeps its place and its share of the
+    /// space between nodes at every zoom, so what is laid out in map units
+    /// to make room for it stays right.
+    Zoom,
+}
+
+impl TextScaling {
+    /// The font size, in points, for a text of `size` points at `zoom`.
+    pub fn font_size(self, size: f32, zoom: f32) -> f32 {
+        match self {
+            Self::Screen => size,
+            Self::Zoom => ((size * zoom) * 2.0).round().max(2.0) / 2.0,
+        }
+    }
+
+    /// What to multiply the measures of a text that are not its font size
+    /// (the padding around it, the corners of its patch) by at `zoom`.
+    pub fn factor(self, zoom: f32) -> f32 {
+        match self {
+            Self::Screen => 1.0,
+            Self::Zoom => zoom,
+        }
+    }
 }
 
 /// How the connection lines fade in as the zoom rises past
@@ -2793,6 +2884,30 @@ mod tests {
         assert_eq!(s.label_text_size, 24.0);
         assert!(s.style.line_width.is_none());
         assert!(s.style.font.is_none());
+    }
+
+    #[test]
+    fn the_text_of_a_line_is_in_screen_points_unless_asked_otherwise() {
+        assert_eq!(
+            MapSettings::default().segment_label_scaling,
+            TextScaling::Screen
+        );
+        assert_eq!(
+            MapSettings::new().segment_label_scaling,
+            TextScaling::Screen
+        );
+    }
+
+    #[test]
+    fn a_text_that_follows_the_zoom_is_sized_to_the_half_point() {
+        assert_eq!(TextScaling::Screen.font_size(12.0, 0.3), 12.0);
+        assert_eq!(TextScaling::Screen.factor(0.3), 1.0);
+        assert_eq!(TextScaling::Zoom.font_size(12.0, 1.0), 12.0);
+        assert_eq!(TextScaling::Zoom.font_size(12.0, 0.7), 8.5);
+        assert_eq!(TextScaling::Zoom.font_size(12.0, 2.0), 24.0);
+        // Never so small that it is not a font.
+        assert_eq!(TextScaling::Zoom.font_size(12.0, 0.0), 1.0);
+        assert_eq!(TextScaling::Zoom.factor(0.5), 0.5);
     }
 
     #[test]

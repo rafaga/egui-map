@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/) (pre-1.0:
 any minor bump may include breaking changes, called out below as such).
 
-## [Unreleased]
+## [0.18.0] 2026-11-11
 
 Breaking: `MapSegment` is no longer `Copy`, `MapSettings` has a new public
 field and the view can no longer be panned past the map (see below). The next
@@ -25,6 +25,21 @@ version is a minor bump (0.18).
 - `MapSegment::label` (`with_label`): a text the built-in stroke writes at the
   middle of the line, in the size of the node names, over a patch of the
   background. A `SegmentTemplate` reads it from `SegmentContext::segment`.
+- `MapSegment::with_label_at` (`label_position`, `DEFAULT_LABEL_AT`): where along the line the
+  label goes, from `0.0` at the first end to `1.0` at the second (the middle by default). The
+  lines of a hub meet at it, so their labels crowd one another at their middles; farther along
+  they have room.
+- `MapSettings::segment_label_scaling` (`objects::TextScaling`): how the text of a line follows
+  the zoom. `Screen` (the default, as before) keeps it in screen points like the names the map
+  writes; `Zoom` makes it `node_text_size * zoom` (to the half point), with the padding and the
+  corners of its patch, as the names that a `NodeTemplate` draws inside the nodes do, so the text
+  takes the same room in map units at every zoom.
+- `MapSettings::segment_label_visibility` (`VisibilitySetting`, default `Always`):
+  `Hover` writes the text of a line only when the pointer is within a few
+  points of it, or on a node that hangs from the map by that one line, so a
+  hub with many lines does not crowd their texts. `Hidden` writes none. Setting
+  it is a new field of `MapSettings` (breaking for struct-literal construction,
+  like the other new fields in this release).
 - `MapSegment::dashed` (`is_dashed`): the built-in stroke draws the line as
   dashes. Their length and the gap are in `MapSettings::segment_dash`
   (`DashPattern`, in screen points, 8 and 5 by default).
@@ -35,15 +50,23 @@ version is a minor bump (0.18).
   It is still `Clone`.
 - **Breaking:** `MapSettings` has a new public field, `segment_dash`. Code that
   builds it with `MapSettings::default()` and assigns fields is not affected.
-- **Breaking (behavior):** the view never leaves the map. The edges of the
-  viewport stay inside the area the nodes take, counting their size (the
-  built-in circle, or what the outline of the `NodeTemplate` reaches on each
-  axis), and a map smaller than the viewport on an axis is centered on it.
+- **Breaking (behavior):** the view stays on the map. Its center never leaves
+  the area the nodes take, counting their size (the built-in circle, or what
+  the outline of the `NodeTemplate` reaches on each axis), so at most half of
+  the viewport goes past the edge of the map, whatever the zoom and however
+  small the map is (a map smaller than the viewport can be moved around it,
+  and it is not held in the middle).
   This holds after a drag, a minimap press, a zoom, a resize, `set_pos` and
   `set_pos_from_nodeid`. Before, the view could be dragged anywhere. The bounds
   are those of the nodes there are: they grow with the nodes that are added
   and shrink with the ones that are removed (`reference.min`/`max`, which the
   minimap draws, now follow `insert_point`/`remove_point` too).
+
+### Fixed
+
+- `add_points` and `add_hashmap_points` with no nodes panicked (`NonFiniteCoordinate`) when
+  the visible nodes were looked up: the bounds of an empty map stayed at infinity and the
+  midpoint of those is not a number. An empty map is now centered on the origin.
 
 ## [0.17.0] - 2026-11-04
 

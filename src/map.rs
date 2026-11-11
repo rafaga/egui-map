@@ -250,6 +250,10 @@ pub mod theme;
 /// lockstep and risking disappearing into it.
 const SEGMENT_EFFECT_ALPHA_BOOST: f32 = 0.2;
 
+/// How close, in screen points, the pointer has to be to a line for its text
+/// to show ([`VisibilitySetting::Hover`] of `segment_label_visibility`).
+const LINE_HOVER_TOLERANCE: f32 = 6.0;
+
 /// The radius of the node the widget draws when no [`NodeTemplate`] is
 /// installed, in map units: it is drawn `4 * zoom` points wide.
 const BUILT_IN_NODE_RADIUS: f32 = 4.0;
@@ -884,7 +888,8 @@ impl Widget for &mut Map {
                 let vec_points = &self.visible_points;
                 let hashm = &self.points;
 
-                for segment in self.paint_map_lines(&paint, &min_point) {
+                let label_lines = self.lines_with_label(&resp, &min_point);
+                for segment in self.paint_map_lines(&paint, &min_point, &label_lines) {
                     self.segment_notifications.remove(&segment);
                 }
 
@@ -1157,6 +1162,13 @@ impl Map {
             let _result = tree.add(entry.coords, entry.get_id());
             hash_map.insert(entry.get_id(), entry);
         }
+        // A map with no nodes has no bounds: they would stay at infinity and
+        // their midpoint is not a number, which the search for the visible
+        // nodes refuses. It is centered on the origin instead.
+        if min.components[0] > max.components[0] {
+            min = RawPoint::new(0.0, 0.0);
+            max = RawPoint::new(0.0, 0.0);
+        }
         // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
         self.reference.min = min;
         self.reference.max = max;
@@ -1226,6 +1238,11 @@ impl Map {
             let _result = tree.add(entry.1.coords, *entry.0);
         }
 
+        // See `add_points`: an empty map is centered on the origin.
+        if min.components[0] > max.components[0] {
+            min = RawPoint::new(0.0, 0.0);
+            max = RawPoint::new(0.0, 0.0);
+        }
         // We stablish the max and min coordinates in this map, this wont change until we change the point hash map
         self.reference.min = min;
         self.reference.max = max;
@@ -1296,10 +1313,10 @@ impl Map {
 
     /// Centers the view on the given map coordinates.
     ///
-    /// The view never leaves the map: the edges of the viewport stay inside
-    /// the area the nodes take (with their size), and a map smaller than the
-    /// viewport on an axis is centered on it. A position that would put the
-    /// view outside is pulled in the next time the map is drawn, so
+    /// The view can go as far as half of the viewport past the edge of the
+    /// map: the center of the view stays inside the area the nodes take (with
+    /// their size), on any zoom and however small the map is. A position that
+    /// would put it outside is pulled in the next time the map is drawn, so
     /// [`get_pos`](Self::get_pos) may give the position that was asked for
     /// until then.
     pub fn set_pos(&mut self, position: [f32; 2]) {
@@ -1592,29 +1609,21 @@ impl Map {
         )
     }
 
-    /// Keeps the view inside the map: the edges of the viewport never go
-    /// past [`content_area`](Self::content_area), and when the map is
-    /// smaller than the viewport on an axis (zoomed out) it is centered on
-    /// that axis. The bounds are those of the nodes there are, so they grow
-    /// with the ones that are added and shrink with the ones that are
-    /// removed.
+    /// Keeps the view on the map: its center never leaves
+    /// [`content_area`](Self::content_area), so at most half of the viewport
+    /// goes past the edge of the map (on each axis), whatever the zoom and
+    /// however small the map is. The bounds are those of the nodes there are,
+    /// so they grow with the ones that are added and shrink with the ones that
+    /// are removed.
     fn clamp_view(&mut self) {
         if self.zoom <= 0.0 || self.map_area.width() <= 0.0 || self.map_area.height() <= 0.0 {
             return;
         }
         let area = self.content_area();
-        let half = [
-            self.map_area.width() / 2.0 / self.zoom,
-            self.map_area.height() / 2.0 / self.zoom,
-        ];
         let mut position = self.reference.pos;
         let ranges = [(area.min.x, area.max.x), (area.min.y, area.max.y)];
         for (axis, (low, high)) in ranges.into_iter().enumerate() {
-            position.components[axis] = if high - low <= 2.0 * half[axis] {
-                (low + high) / 2.0
-            } else {
-                position.components[axis].clamp(low + half[axis], high - half[axis])
-            };
+            position.components[axis] = position.components[axis].clamp(low, high);
         }
         if position.components != self.reference.pos.components {
             self.reference.pos = position;
@@ -2408,7 +2417,54 @@ impl Map {
     /// Draws the connection lines, plus any segment effects, returning the ids
     /// of segment notifications that finished this frame so the caller can
     /// drop them (same pattern as [`Map::paint_map_points`]'s return value).
-    fn paint_map_lines(&self, painter: &Painter, min_point: &RawPoint) -> Vec<(usize, usize)> {
+    /// The lines whose text is written, when
+    /// [`MapSettings::segment_label_visibility`] is
+    /// [`VisibilitySetting::Hover`]: the one under the pointer or, when the
+    /// pointer is over a node that hangs from the map by a single line, that
+    /// line (the node was found the frame before: one frame is not noticed).
+    /// Empty otherwise.
+    fn lines_with_label(&self, resp: &Response, min_point: &RawPoint) -> Vec<(usize, usize)> {
+        let mut lines = Vec::new();
+        if self.settings.segment_label_visibility != VisibilitySetting::Hover
+            || self.segments.is_none()
+            || !resp.hovered()
+        {
+            return lines;
+        }
+        let Some(pointer) = resp.hover_pos() else {
+            return lines;
+        };
+        // A pointer on a node is on every line that ends at it, so the node
+        // decides, not the line: the one it hangs by, if it hangs by one.
+        let Some(node) = self.hovered_node else {
+            let at = (RawPoint::from(pointer) + *min_point) / self.zoom;
+            let tolerance = LINE_HOVER_TOLERANCE / self.zoom;
+            lines.extend(self.line_at(at.into(), tolerance));
+            return lines;
+        };
+        if let (Some(points), Some(segments)) = (&self.points, &self.segments)
+            && let Some(point) = points.get(&node)
+        {
+            let center = RawPoint::from(point.coords);
+            let spread = self.segment_reach.at(self.settings.default_curvature);
+            let reach = RawPoint::new(spread, spread);
+            let query = rstar::AABB::from_corners((center - reach).into(), (center + reach).into());
+            let mut hanging = segments
+                .locate_in_envelope_intersecting(query)
+                .filter(|segment| segment.id.0 == node || segment.id.1 == node);
+            if let (Some(only), None) = (hanging.next(), hanging.next()) {
+                lines.push(only.id);
+            }
+        }
+        lines
+    }
+
+    fn paint_map_lines(
+        &self,
+        painter: &Painter,
+        min_point: &RawPoint,
+        label_lines: &[(usize, usize)],
+    ) -> Vec<(usize, usize)> {
         let _span = tracing::info_span!("paint_map_lines").entered();
         let mut segments_to_remove = Vec::new();
         // One repaint request for the whole pass, not one per animated
@@ -2544,8 +2600,14 @@ impl Map {
             if self.segment_template.is_none()
                 && line_width.is_some()
                 && let Some(label) = &segment.label
+                && match self.settings.segment_label_visibility {
+                    VisibilitySetting::Always => true,
+                    VisibilitySetting::Hover => label_lines.contains(&segment.id),
+                    VisibilitySetting::Hidden => false,
+                }
             {
-                self.paint_segment_label(painter, label, path.point_at(0.5), line_fade, theme);
+                let at = path.point_at(segment.label_at);
+                self.paint_segment_label(painter, label, at, line_fade, theme);
             }
 
             // Persistent segment state is drawn first so a notification --
@@ -2629,7 +2691,8 @@ impl Map {
 
     /// Writes `label` centered at `at` (screen coordinates), over a patch of
     /// the background so it reads on top of the line. The size is that of the
-    /// node names, in screen points: it does not grow with the zoom.
+    /// node names ([`MapSettings::node_text_size`]), in screen points or
+    /// following the zoom, as [`MapSettings::segment_label_scaling`] says.
     fn paint_segment_label(
         &self,
         painter: &Painter,
@@ -2639,15 +2702,20 @@ impl Map {
         theme: ThemeColors,
     ) {
         let text_color = scale_alpha(theme.text, fade);
+        let scaling = self.settings.segment_label_scaling;
         let galley = painter.layout_no_wrap(
             label.to_string(),
-            FontId::new(self.settings.node_text_size, FontFamily::Proportional),
+            FontId::new(
+                scaling.font_size(self.settings.node_text_size, self.zoom),
+                FontFamily::Proportional,
+            ),
             text_color,
         );
-        let padding = Vec2::new(4.0, 1.0);
+        let factor = scaling.factor(self.zoom);
+        let padding = Vec2::new(4.0, 1.0) * factor;
         let rect = Rect::from_center_size(at, galley.size() + 2.0 * padding);
         let background = painter.ctx().global_style().visuals.extreme_bg_color;
-        painter.rect_filled(rect, 3.0, scale_alpha(background, fade));
+        painter.rect_filled(rect, 3.0 * factor, scale_alpha(background, fade));
         painter.galley(rect.min + padding, galley, text_color);
     }
 
@@ -4636,12 +4704,12 @@ mod tests {
     }
 
     #[test]
-    fn the_view_never_goes_past_the_edges_of_the_map() {
+    fn the_center_of_the_view_never_goes_past_the_edges_of_the_map() {
         let mut map = big_map();
         // The built-in node is 4 map units of radius, which the area includes.
         for (asked, expected) in [
-            ([-500.0, -500.0], [296.0, 196.0]),
-            ([5000.0, 5000.0], [1704.0, 804.0]),
+            ([-500.0, -500.0], [-4.0, -4.0]),
+            ([5000.0, 5000.0], [2004.0, 1004.0]),
             ([1000.0, 500.0], [1000.0, 500.0]),
         ] {
             map.set_pos(asked);
@@ -4651,13 +4719,25 @@ mod tests {
     }
 
     #[test]
-    fn a_map_smaller_than_the_view_is_centered() {
-        let mut map = big_map();
-        map.set_zoom(0.1);
-        map.set_pos([0.0, 0.0]);
-        map.clamp_view();
-        // 2000 x 1000 units at zoom 0.1 are 200 x 100 points in 600 x 400.
-        assert_eq!(map.get_pos(), [1000.0, 500.0]);
+    fn half_of_the_view_can_go_past_the_map_at_any_zoom_and_size() {
+        // The same limits whether the map is bigger than the view or much
+        // smaller (2000 x 1000 units at zoom 0.1 are 200 x 100 points in
+        // 600 x 400): the center of the view is kept on the map.
+        for zoom in [1.0, 0.5, 0.1] {
+            let mut map = big_map();
+            map.set_zoom(zoom);
+            for (asked, expected) in [
+                ([1000.0, 500.0], [1000.0, 500.0]),
+                ([1500.0, 300.0], [1500.0, 300.0]),
+                ([-5000.0, -5000.0], [-4.0, -4.0]),
+                ([9000.0, 9000.0], [2004.0, 1004.0]),
+                ([9000.0, 500.0], [2004.0, 500.0]),
+            ] {
+                map.set_pos(asked);
+                map.clamp_view();
+                assert_eq!(map.get_pos(), expected, "zoom {zoom}, asked {asked:?}");
+            }
+        }
     }
 
     #[test]
@@ -4665,17 +4745,17 @@ mod tests {
         let mut map = big_map();
         map.set_pos([5000.0, 500.0]);
         map.clamp_view();
-        assert_eq!(map.get_pos()[0], 1704.0);
+        assert_eq!(map.get_pos()[0], 2004.0);
 
         map.insert_point(MapPoint::new(3, [4000.0, 500.0]));
         map.set_pos([5000.0, 500.0]);
         map.clamp_view();
-        assert_eq!(map.get_pos()[0], 3704.0);
+        assert_eq!(map.get_pos()[0], 4004.0);
 
         // And back to the original ones when the node goes.
         map.remove_point(3);
         map.clamp_view();
-        assert_eq!(map.get_pos()[0], 1704.0);
+        assert_eq!(map.get_pos()[0], 2004.0);
     }
 
     #[test]
@@ -4686,7 +4766,7 @@ mod tests {
         map.node_template = Some(Rc::new(NoDraw));
         map.set_pos([-500.0, -500.0]);
         map.clamp_view();
-        assert_eq!(map.get_pos(), [-45.0 + 300.0, -17.5 + 200.0]);
+        assert_eq!(map.get_pos(), [-45.0, -17.5]);
     }
 
     /// A template that draws nothing, for the tests that only need one to be
