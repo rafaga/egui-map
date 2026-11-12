@@ -14,6 +14,8 @@ An [`egui`](https://github.com/emilk/egui) widget that renders an interactive 2D
 - Connection lines between nodes, straight or curved -- each line is one or the other, and they can share a map -- and free-floating text labels.
 - Text is sized in **screen pixels** (`MapSettings::node_text_size`, `MapSettings::label_text_size`), so names stay readable at any zoom level instead of shrinking away as you zoom out.
 - Region labels (`RegionLabel`, via `Map::add_region_labels`) for naming an *area* of the map rather than a node: unlike every other text the widget draws, their size scales *with* zoom, they are always painted first (behind everything else) and in a faded color, with the built-in renderer caching laid-out text for performance. Customizable through the `LabelTemplate` trait.
+- Nodes and lines can be added and removed while the map is on screen (`insert_point`, `remove_point`, `insert_line`, `remove_line`) without the view moving, and the `Response` of `ui.add(&mut map)` reports clicks and drags (`Map::hovered_node` says which node is under the pointer).
+- Layers (`LayerTemplate`, `Map::add_layer`) draw your own overlays -- an ownership map, a heat map, a highlight that follows the node's shape through `LayerPoint::outline` -- below the lines, below or above the nodes, or inside a node's box.
 - Animations attached per node through `map.node(id)`: one-off events that end on their own (`pulse`, `ripple`, `countdown`, `scale_in`, `crosshair`) and lasting state that runs until `clear()` (`halo`, `blink`, `orbit`), each with an optional `color()`. The effects live in `map::animation::Animation` and can be reused from your own `NodeTemplate`.
 - The same idiom for segments through `map.segment(id)`: `flash` / `comet_once(at, direction)` / `wipe` (one-off) and `comet` / `dash` / `glow_band` / `chevrons` (lasting, until `clear()`) -- `comet_once` is a single dot pass, and every effect but `flash` runs the way you choose with `segment.direction(CometDirection::Forward / Reverse)` before it, `wipe` draws the line in from one endpoint to the other and then wipes it out the same way, `dash` is a "marching ants" pattern and `chevrons` a row of sliding arrowheads, both painted as a repeating-texture mesh (one shared texture, two triangles on a straight segment), `glow_band` a soft travelling highlight that fades out past each end instead of repeating, also with an optional `color()`. All of them follow a curved line around its bend. The effects live in `map::animation::SegmentAnimations`.
 - Custom node rendering and right-click context menus through the `NodeTemplate` and `ContextMenuManager` traits, custom segment rendering through `SegmentTemplate`, and custom region-label rendering through `LabelTemplate`.
@@ -29,10 +31,14 @@ cargo add egui-map
 
 ### Tutorials
 
-Two complete programs that compile and run, each with a written walkthrough. The code in each step is the code of the example.
+Six complete programs that compile and run, each with a written walkthrough. The code in each step is the code of the example.
 
 1. [Tutorial 1: your first map](docs/tutorial-1-first-map.md) -- nodes, lines and a `Map`. Run it with `cargo run --example tutorial_map`.
 2. [Tutorial 2: a map with a `NodeTemplate`](docs/tutorial-2-node-template.md) -- the same map with the nodes drawn by you. Run it with `cargo run --example tutorial_node_template`.
+3. [Tutorial 3: changing the map while it is on screen](docs/tutorial-3-dynamic-nodes.md) -- `insert_point`, `remove_point` and `insert_line`, and clicks on the map's response. Run it with `cargo run --example tutorial_dynamic`.
+4. [Tutorial 4: animations on nodes and lines](docs/tutorial-4-effects.md) -- one-off and lasting effects. Run it with `cargo run --example tutorial_effects`.
+5. [Tutorial 5: layers](docs/tutorial-5-layers.md) -- your own drawing under, between or over the nodes. Run it with `cargo run --example tutorial_layers`.
+6. [Tutorial 6: themes and region labels](docs/tutorial-6-themes-and-labels.md) -- swap the palette, name an area. Run it with `cargo run --example tutorial_themes`.
 
 ### Configuring the map
 
@@ -220,6 +226,42 @@ map.set_segment_template(std::rc::Rc::new(MySegments));
 ```
 
 `examples/animations.rs` is a visual catalog of the built-in node and segment effects, with no custom template at all. `examples/custom_template.rs` is the shortest custom `NodeTemplate`: it paints the node and declares its outline, and the selection, notifications and marker are the defaults drawn along that outline. `examples/node_template_animations.rs` does the same with hexagonal nodes, a glow and a segment with marching ants.
+
+### Changing the map at runtime
+
+`add_points` and `add_lines` replace the whole set and center the view again. To change one thing while the map is on screen use the incremental calls, which leave the view where the user put it:
+
+```rust
+map.insert_point(point);            // adds, or replaces the node with that id
+map.insert_line(segment);           // adds, or replaces the line with that id
+map.remove_point(id);               // also removes its lines, markers and effects
+map.remove_line((1, 2));
+assert!(!map.contains_point(id));
+```
+
+List a line's id in the `connections` of both of its nodes so that `remove_point` takes it along with either. The response of the widget carries the clicks:
+
+```rust
+let response = ui.add(&mut map);
+if response.clicked() && let Some(id) = map.hovered_node() {
+    // the user clicked the node `id`
+}
+```
+
+[Tutorial 3](docs/tutorial-3-dynamic-nodes.md) walks through it and `examples/dynamic_nodes.rs` is a network of about thirty nodes that grows and shrinks.
+
+### Layers
+
+A `LayerTemplate` draws something of your own at a place of the paint order, with the nodes that are on screen in `LayerContext::points` (position on the screen, the node, and its `outline`). The slots are `BelowLines`, `BelowNodes`, `AboveNodes` and `OverNodeBody` (inside the node's box, placed by a `NodeTemplate` through `ctx.layers.paint(..)`); layers of one slot are painted by ascending `z`.
+
+```rust
+use egui_map::map::layer::LayerSlot;
+
+map.add_layer("heat", LayerSlot::BelowNodes, 0, std::rc::Rc::new(heat));
+map.set_layer_visible("heat", false); // hide it without removing it
+```
+
+The map keeps no data of a layer: share it with your application through an `Rc<RefCell<..>>` or an `Rc<Cell<..>>`. [Tutorial 5](docs/tutorial-5-layers.md) walks through it and `examples/layers.rs` has an ownership overlay, a heat map and a focus ring.
 
 ### Region labels
 

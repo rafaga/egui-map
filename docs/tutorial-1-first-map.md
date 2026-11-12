@@ -47,3 +47,4 @@ Pan with click & drag, zoom with the mouse wheel or the slider. [`examples/tutor
 - [Tutorial 2](tutorial-2-node-template.md) draws the nodes yourself with a `NodeTemplate`.
 - The README's [Configuring the map](../README.md#configuring-the-map) section lists the settings people reach for first: zoom limits, when the lines show, how thick they are, node names, the minimap and the slider.
 - Every line in this tutorial is straight. [Straight and curved lines](../README.md#straight-and-curved-lines) shows how to make one a curve.
+- Past tutorial 2, [tutorial 3](tutorial-3-dynamic-nodes.md) changes the map while it runs, [4](tutorial-4-effects.md) animates it, [5](tutorial-5-layers.md) adds layers and [6](tutorial-6-themes-and-labels.md) covers themes and region labels.

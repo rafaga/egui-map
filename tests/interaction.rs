@@ -253,3 +253,29 @@ fn without_a_context_manager_a_right_click_opens_nothing() {
 
     assert!(harness.query_by_label("The menu").is_none());
 }
+
+#[test]
+fn the_response_of_the_map_reports_clicks_on_a_node() {
+    let clicked = Rc::new(Cell::new(None));
+    let seen = clicked.clone();
+    let mut harness = Harness::builder()
+        .with_size(vec2(600.0, 400.0))
+        .build_ui_state(
+            move |ui, map: &mut Map| {
+                let response = ui.add(&mut *map);
+                if response.clicked() {
+                    seen.set(Some(map.hovered_node()));
+                }
+            },
+            map(),
+        );
+    harness.run();
+    let at = center(&harness);
+    harness.hover_at(at);
+    harness.run();
+    press(&harness, at, PointerButton::Primary, true);
+    harness.run();
+    press(&harness, at, PointerButton::Primary, false);
+    harness.run();
+    assert_eq!(clicked.get(), Some(Some(1)));
+}

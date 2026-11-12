@@ -1,6 +1,6 @@
 # Tutorial 2: a map with a `NodeTemplate`
 
-[README](../README.md) · Previous: [Tutorial 1: your first map](tutorial-1-first-map.md)
+[README](../README.md) · Previous: [Tutorial 1: your first map](tutorial-1-first-map.md) · Next: [Tutorial 3: changing the map while it is on screen](tutorial-3-dynamic-nodes.md)
 
 The nodes of [tutorial 1](tutorial-1-first-map.md) are dots with the name next to them. A `NodeTemplate` lets you draw them yourself -- here, a rounded box with the name inside. The data is loaded exactly as before: a template changes how the nodes look, not how they are built.
 
@@ -76,3 +76,4 @@ map.set_node_template(std::rc::Rc::new(BoxNodes {
 
 - The README's [Custom node rendering and animations](../README.md#custom-node-rendering-and-animations) section covers the rest of `NodeTemplate`: selection, notifications and markers.
 - [Custom segment rendering and animations](../README.md#custom-segment-rendering-and-animations) is the same idea for the lines.
+- [Tutorial 3](tutorial-3-dynamic-nodes.md) adds and removes nodes while the map is on screen.

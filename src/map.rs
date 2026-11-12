@@ -209,7 +209,7 @@
 
 use crate::map::objects::{
     CometDirection, ContextMenuManager, HitContext, LabelContext, LineShape, MapBounds, MapLabel,
-    MapPoint, MapSegment, MapSettings, MarkerContext, NodeAnimation, NodeContext,
+    MapPoint, MapSegment, MapSettings, MarkerContext, NodeAnimation, NodeContext, NodeOutline,
     NotificationContext, RawLine, RawPoint, RegionLabel, SegmentAnimation, SegmentContext,
     SegmentNotificationContext, SegmentStateContext, SelectionContext, SteadyAnimation,
     SteadySegmentAnimation, TextSettings, VisibilitySetting,
@@ -836,12 +836,14 @@ impl Widget for &mut Map {
         let frame_margin = canvas.total_margin().sum();
         let painter_size = (self.map_area.size() - frame_margin).max(Vec2::ZERO);
 
+        let mut clicks: Option<egui::Response> = None;
         let inner_response = canvas.show(ui, |ui| {
             let _span = tracing::info_span!("paint_map").entered();
 
             if ui.is_rect_visible(self.map_area) {
                 let (resp, paint) =
                     ui.allocate_painter(painter_size, egui::Sense::click_and_drag());
+                clicks = Some(resp.clone());
                 // `paint` is already clipped to the drawable area, but custom
                 // templates (and the built-in marker effects) paint through
                 // `ui.painter()`, whose clip was still the parent's -- so a
@@ -938,7 +940,13 @@ impl Widget for &mut Map {
         // `Ui` (that is what `inner_response.response.rect` reports), so the
         // widget must not allocate `map_area` a second time -- doing so made
         // it consume twice its own height in the surrounding layout.
-        inner_response.response
+        // The frame's own response only senses hover; hand back the painter's
+        // one (clicks, drags) with the frame's rect so layout is unchanged.
+        let frame = inner_response.response;
+        match clicks {
+            Some(inner) => inner.with_new_rect(frame.rect),
+            None => frame,
+        }
     }
 }
 
@@ -3056,9 +3064,26 @@ impl Map {
                 .visible_points
                 .iter()
                 .filter_map(|id| points.get(&id.cast_unsigned()))
-                .map(|point| LayerPoint {
-                    position: (RawPoint::from(point.coords) * self.zoom - min_point).into(),
-                    point,
+                .map(|point| {
+                    let position: Pos2 =
+                        (RawPoint::from(point.coords) * self.zoom - min_point).into();
+                    let hit = HitContext {
+                        position,
+                        zoom: self.zoom,
+                        point,
+                    };
+                    let outline = match &self.node_template {
+                        Some(template) => template.outline(hit),
+                        None => NodeOutline::Circle {
+                            center: position,
+                            radius: 4.0 * self.zoom,
+                        },
+                    };
+                    LayerPoint {
+                        position,
+                        point,
+                        outline,
+                    }
                 })
                 .collect(),
             None => Vec::new(),

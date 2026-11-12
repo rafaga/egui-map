@@ -49,13 +49,25 @@ pub enum LayerSlot {
 }
 
 /// A node as a layer sees it.
-#[derive(Clone, Copy, Debug)]
+///
+/// `#[non_exhaustive]`, like the contexts, so a field can be added without
+/// breaking [`LayerTemplate`]. It is no longer `Copy`: it owns the node's
+/// [`NodeOutline`].
+#[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct LayerPoint<'a> {
     /// The node's screen position: already scaled by the zoom and translated
     /// to the viewport origin.
     pub position: Pos2,
     /// The node: its id, name, coordinates and connections.
     pub point: &'a MapPoint,
+    /// The node's shape as the node template reports it
+    /// ([`NodeTemplate::outline`](super::objects::NodeTemplate::outline)), or
+    /// the circle of the built-in node (`4 * zoom`) when the map has none. A
+    /// layer that rings, highlights or shades a node follows this shape
+    /// (`outline.grown(SELECTION_GAP).stroke_shape(..)`) instead of drawing a
+    /// circle that only fits round nodes.
+    pub outline: NodeOutline,
 }
 
 /// The context passed to [`LayerTemplate::layer_ui`].
