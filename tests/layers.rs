@@ -57,6 +57,34 @@ impl NodeTemplate for LayeredTemplate {
     fn marker_ui(&self, _ui: &mut Ui, _ctx: MarkerContext) {}
 }
 
+/// Keeps the outline of every point it is given.
+struct OutlineRecorder {
+    outlines: Rc<RefCell<Vec<(usize, NodeOutline)>>>,
+}
+
+impl LayerTemplate for OutlineRecorder {
+    fn layer_ui(&self, _painter: &Painter, ctx: LayerContext) {
+        *self.outlines.borrow_mut() = ctx
+            .points
+            .iter()
+            .map(|point| (point.point.id, point.outline.clone()))
+            .collect();
+    }
+}
+
+/// A node that is a box, not a circle.
+struct BoxTemplate;
+
+impl NodeTemplate for BoxTemplate {
+    fn node_ui(&self, _ui: &mut Ui, _ctx: NodeContext) {}
+    fn outline(&self, ctx: egui_map::map::objects::HitContext) -> NodeOutline {
+        NodeOutline::RoundedRect {
+            rect: egui::Rect::from_center_size(ctx.position, egui::vec2(60.0, 20.0)),
+            corner_radius: 4.0,
+        }
+    }
+}
+
 fn render_once(map: &mut Map) {
     let ctx = Context::default();
     let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 300.0));
@@ -97,6 +125,53 @@ fn the_slots_are_painted_from_back_to_front_with_the_visible_points() {
     map.add_layer("lines", LayerSlot::BelowLines, 0, recorder("lines", &log));
     render_once(&mut map);
     assert_eq!(*log.borrow(), ["lines:2", "below:2", "above:2"]);
+}
+
+#[test]
+fn a_layer_gets_the_circle_of_the_built_in_node_when_there_is_no_template() {
+    let outlines = Rc::new(RefCell::new(Vec::new()));
+    let mut map = map_with_two_points();
+    map.add_layer(
+        "outlines",
+        LayerSlot::AboveNodes,
+        0,
+        Rc::new(OutlineRecorder {
+            outlines: Rc::clone(&outlines),
+        }),
+    );
+    render_once(&mut map);
+    let outlines = outlines.borrow();
+    assert_eq!(outlines.len(), 2);
+    for (_, outline) in outlines.iter() {
+        let NodeOutline::Circle { radius, .. } = outline else {
+            panic!("the built-in node is a circle, not {outline:?}");
+        };
+        assert!(*radius > 0.0);
+    }
+}
+
+#[test]
+fn a_layer_gets_the_outline_the_node_template_reports() {
+    let outlines = Rc::new(RefCell::new(Vec::new()));
+    let mut map = map_with_two_points();
+    map.set_node_template(Rc::new(BoxTemplate));
+    map.add_layer(
+        "outlines",
+        LayerSlot::AboveNodes,
+        0,
+        Rc::new(OutlineRecorder {
+            outlines: Rc::clone(&outlines),
+        }),
+    );
+    render_once(&mut map);
+    let outlines = outlines.borrow();
+    assert_eq!(outlines.len(), 2);
+    for (_, outline) in outlines.iter() {
+        let NodeOutline::RoundedRect { rect, .. } = outline else {
+            panic!("the template reports a box, not {outline:?}");
+        };
+        assert_eq!(rect.size(), egui::vec2(60.0, 20.0));
+    }
 }
 
 #[test]

@@ -26,7 +26,7 @@ use egui::{Align2, Color32, FontId, Painter, Pos2, Shape, Stroke, Ui, vec2};
 use egui_map::map::Map;
 use egui_map::map::layer::{LayerContext, LayerNodeContext, LayerSlot, LayerTemplate};
 use egui_map::map::objects::{
-    HitContext, MapPoint, MapSegment, NodeContext, NodeOutline, NodeTemplate,
+    HitContext, MapPoint, MapSegment, NodeContext, NodeOutline, NodeTemplate, SELECTION_GAP,
 };
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -137,7 +137,9 @@ impl LayerTemplate for Ownership {
     }
 }
 
-/// A ring around the node the pointer is over.
+/// A ring around the node the pointer is over, following the shape of the
+/// node: a rounded box for the chips of this example, a circle for a round
+/// node.
 struct FocusRing {
     hovered: Rc<Cell<Option<usize>>>,
 }
@@ -148,10 +150,11 @@ impl LayerTemplate for FocusRing {
             return;
         };
         if let Some(point) = ctx.points.iter().find(|point| point.point.id == id) {
-            painter.circle_stroke(
-                point.position,
-                26.0 * ctx.zoom,
-                Stroke::new(2.0, ctx.theme.selected),
+            painter.add(
+                point
+                    .outline
+                    .grown(SELECTION_GAP)
+                    .stroke_shape(Stroke::new(2.0, ctx.theme.selected)),
             );
         }
     }

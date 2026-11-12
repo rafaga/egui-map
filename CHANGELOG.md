@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/) (pre-1.0:
 any minor bump may include breaking changes, called out below as such).
 
+## [Unreleased]
+
+Breaking: `LayerPoint` is `#[non_exhaustive]` and no longer `Copy` (see below).
+
+### Added
+
+- Tutorials 3 to 6 (`docs/tutorial-3-dynamic-nodes.md`, `tutorial-4-effects.md`, `tutorial-5-layers.md`, `tutorial-6-themes-and-labels.md`) with their runnable examples (`tutorial_dynamic`, `tutorial_effects`, `tutorial_layers`, `tutorial_themes`). The README has new "Changing the map at runtime" and "Layers" sections.
+- `LayerPoint::outline`: the shape of each node as the node template reports it
+  (`NodeTemplate::outline`), or the circle of the built-in node when the map has no
+  template. A layer that rings or shades a node can follow its shape
+  (`outline.grown(SELECTION_GAP).stroke_shape(..)`) instead of drawing a circle.
+
+- `examples/dynamic_nodes.rs`: a network of about 30 nodes (rings, some joined by dashed
+  bridges, a ring on its own and two lone nodes) that grows and shrinks on screen with
+  `insert_point`, `insert_line` and `remove_point`, by buttons, by a click on a node or by itself
+  (Auto), without the view moving.
+
+### Fixed
+
+- The `Response` returned by `ui.add(&mut map)` now reports clicks and drags
+  (`clicked()`, `dragged()`): it was the response of the surrounding frame,
+  which only senses hover, so `response.clicked()` was never true.
+
+### Changed
+
+- The focus ring of `examples/layers.rs` follows the outline of the node (a rounded box for its
+  chips) and no longer draws a circle of a fixed radius.
+
 ## [0.18.0] 2026-11-11
 
 Breaking: `MapSegment` is no longer `Copy`, `MapSettings` has a new public
